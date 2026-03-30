@@ -1,0 +1,68 @@
+name: Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+env:
+  HOST_NODE_VERSION: "22"
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-14
+            arch: arm64
+          - os: macos-14
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: windows-2022
+            arch: ia32
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.HOST_NODE_VERSION }}
+
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev
+
+      - if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build -- --target=node-v${{ env.HOST_NODE_VERSION }} --arch ${{ matrix.arch }}
+
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            # Cross-compiled x64 on arm64 macOS — download x64 node to test
+            NODE_VERSION=$(node -v)
+            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+            ./node-${NODE_VERSION}-darwin-x64/bin/node test/test.js types
+          elif [ "${{ matrix.arch }}" = "ia32" ]; then
+            NODE_VERSION=$(node -v)
+            curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
+            unzip -q "node-${NODE_VERSION}-win-x86.zip"
+            ./node-${NODE_VERSION}-win-x86/node test/test.js types
+          else
+            npm run test:ci
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
+          path: prebuilds/
+          if-no-files-found: error
