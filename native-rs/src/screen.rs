@@ -173,7 +173,7 @@ pub fn screen_grab_screen(
     env: Env,
     x: i32, y: i32, w: i32, h: i32,
     window_handle: Option<f64>,
-) -> Result<Either<Buffer, napi::JsNull>> {
+) -> Result<Either<Uint32Array, napi::JsNull>> {
     unsafe {
         let display = get_display();
         if display.is_null() || w <= 0 || h <= 0 {
@@ -216,8 +216,7 @@ pub fn screen_grab_screen(
         }
         XDestroyImage(img);
 
-        let bytes: Vec<u8> = pixels.iter().flat_map(|p| p.to_ne_bytes()).collect();
-        Ok(Either::A(Buffer::from(bytes)))
+        Ok(Either::A(Uint32Array::new(pixels)))
     }
 }
 
