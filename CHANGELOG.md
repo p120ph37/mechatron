@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.0.1] - 2026-04-02
 
 ### Added
 - Initial port of robot-js (NAPI branch) with Robot C++ library merged into
