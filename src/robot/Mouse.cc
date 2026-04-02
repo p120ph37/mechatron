@@ -580,22 +580,22 @@ void Mouse::SetPos (uint32 x, uint32 y)
 #ifdef ROBOT_OS_MAC
 
 	CGPoint position = CGPointMake (x, y);
-	// Create an HID hardware event source
-	CGEventSourceRef src = CGEventSourceCreate
-		(kCGEventSourceStateHIDSystemState);
 
-	CGEventRef evt = nullptr;
-	if (GetState (ButtonLeft))
+	if (GetState (ButtonLeft) || GetState (ButtonRight))
 	{
-		// Create a left button drag
-		evt = CGEventCreateMouseEvent
-			(src, kCGEventLeftMouseDragged,
-			 position, kCGMouseButtonLeft);
-	}
+		// Create an HID hardware event source
+		CGEventSourceRef src = CGEventSourceCreate
+			(kCGEventSourceStateHIDSystemState);
 
-	else
-	{
-		if (GetState (ButtonRight))
+		CGEventRef evt = nullptr;
+		if (GetState (ButtonLeft))
+		{
+			// Create a left button drag
+			evt = CGEventCreateMouseEvent
+				(src, kCGEventLeftMouseDragged,
+				 position, kCGMouseButtonLeft);
+		}
+		else
 		{
 			// Create a right button drag
 			evt = CGEventCreateMouseEvent
@@ -603,18 +603,20 @@ void Mouse::SetPos (uint32 x, uint32 y)
 				 position, kCGMouseButtonLeft);
 		}
 
-		else
-		{
-			// Create a mouse move event
-			evt = CGEventCreateMouseEvent
-				(src, kCGEventMouseMoved,
-				 position, kCGMouseButtonLeft);
-		}
+		// Post drag event and release
+		CGEventPost (kCGHIDEventTap, evt);
+		CFRelease (evt); CFRelease (src);
 	}
-
-	// Post mouse event and release
-	CGEventPost (kCGHIDEventTap, evt);
-	CFRelease (evt); CFRelease (src);
+	else
+	{
+		// Use CGWarpMouseCursorPosition for simple moves —
+		// it updates the cursor position synchronously,
+		// unlike CGEventPost which is async and may not
+		// update before the next GetPos call.
+		CGWarpMouseCursorPosition (position);
+		// Re-associate mouse and cursor after warping
+		CGAssociateMouseAndMouseCursorPosition (true);
+	}
 
 #endif
 #ifdef ROBOT_OS_WIN

@@ -149,8 +149,8 @@ function testMouse()
 	assert (typeof old.x === "number" && typeof old.y === "number", "getPos returns point");
 
 	// Probe whether mouse position control works
-	// (macOS TCC blocks CGEventPost without accessibility permissions)
 	Mouse.setPos (100, 200);
+	mRobot.Timer.sleep (10); // allow window server to process cursor warp
 	var p = Mouse.getPos();
 	var mousePosWorks = (p.x === 100 && p.y === 200);
 	if (mousePosWorks)

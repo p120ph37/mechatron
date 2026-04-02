@@ -106,29 +106,17 @@ jobs:
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
 
-      - name: Grant macOS accessibility permissions
+      - name: Grant macOS TCC permissions
         if: runner.os == 'macOS'
         run: |
-          echo "=== SIP Status ==="
-          csrutil status || true
           TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
-          COLS=$(sudo sqlite3 "$TCC_DB" "PRAGMA table_info(access);" 2>/dev/null | wc -l || echo "0")
-          echo "=== TCC access table columns: $COLS ==="
+          SVCS=(kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture)
           NODE_BIN=$(which node)
-          TS=$(date +%s)
-          if [ "$COLS" -ge 17 ]; then
-            VALS="1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,${TS},NULL,NULL,'UNUSED',${TS}"
-          else
-            VALS="1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,${TS}"
-          fi
-          for DB in "$TCC_DB" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
-            for CLIENT in "$NODE_BIN" "/bin/bash"; do
-              for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-                sudo sqlite3 "$DB" "INSERT OR REPLACE INTO access VALUES('$SVC','$CLIENT',$VALS);" 2>/dev/null || true
-              done
-            done
+          for SVC in "${SVCS[@]}"; do
+            sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$NODE_BIN',1,2,4,1,0);" 2>/dev/null || true
           done
-          sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE service IN ('kTCCServiceAccessibility','kTCCServicePostEvent');" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
+          sudo launchctl stop com.apple.tccd 2>/dev/null || true
+          sleep 1
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -147,27 +135,14 @@ jobs:
             NODE_VERSION=$(node -v)
             curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
             X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
-            # Launch via Terminal.app for TCC responsible process context
-            TEST_FIFO=/tmp/mechatron-test-fifo
-            TEST_EXIT=/tmp/mechatron-test-exit
-            mkfifo "$TEST_FIFO"
-            WORK_DIR="$(pwd)"
-            X64_NODE_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
-            printf '#!/bin/bash\ncd "%s"\nsudo "%s" test/test-ci.js all > "%s" 2>&1\necho $? > "%s"\n' \
-              "$WORK_DIR" "$X64_NODE_ABS" "$TEST_FIFO" "$TEST_EXIT" > /tmp/mechatron-test-runner.sh
-            chmod +x /tmp/mechatron-test-runner.sh
-            if open -a Terminal /tmp/mechatron-test-runner.sh 2>/dev/null; then
-              cat "$TEST_FIFO"
-              sleep 1
-              EXIT_CODE=$(cat "$TEST_EXIT" 2>/dev/null || echo "1")
-            else
-              echo "Terminal.app launch failed, falling back to direct execution"
-              rm -f "$TEST_FIFO"
-              sudo "$X64_NODE_ABS" test/test-ci.js all
-              EXIT_CODE=$?
-            fi
-            rm -f "$TEST_FIFO" "$TEST_EXIT" /tmp/mechatron-test-runner.sh
-            exit $EXIT_CODE
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            X64_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_ABS',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
+            sudo "$X64_ABS" test/test-ci.js all
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
@@ -176,26 +151,7 @@ jobs:
           elif [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run --auto-servernum node test/test-ci.js all
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            TEST_FIFO=/tmp/mechatron-test-fifo
-            TEST_EXIT=/tmp/mechatron-test-exit
-            mkfifo "$TEST_FIFO"
-            WORK_DIR="$(pwd)"
-            NODE_BIN="$(which node)"
-            printf '#!/bin/bash\ncd "%s"\nsudo "%s" test/test-ci.js all > "%s" 2>&1\necho $? > "%s"\n' \
-              "$WORK_DIR" "$NODE_BIN" "$TEST_FIFO" "$TEST_EXIT" > /tmp/mechatron-test-runner.sh
-            chmod +x /tmp/mechatron-test-runner.sh
-            if open -a Terminal /tmp/mechatron-test-runner.sh 2>/dev/null; then
-              cat "$TEST_FIFO"
-              sleep 1
-              EXIT_CODE=$(cat "$TEST_EXIT" 2>/dev/null || echo "1")
-            else
-              echo "Terminal.app launch failed, falling back to direct execution"
-              rm -f "$TEST_FIFO"
-              sudo "$NODE_BIN" test/test-ci.js all
-              EXIT_CODE=$?
-            fi
-            rm -f "$TEST_FIFO" "$TEST_EXIT" /tmp/mechatron-test-runner.sh
-            exit $EXIT_CODE
+            sudo node test/test-ci.js all
           else
             node test/test-ci.js all
           fi
