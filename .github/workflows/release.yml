@@ -3,7 +3,7 @@ name: Release from Changelog
 on:
   push:
     branches: [main]
-    paths: [CHANGELOG.md]
+  workflow_dispatch:
 
 jobs:
   detect-release:
@@ -13,27 +13,51 @@ jobs:
       prerelease: ${{ steps.parse.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
 
       - name: Parse latest changelog version
         id: parse
         run: |
-          VERSION=$(grep -oP '(?<=^## \[)[^\]]+' CHANGELOG.md | head -1)
+          # Extract the first heading that matches: ## [vX.Y.Z...] - YYYY-MM-DD
+          # The date is required — headings without a date are treated as drafts.
+          HEADING=$(grep -P '^## \[v[^\]]+\]\s+-\s+\d{4}-\d{2}-\d{2}' CHANGELOG.md | head -1)
 
-          if [ -z "$VERSION" ]; then
-            echo "::notice::No version heading found in CHANGELOG.md — skipping release."
+          if [ -z "$HEADING" ]; then
+            echo "No dated release heading found — nothing to release."
             echo "version=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          VERSION=$(echo "$HEADING" | grep -oP '(?<=\[)[^\]]+')
+
+          # Must be valid semver with v prefix
           if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$ ]]; then
             echo "::error::First changelog heading '$VERSION' is not valid semver with v prefix"
             exit 1
           fi
 
+          # Verify the date is today (UTC +/- 12h to accommodate any timezone)
+          ENTRY_DATE=$(echo "$HEADING" | grep -oP '\d{4}-\d{2}-\d{2}')
+          YESTERDAY=$(date -u -d '-12 hours' +%Y-%m-%d)
+          TODAY=$(date -u +%Y-%m-%d)
+          TOMORROW=$(date -u -d '+12 hours' +%Y-%m-%d)
+          if [[ "$ENTRY_DATE" != "$YESTERDAY" && "$ENTRY_DATE" != "$TODAY" && "$ENTRY_DATE" != "$TOMORROW" ]]; then
+            echo "::error::Changelog date $ENTRY_DATE does not match today — expected $YESTERDAY, $TODAY, or $TOMORROW"
+            exit 1
+          fi
+
+          # Check if this tag already exists on the remote
           if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
             echo "Tag $VERSION already exists — skipping release."
             echo "version=" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # Check if a GitHub release already exists
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::GitHub release $VERSION already exists but tag does not — manual cleanup needed"
+            exit 1
           fi
 
           PRERELEASE="false"
@@ -131,17 +155,17 @@ jobs:
           VERSION="${{ needs.detect-release.outputs.version }}"
           npm version "${VERSION#v}" --no-git-tag-version
 
-      - name: Create Git tag
-        run: |
-          VERSION="${{ needs.detect-release.outputs.version }}"
-          git tag "$VERSION"
-          git push origin "$VERSION"
-
       - name: Extract changelog entry
         id: changelog
         run: |
           BODY=$(awk '/^## \[/{if(found) exit; found=1; next} found' CHANGELOG.md)
           echo "$BODY" > /tmp/release-body.md
+
+      - name: Create Git tag
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
 
       - name: Create GitHub Release
         env:
