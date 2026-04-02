@@ -37,31 +37,22 @@ set(ROBOT_SOURCES
   src/robot/Window.cc
 )
 
-# NAPI adapter sources
-set(ADAPTER_SOURCES
-  src/BoundsAdapter.cc
-  src/ClipboardAdapter.cc
-  src/ColorAdapter.cc
-  src/HashAdapter.cc
-  src/ImageAdapter.cc
-  src/KeyboardAdapter.cc
-  src/MemoryAdapter.cc
-  src/ModuleAdapter.cc
-  src/MouseAdapter.cc
-  src/PointAdapter.cc
-  src/ProcessAdapter.cc
-  src/RangeAdapter.cc
-  src/ScreenAdapter.cc
-  src/SizeAdapter.cc
-  src/TimerAdapter.cc
-  src/WindowAdapter.cc
-  src/RobotAdapter.cc
+# Flat NAPI backend sources
+set(NATIVE_SOURCES
+  src/native/init.cc
+  src/native/keyboard.cc
+  src/native/mouse.cc
+  src/native/clipboard.cc
+  src/native/screen.cc
+  src/native/window.cc
+  src/native/process.cc
+  src/native/memory.cc
 )
 
 # Define the NAPI addon
 add_library(robot SHARED
   ${ROBOT_SOURCES}
-  ${ADAPTER_SOURCES}
+  ${NATIVE_SOURCES}
 )
 
 # Set NAPI version
@@ -73,6 +64,7 @@ target_include_directories(robot PRIVATE
   ${NODE_ADDON_API_DIR}
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/robot
+  ${CMAKE_SOURCE_DIR}/src/native
 )
 
 # Link cmake-js provided libraries
