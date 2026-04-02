@@ -25,120 +25,7 @@ var __export = (target, all) => {
       set: (newValue) => all[name] = () => newValue
     });
 };
-
-// lib/native.ts
-var exports_native = {};
-__export(exports_native, {
-  setNativeBackend: () => setNativeBackend,
-  getNativeBackend: () => getNativeBackend
-});
-function getNativeBackend() {
-  if (_backend)
-    return _backend;
-  const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
-  _backend = addon;
-  return _backend;
-}
-function setNativeBackend(backend) {
-  _backend = backend;
-}
-var __dirname = "/home/user/mechatron/lib", _backend = null;
-// lib/Range.ts
-class Range {
-  min;
-  max;
-  _state;
-  constructor(a, b) {
-    this._state = (Math.floor(Date.now() / 1000) & 2147483647) >>> 0;
-    if (a === undefined) {
-      this.min = 0;
-      this.max = 0;
-    } else if (a instanceof Range) {
-      this.min = a.min;
-      this.max = a.max;
-    } else if (typeof a === "object") {
-      this.min = a.min;
-      this.max = a.max;
-    } else if (b !== undefined) {
-      this.min = a;
-      this.max = b;
-    } else {
-      this.min = a;
-      this.max = a;
-    }
-  }
-  getRange() {
-    return this.max - this.min;
-  }
-  setRange(a, b) {
-    if (a === undefined)
-      return;
-    if (a instanceof Range) {
-      this.min = a.min;
-      this.max = a.max;
-    } else if (typeof a === "object") {
-      this.min = a.min;
-      this.max = a.max;
-    } else if (b !== undefined) {
-      this.min = a;
-      this.max = b;
-    } else {
-      this.min = a;
-      this.max = a;
-    }
-  }
-  contains(value, inclusive) {
-    if (typeof value !== "number")
-      throw new TypeError("Invalid arguments");
-    if (inclusive !== undefined && typeof inclusive !== "boolean")
-      throw new TypeError("Invalid arguments");
-    const incl = inclusive !== undefined ? inclusive : true;
-    return incl ? this.min <= value && value <= this.max : this.min < value && value < this.max;
-  }
-  getRandom() {
-    if (this.min >= this.max)
-      return this.min;
-    this._state = (Math.imul(this._state, 1103515245) + 12345 & 2147483647) >>> 0;
-    return this._state % (this.max - this.min) + this.min;
-  }
-  eq(...args) {
-    if (args.length === 0)
-      return false;
-    const a0 = args[0];
-    if (a0 instanceof Range)
-      return this.min === a0.min && this.max === a0.max;
-    if (typeof a0 === "object" && a0 !== null && "min" in a0 && "max" in a0) {
-      return this.min === a0.min && this.max === a0.max;
-    }
-    if (typeof a0 === "number" && args.length >= 2)
-      return this.min === a0 && this.max === args[1];
-    if (typeof a0 === "number")
-      return this.min === a0 && this.max === a0;
-    throw new TypeError("Invalid arguments");
-  }
-  ne(...args) {
-    if (args.length === 0)
-      return true;
-    return !this.eq(...args);
-  }
-  clone() {
-    return new Range(this);
-  }
-  toString() {
-    return `[${this.min}, ${this.max}]`;
-  }
-  static normalize(a, b) {
-    if (a instanceof Range)
-      return { min: a.min, max: a.max };
-    if (typeof a === "object" && a !== null && a !== undefined)
-      return { min: a.min, max: a.max };
-    if (b !== undefined)
-      return { min: a, max: b };
-    if (typeof a === "number")
-      return { min: a, max: a };
-    return { min: 0, max: 0 };
-  }
-}
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // lib/Size.ts
 class Size {
@@ -228,6 +115,9 @@ class Size {
     return { w: 0, h: 0 };
   }
 }
+var init_Size = __esm(() => {
+  init_Point();
+});
 
 // lib/Point.ts
 class Point {
@@ -317,6 +207,9 @@ class Point {
     return { x: 0, y: 0 };
   }
 }
+var init_Point = __esm(() => {
+  init_Size();
+});
 
 // lib/Bounds.ts
 class Bounds {
@@ -614,6 +507,363 @@ class Bounds {
     return { x: 0, y: 0, w: 0, h: 0 };
   }
 }
+var init_Bounds = __esm(() => {
+  init_Point();
+  init_Size();
+});
+
+// lib/native.ts
+var exports_native = {};
+__export(exports_native, {
+  setNativeBackend: () => setNativeBackend,
+  getNativeBackend: () => getNativeBackend
+});
+function getNativeBackend() {
+  if (_backend)
+    return _backend;
+  const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
+  _backend = addon;
+  return _backend;
+}
+function setNativeBackend(backend) {
+  _backend = backend;
+}
+var __dirname = "/home/user/mechatron/lib", _backend = null;
+
+// lib/Process.ts
+var exports_Process = {};
+__export(exports_Process, {
+  Process: () => Process
+});
+function getNative3() {
+  const { getNativeBackend: getNativeBackend2 } = __toCommonJS(exports_native);
+  return getNativeBackend2();
+}
+
+class Process {
+  _pid;
+  constructor(pid) {
+    if (pid instanceof Process) {
+      this._pid = pid._pid;
+    } else {
+      this._pid = pid || 0;
+    }
+  }
+  open(pid) {
+    this._pid = pid;
+    return getNative3().process_open(pid);
+  }
+  close() {
+    getNative3().process_close(this._pid);
+  }
+  isValid() {
+    return getNative3().process_isValid(this._pid);
+  }
+  is64Bit() {
+    return getNative3().process_is64Bit(this._pid);
+  }
+  isDebugged() {
+    return getNative3().process_isDebugged(this._pid);
+  }
+  getPID() {
+    return this._pid;
+  }
+  getName() {
+    return getNative3().process_getName(this._pid);
+  }
+  getPath() {
+    return getNative3().process_getPath(this._pid);
+  }
+  exit() {
+    getNative3().process_exit(this._pid);
+  }
+  kill() {
+    getNative3().process_kill(this._pid);
+  }
+  hasExited() {
+    return getNative3().process_hasExited(this._pid);
+  }
+  getModules(regex) {
+    return getNative3().process_getModules(this._pid, regex);
+  }
+  getWindows(regex) {
+    const handles = getNative3().process_getWindows(this._pid, regex);
+    return handles.map((h) => new Window(h));
+  }
+  eq(other) {
+    if (other instanceof Process) {
+      return this._pid === other._pid;
+    }
+    return this._pid === other;
+  }
+  ne(other) {
+    return !this.eq(other);
+  }
+  clone() {
+    return new Process(this._pid);
+  }
+  static getList(regex) {
+    const pids = getNative3().process_getList(regex);
+    return pids.map((pid) => new Process(pid));
+  }
+  static getCurrent() {
+    return new Process(getNative3().process_getCurrent());
+  }
+  static isSys64Bit() {
+    return getNative3().process_isSys64Bit();
+  }
+  static _getSegments(process, base) {
+    return getNative3().process_getSegments(process._pid, base);
+  }
+}
+var init_Process = __esm(() => {
+  init_Window();
+});
+
+// lib/Window.ts
+function getNative4() {
+  const { getNativeBackend: getNativeBackend2 } = __toCommonJS(exports_native);
+  return getNativeBackend2();
+}
+
+class Window {
+  _handle;
+  constructor(handle) {
+    if (handle instanceof Window) {
+      this._handle = handle._handle;
+    } else {
+      this._handle = handle || 0;
+    }
+  }
+  isValid() {
+    return getNative4().window_isValid(this._handle);
+  }
+  close() {
+    getNative4().window_close(this._handle);
+  }
+  isTopMost() {
+    return getNative4().window_isTopMost(this._handle);
+  }
+  isBorderless() {
+    return getNative4().window_isBorderless(this._handle);
+  }
+  isMinimized() {
+    return getNative4().window_isMinimized(this._handle);
+  }
+  isMaximized() {
+    return getNative4().window_isMaximized(this._handle);
+  }
+  setTopMost(topMost) {
+    getNative4().window_setTopMost(this._handle, topMost);
+  }
+  setBorderless(borderless) {
+    getNative4().window_setBorderless(this._handle, borderless);
+  }
+  setMinimized(minimized) {
+    getNative4().window_setMinimized(this._handle, minimized);
+  }
+  setMaximized(maximized) {
+    getNative4().window_setMaximized(this._handle, maximized);
+  }
+  getProcess() {
+    const { Process: Process2 } = (init_Process(), __toCommonJS(exports_Process));
+    return new Process2(getNative4().window_getProcess(this._handle));
+  }
+  getPID() {
+    return getNative4().window_getPID(this._handle);
+  }
+  getHandle() {
+    return this._handle;
+  }
+  setHandle(handle) {
+    const result = getNative4().window_setHandle(this._handle, handle);
+    if (result)
+      this._handle = handle;
+    return result;
+  }
+  getTitle() {
+    return getNative4().window_getTitle(this._handle);
+  }
+  setTitle(title) {
+    getNative4().window_setTitle(this._handle, title);
+  }
+  getBounds() {
+    const b = getNative4().window_getBounds(this._handle);
+    return new Bounds(b.x, b.y, b.w, b.h);
+  }
+  setBounds(a, b, c, d) {
+    if (typeof a === "number") {
+      getNative4().window_setBounds(this._handle, a, b, c, d);
+    } else {
+      getNative4().window_setBounds(this._handle, a.x, a.y, a.w, a.h);
+    }
+  }
+  getClient() {
+    const b = getNative4().window_getClient(this._handle);
+    return new Bounds(b.x, b.y, b.w, b.h);
+  }
+  setClient(a, b, c, d) {
+    if (typeof a === "number") {
+      getNative4().window_setClient(this._handle, a, b, c, d);
+    } else {
+      getNative4().window_setClient(this._handle, a.x, a.y, a.w, a.h);
+    }
+  }
+  mapToClient(a, b) {
+    let x, y;
+    if (typeof a === "number") {
+      x = a;
+      y = b;
+    } else {
+      x = a.x;
+      y = a.y;
+    }
+    const p = getNative4().window_mapToClient(this._handle, x, y);
+    return new Point(p.x, p.y);
+  }
+  mapToScreen(a, b) {
+    let x, y;
+    if (typeof a === "number") {
+      x = a;
+      y = b;
+    } else {
+      x = a.x;
+      y = a.y;
+    }
+    const p = getNative4().window_mapToScreen(this._handle, x, y);
+    return new Point(p.x, p.y);
+  }
+  eq(other) {
+    if (other instanceof Window) {
+      return this._handle === other._handle;
+    }
+    return this._handle === other;
+  }
+  ne(other) {
+    return !this.eq(other);
+  }
+  clone() {
+    return new Window(this._handle);
+  }
+  static getList(title) {
+    const handles = getNative4().window_getList(title);
+    return handles.map((h) => new Window(h));
+  }
+  static getActive() {
+    return new Window(getNative4().window_getActive());
+  }
+  static setActive(window) {
+    getNative4().window_setActive(window._handle);
+  }
+  static isAxEnabled(prompt) {
+    return getNative4().window_isAxEnabled(prompt);
+  }
+}
+var init_Window = __esm(() => {
+  init_Bounds();
+  init_Point();
+});
+// lib/Range.ts
+class Range {
+  min;
+  max;
+  _state;
+  constructor(a, b) {
+    this._state = (Math.floor(Date.now() / 1000) & 2147483647) >>> 0;
+    if (a === undefined) {
+      this.min = 0;
+      this.max = 0;
+    } else if (a instanceof Range) {
+      this.min = a.min;
+      this.max = a.max;
+    } else if (typeof a === "object") {
+      this.min = a.min;
+      this.max = a.max;
+    } else if (b !== undefined) {
+      this.min = a;
+      this.max = b;
+    } else {
+      this.min = a;
+      this.max = a;
+    }
+  }
+  getRange() {
+    return this.max - this.min;
+  }
+  setRange(a, b) {
+    if (a === undefined)
+      return;
+    if (a instanceof Range) {
+      this.min = a.min;
+      this.max = a.max;
+    } else if (typeof a === "object") {
+      this.min = a.min;
+      this.max = a.max;
+    } else if (b !== undefined) {
+      this.min = a;
+      this.max = b;
+    } else {
+      this.min = a;
+      this.max = a;
+    }
+  }
+  contains(value, inclusive) {
+    if (typeof value !== "number")
+      throw new TypeError("Invalid arguments");
+    if (inclusive !== undefined && typeof inclusive !== "boolean")
+      throw new TypeError("Invalid arguments");
+    const incl = inclusive !== undefined ? inclusive : true;
+    return incl ? this.min <= value && value <= this.max : this.min < value && value < this.max;
+  }
+  getRandom() {
+    if (this.min >= this.max)
+      return this.min;
+    this._state = (Math.imul(this._state, 1103515245) + 12345 & 2147483647) >>> 0;
+    return this._state % (this.max - this.min) + this.min;
+  }
+  eq(...args) {
+    if (args.length === 0)
+      return false;
+    const a0 = args[0];
+    if (a0 instanceof Range)
+      return this.min === a0.min && this.max === a0.max;
+    if (typeof a0 === "object" && a0 !== null && "min" in a0 && "max" in a0) {
+      return this.min === a0.min && this.max === a0.max;
+    }
+    if (typeof a0 === "number" && args.length >= 2)
+      return this.min === a0 && this.max === args[1];
+    if (typeof a0 === "number")
+      return this.min === a0 && this.max === a0;
+    throw new TypeError("Invalid arguments");
+  }
+  ne(...args) {
+    if (args.length === 0)
+      return true;
+    return !this.eq(...args);
+  }
+  clone() {
+    return new Range(this);
+  }
+  toString() {
+    return `[${this.min}, ${this.max}]`;
+  }
+  static normalize(a, b) {
+    if (a instanceof Range)
+      return { min: a.min, max: a.max };
+    if (typeof a === "object" && a !== null && a !== undefined)
+      return { min: a.min, max: a.max };
+    if (b !== undefined)
+      return { min: a, max: b };
+    if (typeof a === "number")
+      return { min: a, max: a };
+    return { min: 0, max: 0 };
+  }
+}
+
+// lib/index.ts
+init_Point();
+init_Size();
+init_Bounds();
 
 // lib/Color.ts
 class Color {
@@ -1042,6 +1292,8 @@ class Hash {
 }
 
 // lib/Image.ts
+init_Point();
+
 class Image {
   _width = 0;
   _height = 0;
@@ -1467,6 +1719,8 @@ class Keyboard {
 }
 
 // lib/Mouse.ts
+init_Point();
+
 class Mouse {
   autoDelay;
   _native;
@@ -1565,6 +1819,8 @@ var Clipboard = {
 };
 
 // lib/Screen.ts
+init_Bounds();
+init_Point();
 function getNative2() {
   const { getNativeBackend: getNativeBackend2 } = __toCommonJS(exports_native);
   return getNativeBackend2();
@@ -1618,8 +1874,22 @@ class Screen {
   static getList() {
     return Screen._screens.slice();
   }
-  static getScreen(target) {
-    const p = target instanceof Point ? target : new Point(target.x, target.y);
+  static getScreen(a, b) {
+    if (typeof a === "number" && typeof b === "number") {
+      return Screen._getScreenForPoint(new Point(a, b));
+    }
+    if (a && typeof a.getBounds === "function" && typeof a.isValid === "function") {
+      if (!a.isValid())
+        return null;
+      const bounds = a.getBounds();
+      const cx = bounds.x + Math.floor(bounds.w / 2);
+      const cy = bounds.y + Math.floor(bounds.h / 2);
+      return Screen._getScreenForPoint(new Point(cx, cy));
+    }
+    const p = a instanceof Point ? a : new Point(a.x, a.y);
+    return Screen._getScreenForPoint(p);
+  }
+  static _getScreenForPoint(p) {
     for (const s of Screen._screens) {
       if (s._bounds.containsP(p))
         return s;
@@ -1668,226 +1938,13 @@ class Screen {
   }
 }
 
-// lib/Window.ts
-function getNative3() {
-  const { getNativeBackend: getNativeBackend2 } = __toCommonJS(exports_native);
-  return getNativeBackend2();
-}
-
-class Window {
-  _handle;
-  constructor(handle) {
-    if (handle instanceof Window) {
-      this._handle = handle._handle;
-    } else {
-      this._handle = handle || 0;
-    }
-  }
-  isValid() {
-    return getNative3().window_isValid(this._handle);
-  }
-  close() {
-    getNative3().window_close(this._handle);
-  }
-  isTopMost() {
-    return getNative3().window_isTopMost(this._handle);
-  }
-  isBorderless() {
-    return getNative3().window_isBorderless(this._handle);
-  }
-  isMinimized() {
-    return getNative3().window_isMinimized(this._handle);
-  }
-  isMaximized() {
-    return getNative3().window_isMaximized(this._handle);
-  }
-  setTopMost(topMost) {
-    getNative3().window_setTopMost(this._handle, topMost);
-  }
-  setBorderless(borderless) {
-    getNative3().window_setBorderless(this._handle, borderless);
-  }
-  setMinimized(minimized) {
-    getNative3().window_setMinimized(this._handle, minimized);
-  }
-  setMaximized(maximized) {
-    getNative3().window_setMaximized(this._handle, maximized);
-  }
-  getProcess() {
-    return getNative3().window_getProcess(this._handle);
-  }
-  getPID() {
-    return getNative3().window_getPID(this._handle);
-  }
-  getHandle() {
-    return this._handle;
-  }
-  setHandle(handle) {
-    return getNative3().window_setHandle(this._handle, handle);
-  }
-  getTitle() {
-    return getNative3().window_getTitle(this._handle);
-  }
-  setTitle(title) {
-    getNative3().window_setTitle(this._handle, title);
-  }
-  getBounds() {
-    const b = getNative3().window_getBounds(this._handle);
-    return new Bounds(b.x, b.y, b.w, b.h);
-  }
-  setBounds(a, b, c, d) {
-    if (typeof a === "number") {
-      getNative3().window_setBounds(this._handle, a, b, c, d);
-    } else {
-      getNative3().window_setBounds(this._handle, a.x, a.y, a.w, a.h);
-    }
-  }
-  getClient() {
-    const b = getNative3().window_getClient(this._handle);
-    return new Bounds(b.x, b.y, b.w, b.h);
-  }
-  setClient(a, b, c, d) {
-    if (typeof a === "number") {
-      getNative3().window_setClient(this._handle, a, b, c, d);
-    } else {
-      getNative3().window_setClient(this._handle, a.x, a.y, a.w, a.h);
-    }
-  }
-  mapToClient(a, b) {
-    let x, y;
-    if (typeof a === "number") {
-      x = a;
-      y = b;
-    } else {
-      x = a.x;
-      y = a.y;
-    }
-    const p = getNative3().window_mapToClient(this._handle, x, y);
-    return new Point(p.x, p.y);
-  }
-  mapToScreen(a, b) {
-    let x, y;
-    if (typeof a === "number") {
-      x = a;
-      y = b;
-    } else {
-      x = a.x;
-      y = a.y;
-    }
-    const p = getNative3().window_mapToScreen(this._handle, x, y);
-    return new Point(p.x, p.y);
-  }
-  eq(other) {
-    if (other instanceof Window) {
-      return this._handle === other._handle;
-    }
-    return this._handle === other;
-  }
-  ne(other) {
-    return !this.eq(other);
-  }
-  clone() {
-    return new Window(this._handle);
-  }
-  static getList(title) {
-    const handles = getNative3().window_getList(title);
-    return handles.map((h) => new Window(h));
-  }
-  static getActive() {
-    return new Window(getNative3().window_getActive());
-  }
-  static setActive(window) {
-    getNative3().window_setActive(window._handle);
-  }
-  static isAxEnabled(prompt) {
-    return getNative3().window_isAxEnabled(prompt);
-  }
-}
-
-// lib/Process.ts
-function getNative4() {
-  const { getNativeBackend: getNativeBackend2 } = __toCommonJS(exports_native);
-  return getNativeBackend2();
-}
-
-class Process {
-  _pid;
-  constructor(pid) {
-    if (pid instanceof Process) {
-      this._pid = pid._pid;
-    } else {
-      this._pid = pid || 0;
-    }
-  }
-  open(pid) {
-    this._pid = pid;
-    return getNative4().process_open(pid);
-  }
-  close() {
-    getNative4().process_close(this._pid);
-  }
-  isValid() {
-    return getNative4().process_isValid(this._pid);
-  }
-  is64Bit() {
-    return getNative4().process_is64Bit(this._pid);
-  }
-  isDebugged() {
-    return getNative4().process_isDebugged(this._pid);
-  }
-  getPID() {
-    return this._pid;
-  }
-  getName() {
-    return getNative4().process_getName(this._pid);
-  }
-  getPath() {
-    return getNative4().process_getPath(this._pid);
-  }
-  exit() {
-    getNative4().process_exit(this._pid);
-  }
-  kill() {
-    getNative4().process_kill(this._pid);
-  }
-  hasExited() {
-    return getNative4().process_hasExited(this._pid);
-  }
-  getModules(regex) {
-    return getNative4().process_getModules(this._pid, regex);
-  }
-  getWindows(regex) {
-    const handles = getNative4().process_getWindows(this._pid, regex);
-    return handles.map((h) => new Window(h));
-  }
-  eq(other) {
-    if (other instanceof Process) {
-      return this._pid === other._pid;
-    }
-    return this._pid === other;
-  }
-  ne(other) {
-    return !this.eq(other);
-  }
-  clone() {
-    return new Process(this._pid);
-  }
-  static getList(regex) {
-    const pids = getNative4().process_getList(regex);
-    return pids.map((pid) => new Process(pid));
-  }
-  static getCurrent() {
-    return new Process(getNative4().process_getCurrent());
-  }
-  static isSys64Bit() {
-    return getNative4().process_isSys64Bit();
-  }
-  static _getSegments(process, base) {
-    return getNative4().process_getSegments(process._pid, base);
-  }
-}
+// lib/index.ts
+init_Window();
+init_Process();
 
 // lib/Module.ts
+init_Process();
+
 class Segment {
   valid = false;
   base = 0;
@@ -2074,6 +2131,7 @@ class Module {
 }
 
 // lib/Memory.ts
+init_Process();
 function getNative5() {
   const { getNativeBackend: getNativeBackend2 } = __toCommonJS(exports_native);
   return getNativeBackend2();

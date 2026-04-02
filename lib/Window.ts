@@ -58,8 +58,9 @@ export class Window {
     getNative().window_setMaximized(this._handle, maximized);
   }
 
-  getProcess(): number {
-    return getNative().window_getProcess(this._handle);
+  getProcess(): any {
+    const { Process } = require("./Process");
+    return new Process(getNative().window_getProcess(this._handle));
   }
 
   getPID(): number {
@@ -71,7 +72,9 @@ export class Window {
   }
 
   setHandle(handle: number): boolean {
-    return getNative().window_setHandle(this._handle, handle);
+    const result = getNative().window_setHandle(this._handle, handle);
+    if (result) this._handle = handle;
+    return result;
   }
 
   getTitle(): string {

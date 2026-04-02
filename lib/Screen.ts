@@ -72,8 +72,28 @@ export class Screen {
     return Screen._screens.slice();
   }
 
-  static getScreen(target: { x: number; y: number } | Point): Screen | null {
-    const p = target instanceof Point ? target : new Point(target.x, target.y);
+  static getScreen(target: { x: number; y: number } | Point): Screen | null;
+  static getScreen(x: number, y: number): Screen | null;
+  static getScreen(window: any): Screen | null;
+  static getScreen(a: any, b?: number): Screen | null {
+    if (typeof a === "number" && typeof b === "number") {
+      return Screen._getScreenForPoint(new Point(a, b));
+    }
+    // Window-like object with getBounds()
+    if (a && typeof a.getBounds === "function" && typeof a.isValid === "function") {
+      if (!a.isValid()) return null;
+      const bounds = a.getBounds();
+      // Use center of window bounds
+      const cx = bounds.x + Math.floor(bounds.w / 2);
+      const cy = bounds.y + Math.floor(bounds.h / 2);
+      return Screen._getScreenForPoint(new Point(cx, cy));
+    }
+    // Point-like
+    const p = a instanceof Point ? a : new Point(a.x, a.y);
+    return Screen._getScreenForPoint(p);
+  }
+
+  private static _getScreenForPoint(p: Point): Screen | null {
     for (const s of Screen._screens) {
       if (s._bounds.containsP(p)) return s;
     }
