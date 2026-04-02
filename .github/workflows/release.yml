@@ -106,6 +106,15 @@ jobs:
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
 
+      - name: Grant macOS accessibility & memory permissions
+        if: runner.os == 'macOS'
+        run: |
+          NODE_BIN=$(which node)
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','$NODE_BIN',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s),NULL,NULL,'UNUSED',$(date +%s));" 2>/dev/null || true
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "SELECT client FROM access WHERE service='kTCCServiceAccessibility';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -122,7 +131,10 @@ jobs:
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
             NODE_VERSION=$(node -v)
             curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
-            ./node-${NODE_VERSION}-darwin-x64/bin/node test/test-ci.js all
+            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+              "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s),NULL,NULL,'UNUSED',$(date +%s));" 2>/dev/null || true
+            sudo $X64_NODE test/test-ci.js all
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
@@ -130,6 +142,8 @@ jobs:
             ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
           elif [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run --auto-servernum node test/test-ci.js all
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            sudo node test/test-ci.js all
           else
             node test/test-ci.js all
           fi

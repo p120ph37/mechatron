@@ -491,15 +491,6 @@ function testMemory()
 	assert (mod.getBase() === 0, "empty module getBase");
 	assert (mod.getSize() === 0, "empty module getSize");
 
-	// On macOS, native Memory API can SIGABRT without mach task entitlements.
-	// Unlike input simulation, this crash is unrecoverable (SIGABRT), so we
-	// cannot probe for it — we must skip based on platform.
-	if (process.platform === "darwin")
-	{
-		log ("OK (macOS - skipping native memory ops)\n");
-		return true;
-	}
-
 	var Process = mRobot.Process;
 	var Memory  = mRobot.Memory;
 
@@ -659,6 +650,7 @@ function main()
 	log ("------------------------------\n");
 	log ("Platform: " + process.platform + " " + process.arch + "\n");
 	log ("Node: " + process.version + "\n");
+	log ("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
 	log ("------------------------------\n\n");
 
 	var tests = [

@@ -41,6 +41,47 @@ jobs:
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
 
+      - name: Grant macOS accessibility & memory permissions
+        if: runner.os == 'macOS'
+        run: |
+          # Try to add node binary to TCC accessibility database
+          # (works if the image was built with SIP off; harmless if SIP blocks it)
+          NODE_BIN=$(which node)
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','$NODE_BIN',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s),NULL,NULL,'UNUSED',$(date +%s));" 2>/dev/null || true
+          # Also try for the cross-compiled x64 node if applicable
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            NODE_VERSION=$(node -v)
+            X64_NODE="$(pwd)/node-${NODE_VERSION}-darwin-x64/bin/node"
+            # Will be granted later after download, see test step
+          fi
+          # Diagnostic: check what's already granted
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "SELECT client FROM access WHERE service='kTCCServiceAccessibility';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
+
+      - name: Diagnose Windows desktop session
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Session ID: $([System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
+          query session 2>$null || Write-Host "(query session not available)"
+          query user 2>$null || Write-Host "(query user not available)"
+          # Check if we have an interactive desktop
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class Desktop {
+              [DllImport("user32.dll")]
+              public static extern IntPtr GetDesktopWindow();
+              [DllImport("user32.dll")]
+              public static extern IntPtr GetForegroundWindow();
+          }
+          "@
+          $desktop = [Desktop]::GetDesktopWindow()
+          $foreground = [Desktop]::GetForegroundWindow()
+          Write-Host "Desktop window handle: $desktop"
+          Write-Host "Foreground window handle: $foreground"
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -58,7 +99,12 @@ jobs:
             # Cross-compiled x64 on arm64 macOS — download x64 node to test
             NODE_VERSION=$(node -v)
             curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
-            ./node-${NODE_VERSION}-darwin-x64/bin/node test/test-ci.js all
+            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            # Grant accessibility to the x64 node binary too
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+              "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s),NULL,NULL,'UNUSED',$(date +%s));" 2>/dev/null || true
+            # Run with sudo to enable task_for_pid for memory tests
+            sudo $X64_NODE test/test-ci.js all
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
@@ -66,6 +112,10 @@ jobs:
             ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
           elif [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run --auto-servernum node test/test-ci.js all
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            # Run with sudo to enable task_for_pid for memory tests
+            # and potentially bypass TCC for CGEventPost
+            sudo node test/test-ci.js all
           else
             node test/test-ci.js all
           fi
