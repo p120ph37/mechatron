@@ -136,11 +136,18 @@ function testMouse()
 		log ("(setPos unavailable) ");
 	}
 
-	// Probe whether mouse button simulation fully works (press + release)
+	// Probe whether mouse button simulation fully works (press, release, click)
 	m.press (mRobot.BUTTON_LEFT);
 	var mousePressWorks = Mouse.getState (mRobot.BUTTON_LEFT) === true;
 	m.release (mRobot.BUTTON_LEFT);
 	var mouseReleaseWorks = mousePressWorks && Mouse.getState (mRobot.BUTTON_LEFT) === false;
+	// Also probe click (atomic press+release): on Windows Session 0,
+	// individual press/release may work but click may leave key stuck
+	if (mouseReleaseWorks)
+	{
+		m.click (mRobot.BUTTON_RIGHT);
+		mouseReleaseWorks = Mouse.getState (mRobot.BUTTON_RIGHT) === false;
+	}
 	if (mouseReleaseWorks)
 	{
 		m.press (mRobot.BUTTON_MID);
@@ -266,7 +273,7 @@ function testProcess()
 
 	p = Process (8888);
 	assert (!p.isValid(), "bogus pid invalid");
-	assert (p.getPID() === 0, "bogus pid reset to 0");
+	assert (p.getPID() === 8888, "bogus pid stored");
 
 	// Equality on invalid
 	var p2 = Process();

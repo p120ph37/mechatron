@@ -545,11 +545,8 @@ class Process {
   constructor(pid) {
     if (pid instanceof Process) {
       this._pid = pid._pid;
-    } else if (typeof pid === "number" && pid > 0) {
-      const valid = getNative3().process_open(pid);
-      this._pid = valid ? pid : 0;
     } else {
-      this._pid = 0;
+      this._pid = typeof pid === "number" ? pid : 0;
     }
   }
   open(pid) {
