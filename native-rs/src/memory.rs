@@ -1,9 +1,8 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::fs;
-use std::path::Path;
 
-// Memory region info
+// ── Shared types (all platforms) ────────────────────────────────────────────
+
 struct RegionInfo {
     valid: bool,
     bound: bool,
@@ -28,10 +27,35 @@ impl Default for RegionInfo {
     }
 }
 
+fn region_to_obj(env: &Env, r: &RegionInfo) -> Result<napi::JsObject> {
+    let mut o = env.create_object()?;
+    o.set("valid", r.valid)?;
+    o.set("bound", r.bound)?;
+    o.set("start", r.start as f64)?;
+    o.set("stop", r.stop as f64)?;
+    o.set("size", r.size as f64)?;
+    o.set("readable", r.readable)?;
+    o.set("writable", r.writable)?;
+    o.set("executable", r.executable)?;
+    o.set("access", r.access)?;
+    o.set("private", r.private)?;
+    o.set("guarded", r.guarded)?;
+    Ok(o)
+}
+
+// ── Linux-only helpers ──────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+use std::fs;
+#[cfg(target_os = "linux")]
+use std::path::Path;
+
+#[cfg(target_os = "linux")]
 fn is_proc_valid(pid: i32) -> bool {
     pid > 0 && Path::new(&format!("/proc/{}", pid)).exists()
 }
 
+#[cfg(target_os = "linux")]
 fn parse_maps(pid: i32) -> Vec<RegionInfo> {
     let mut regions = Vec::new();
     let maps_path = format!("/proc/{}/maps", pid);
@@ -76,27 +100,55 @@ fn parse_maps(pid: i32) -> Vec<RegionInfo> {
     regions
 }
 
-fn region_to_obj(env: &Env, r: &RegionInfo) -> Result<napi::JsObject> {
-    let mut o = env.create_object()?;
-    o.set("valid", r.valid)?;
-    o.set("bound", r.bound)?;
-    o.set("start", r.start as f64)?;
-    o.set("stop", r.stop as f64)?;
-    o.set("size", r.size as f64)?;
-    o.set("readable", r.readable)?;
-    o.set("writable", r.writable)?;
-    o.set("executable", r.executable)?;
-    o.set("access", r.access)?;
-    o.set("private", r.private)?;
-    o.set("guarded", r.guarded)?;
-    Ok(o)
+#[cfg(target_os = "linux")]
+fn read_process_memory(pid: i32, address: u64, buf: &mut [u8]) -> usize {
+    unsafe {
+        let local_iov = libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut _,
+            iov_len: buf.len(),
+        };
+        let remote_iov = libc::iovec {
+            iov_base: address as *mut _,
+            iov_len: buf.len(),
+        };
+        let result = libc::process_vm_readv(pid, &local_iov, 1, &remote_iov, 1, 0);
+        if result < 0 { 0 } else { result as usize }
+    }
 }
 
+#[cfg(target_os = "linux")]
+fn write_process_memory(pid: i32, address: u64, buf: &[u8]) -> usize {
+    unsafe {
+        let local_iov = libc::iovec {
+            iov_base: buf.as_ptr() as *mut _,
+            iov_len: buf.len(),
+        };
+        let remote_iov = libc::iovec {
+            iov_base: address as *mut _,
+            iov_len: buf.len(),
+        };
+        let result = libc::process_vm_writev(pid, &local_iov, 1, &remote_iov, 1, 0);
+        if result < 0 { 0 } else { result as usize }
+    }
+}
+
+// ── memory_isValid ──────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_isValid")]
 pub fn memory_is_valid(pid: i32) -> bool {
     is_proc_valid(pid)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_isValid")]
+pub fn memory_is_valid(_pid: i32) -> bool {
+    false
+}
+
+// ── memory_getRegion ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_getRegion")]
 pub fn memory_get_region(env: Env, pid: i32, address: f64) -> Result<napi::JsObject> {
     let addr = address as u64;
@@ -109,6 +161,15 @@ pub fn memory_get_region(env: Env, pid: i32, address: f64) -> Result<napi::JsObj
     region_to_obj(&env, &RegionInfo::default())
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_getRegion")]
+pub fn memory_get_region(env: Env, _pid: i32, _address: f64) -> Result<napi::JsObject> {
+    region_to_obj(&env, &RegionInfo::default())
+}
+
+// ── memory_getRegions ───────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_getRegions")]
 pub fn memory_get_regions(env: Env, pid: i32, start: Option<f64>, stop: Option<f64>) -> Result<napi::JsObject> {
     let start_addr = start.unwrap_or(0.0) as u64;
@@ -127,18 +188,46 @@ pub fn memory_get_regions(env: Env, pid: i32, start: Option<f64>, stop: Option<f
     Ok(arr.coerce_to_object()?)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_getRegions")]
+pub fn memory_get_regions(env: Env, _pid: i32, _start: Option<f64>, _stop: Option<f64>) -> Result<napi::JsObject> {
+    let arr = env.create_array(0)?;
+    Ok(arr.coerce_to_object()?)
+}
+
+// ── memory_setAccess ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_setAccess")]
-pub fn memory_set_access(pid: i32, region_start: f64, readable: bool, writable: bool, executable: bool) -> bool {
+pub fn memory_set_access(_pid: i32, _region_start: f64, _readable: bool, _writable: bool, _executable: bool) -> bool {
     // mprotect can't be applied to another process's memory on Linux
     // The C++ implementation likely uses /proc/pid/mem or ptrace
     false
 }
 
-#[napi(js_name = "memory_setAccessFlags")]
-pub fn memory_set_access_flags(pid: i32, region_start: f64, flags: u32) -> bool {
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_setAccess")]
+pub fn memory_set_access(_pid: i32, _region_start: f64, _readable: bool, _writable: bool, _executable: bool) -> bool {
     false
 }
 
+// ── memory_setAccessFlags ───────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "memory_setAccessFlags")]
+pub fn memory_set_access_flags(_pid: i32, _region_start: f64, _flags: u32) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_setAccessFlags")]
+pub fn memory_set_access_flags(_pid: i32, _region_start: f64, _flags: u32) -> bool {
+    false
+}
+
+// ── memory_getPtrSize ───────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_getPtrSize")]
 pub fn memory_get_ptr_size(pid: i32) -> f64 {
     if !is_proc_valid(pid) { return 0.0; }
@@ -152,23 +241,59 @@ pub fn memory_get_ptr_size(pid: i32) -> f64 {
     (std::mem::size_of::<usize>()) as f64
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_getPtrSize")]
+pub fn memory_get_ptr_size(_pid: i32) -> f64 {
+    0.0
+}
+
+// ── memory_getMinAddress ────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_getMinAddress")]
 pub fn memory_get_min_address(pid: i32) -> f64 {
     let regions = parse_maps(pid);
     regions.first().map(|r| r.start as f64).unwrap_or(0.0)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_getMinAddress")]
+pub fn memory_get_min_address(_pid: i32) -> f64 {
+    0.0
+}
+
+// ── memory_getMaxAddress ────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_getMaxAddress")]
 pub fn memory_get_max_address(pid: i32) -> f64 {
     let regions = parse_maps(pid);
     regions.last().map(|r| r.stop as f64).unwrap_or(0.0)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_getMaxAddress")]
+pub fn memory_get_max_address(_pid: i32) -> f64 {
+    0.0
+}
+
+// ── memory_getPageSize ──────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_getPageSize")]
 pub fn memory_get_page_size(_pid: i32) -> f64 {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as f64 }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_getPageSize")]
+pub fn memory_get_page_size(_pid: i32) -> f64 {
+    0.0
+}
+
+// ── memory_find ─────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_find")]
 pub fn memory_find(
     env: Env, pid: i32, pattern: String,
@@ -238,36 +363,20 @@ pub fn memory_find(
     Ok(arr.coerce_to_object()?)
 }
 
-fn read_process_memory(pid: i32, address: u64, buf: &mut [u8]) -> usize {
-    unsafe {
-        let local_iov = libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut _,
-            iov_len: buf.len(),
-        };
-        let remote_iov = libc::iovec {
-            iov_base: address as *mut _,
-            iov_len: buf.len(),
-        };
-        let result = libc::process_vm_readv(pid, &local_iov, 1, &remote_iov, 1, 0);
-        if result < 0 { 0 } else { result as usize }
-    }
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_find")]
+pub fn memory_find(
+    env: Env, _pid: i32, _pattern: String,
+    _start: Option<f64>, _stop: Option<f64>,
+    _limit: Option<f64>, _flags: Option<String>,
+) -> Result<napi::JsObject> {
+    let arr = env.create_array(0)?;
+    Ok(arr.coerce_to_object()?)
 }
 
-fn write_process_memory(pid: i32, address: u64, buf: &[u8]) -> usize {
-    unsafe {
-        let local_iov = libc::iovec {
-            iov_base: buf.as_ptr() as *mut _,
-            iov_len: buf.len(),
-        };
-        let remote_iov = libc::iovec {
-            iov_base: address as *mut _,
-            iov_len: buf.len(),
-        };
-        let result = libc::process_vm_writev(pid, &local_iov, 1, &remote_iov, 1, 0);
-        if result < 0 { 0 } else { result as usize }
-    }
-}
+// ── memory_readData ─────────────────────────────────────────────────────────
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_readData")]
 pub fn memory_read_data(
     env: Env, pid: i32, address: f64, length: f64, _flags: Option<i32>,
@@ -283,13 +392,32 @@ pub fn memory_read_data(
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_readData")]
+pub fn memory_read_data(
+    env: Env, _pid: i32, _address: f64, _length: f64, _flags: Option<i32>,
+) -> Result<Either<Buffer, napi::JsNull>> {
+    Ok(Either::B(env.get_null()?))
+}
+
+// ── memory_writeData ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_writeData")]
 pub fn memory_write_data(pid: i32, address: f64, data: Buffer, _flags: Option<i32>) -> f64 {
     let addr = address as u64;
     write_process_memory(pid, addr, &data) as f64
 }
 
-// Cache operations — simplified stubs (the C++ version uses a complex caching system)
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_writeData")]
+pub fn memory_write_data(_pid: i32, _address: f64, _data: Buffer, _flags: Option<i32>) -> f64 {
+    0.0
+}
+
+// ── memory_createCache ──────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_createCache")]
 pub fn memory_create_cache(
     _pid: i32, _address: f64, _size: f64, _block_size: f64,
@@ -298,17 +426,58 @@ pub fn memory_create_cache(
     false
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_createCache")]
+pub fn memory_create_cache(
+    _pid: i32, _address: f64, _size: f64, _block_size: f64,
+    _max_blocks: Option<f64>, _flags: Option<f64>,
+) -> bool {
+    false
+}
+
+// ── memory_clearCache ───────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_clearCache")]
 pub fn memory_clear_cache(_pid: i32) {}
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_clearCache")]
+pub fn memory_clear_cache(_pid: i32) {}
+
+// ── memory_deleteCache ──────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_deleteCache")]
 pub fn memory_delete_cache(_pid: i32) {}
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_deleteCache")]
+pub fn memory_delete_cache(_pid: i32) {}
+
+// ── memory_isCaching ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "memory_isCaching")]
 pub fn memory_is_caching(_pid: i32) -> bool {
     false
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "memory_isCaching")]
+pub fn memory_is_caching(_pid: i32) -> bool {
+    false
+}
+
+// ── memory_getCacheSize ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "memory_getCacheSize")]
+pub fn memory_get_cache_size(_pid: i32) -> f64 {
+    0.0
+}
+
+#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "memory_getCacheSize")]
 pub fn memory_get_cache_size(_pid: i32) -> f64 {
     0.0

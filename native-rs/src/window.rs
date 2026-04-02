@@ -1,28 +1,49 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
-use std::ptr;
 
+// ==================== Linux implementation ====================
+
+#[cfg(target_os = "linux")]
+use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
+#[cfg(target_os = "linux")]
+use std::ptr;
+#[cfg(target_os = "linux")]
 use crate::x11::*;
 
 // --- Atom cache ---
+#[cfg(target_os = "linux")]
 static mut WM_STATE: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_ABOVE: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_HIDDEN: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_HMAX: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_VMAX: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_DESKTOP: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_CURDESK: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_NAME: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_UTF8: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_PID: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_ACTIVE: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_HINTS: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut WM_EXTENTS: Atom = 0;
+#[cfg(target_os = "linux")]
 static mut XA_WM_NAME: Atom = 0;
 
+#[cfg(target_os = "linux")]
 static ATOMS_INIT: std::sync::Once = std::sync::Once::new();
 
+#[cfg(target_os = "linux")]
 unsafe fn load_atoms() {
     ATOMS_INIT.call_once(|| {
         let d = get_display();
@@ -44,7 +65,7 @@ unsafe fn load_atoms() {
     });
 }
 
-// Check if X11 window handle is valid (has _NET_WM_PID property)
+#[cfg(target_os = "linux")]
 unsafe fn win_is_valid(handle: u64) -> bool {
     if handle == 0 { return false; }
     let d = get_display();
@@ -57,16 +78,20 @@ unsafe fn win_is_valid(handle: u64) -> bool {
     true
 }
 
-// Validate & return handle, or 0
+#[cfg(target_os = "linux")]
 unsafe fn validate_handle(handle: u64) -> u64 {
     if handle == 0 { return 0; }
     if win_is_valid(handle) { handle } else { 0 }
 }
 
+#[cfg(target_os = "linux")]
 const STATE_TOPMOST: u8 = 0;
+#[cfg(target_os = "linux")]
 const STATE_MINIMIZE: u8 = 1;
+#[cfg(target_os = "linux")]
 const STATE_MAXIMIZE: u8 = 2;
 
+#[cfg(target_os = "linux")]
 unsafe fn get_wm_state(win: Window, setting: u8) -> bool {
     load_atoms();
     if WM_STATE == None_ || WM_ABOVE == None_ || WM_VMAX == None_
@@ -99,6 +124,7 @@ unsafe fn get_wm_state(win: Window, setting: u8) -> bool {
     test1 && test2
 }
 
+#[cfg(target_os = "linux")]
 unsafe fn set_wm_state(win: Window, setting: u8, state: bool) {
     load_atoms();
     let d = get_display();
@@ -110,7 +136,6 @@ unsafe fn set_wm_state(win: Window, setting: u8, state: bool) {
             let s = XScreenNumberOfScreen(attr.screen);
             XIconifyWindow(d, win, s);
         } else {
-            // Unminimize = set active
             window_set_active_internal(win);
         }
         return;
@@ -149,6 +174,7 @@ unsafe fn set_wm_state(win: Window, setting: u8, state: bool) {
         &mut e as *mut XClientMessageEvent as *mut XEvent);
 }
 
+#[cfg(target_os = "linux")]
 unsafe fn get_frame(win: Window) -> (i32, i32, i32, i32) {
     load_atoms();
     if WM_EXTENTS == None_ { return (0, 0, 0, 0); }
@@ -167,12 +193,12 @@ unsafe fn get_frame(win: Window) -> (i32, i32, i32, i32) {
     (left, top, left + right, top + bottom)
 }
 
+#[cfg(target_os = "linux")]
 unsafe fn get_title(win: Window) -> String {
     load_atoms();
     let d = get_display();
     let _xe = XDismissErrors::new();
 
-    // Try _NET_WM_NAME (UTF-8) first
     let result = get_window_property(win, WM_NAME, None);
     if !result.is_null() {
         let cstr = std::ffi::CStr::from_ptr(result as *const c_char);
@@ -181,7 +207,6 @@ unsafe fn get_title(win: Window) -> String {
         if !name.is_empty() { return name; }
     }
 
-    // Fallback: WM_NAME (ASCII)
     let result = get_window_property(win, XA_WM_NAME, None);
     if !result.is_null() {
         let cstr = std::ffi::CStr::from_ptr(result as *const c_char);
@@ -193,6 +218,7 @@ unsafe fn get_title(win: Window) -> String {
     String::new()
 }
 
+#[cfg(target_os = "linux")]
 unsafe fn get_pid(win: Window) -> i32 {
     load_atoms();
     let _xe = XDismissErrors::new();
@@ -203,7 +229,7 @@ unsafe fn get_pid(win: Window) -> i32 {
     pid
 }
 
-// Get client area (geometry relative to root)
+#[cfg(target_os = "linux")]
 unsafe fn get_client(win: Window) -> (i32, i32, i32, i32) {
     let d = get_display();
     let _xe = XDismissErrors::new();
@@ -211,7 +237,6 @@ unsafe fn get_client(win: Window) -> (i32, i32, i32, i32) {
     if XGetWindowAttributes(d, win, &mut attr) == 0 {
         return (0, 0, 0, 0);
     }
-    // Translate to root coordinates
     let mut child: Window = 0;
     let mut x: c_int = 0;
     let mut y: c_int = 0;
@@ -225,6 +250,7 @@ unsafe fn get_client(win: Window) -> (i32, i32, i32, i32) {
     (x, y, attr.width, attr.height)
 }
 
+#[cfg(target_os = "linux")]
 unsafe fn window_set_active_internal(win: Window) {
     load_atoms();
     let d = get_display();
@@ -239,7 +265,7 @@ unsafe fn window_set_active_internal(win: Window) {
         e.format = 32;
         e.message_type = WM_ACTIVE;
         e.display = d;
-        e.data.l[0] = 2; // Source: pager
+        e.data.l[0] = 2;
         e.data.l[1] = CurrentTime as c_long;
 
         XSendEvent(d, XRootWindow(d, s), False_,
@@ -250,14 +276,13 @@ unsafe fn window_set_active_internal(win: Window) {
     XRaiseWindow(d, win);
 }
 
-// Enumerate visible windows recursively
+#[cfg(target_os = "linux")]
 unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: i32, results: &mut Vec<u64>) {
     let d = get_display();
     let mut attr: XWindowAttributes = std::mem::zeroed();
     XGetWindowAttributes(d, win, &mut attr);
 
     if attr.map_state == IsViewable {
-        // Check if it's a valid window (has PID)
         if win_is_valid(win as u64) {
             let match_pid = pid_filter == 0 || get_pid(win) == pid_filter;
             if match_pid {
@@ -275,7 +300,6 @@ unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: 
         }
     }
 
-    // Recurse into children
     let mut root: Window = 0;
     let mut parent: Window = 0;
     let mut children: *mut Window = ptr::null_mut();
@@ -288,19 +312,22 @@ unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: 
     }
 }
 
-// Public helper for process.rs
+// Public helper for process.rs (Linux only)
+#[cfg(target_os = "linux")]
 pub unsafe fn enum_windows_with_pid(root: Window, pattern: Option<&regex::Regex>, pid: i32, results: &mut Vec<u64>) {
     load_atoms();
     enum_windows(root, pattern, pid, results);
 }
 
-// --- NAPI exports ---
+// --- NAPI exports (Linux) ---
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_isValid")]
 pub fn window_is_valid(handle: f64) -> bool {
     unsafe { win_is_valid(handle as u64) }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_close")]
 pub fn window_close(handle: f64) {
     unsafe {
@@ -312,6 +339,7 @@ pub fn window_close(handle: f64) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_isTopMost")]
 pub fn window_is_top_most(handle: f64) -> bool {
     unsafe {
@@ -322,6 +350,7 @@ pub fn window_is_top_most(handle: f64) -> bool {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_isBorderless")]
 pub fn window_is_borderless(handle: f64) -> bool {
     unsafe {
@@ -331,13 +360,13 @@ pub fn window_is_borderless(handle: f64) -> bool {
         let _xe = XDismissErrors::new();
         let result = get_window_property(h as Window, WM_HINTS, None);
         if result.is_null() { return false; }
-        // Hints struct: flags(ulong), funcs(ulong), decorations(ulong), mode(long), stat(ulong)
         let decorations = *(result as *const c_ulong).add(2);
         XFree(result as *mut c_void);
         decorations == 0
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_isMinimized")]
 pub fn window_is_minimized(handle: f64) -> bool {
     unsafe {
@@ -348,6 +377,7 @@ pub fn window_is_minimized(handle: f64) -> bool {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_isMaximized")]
 pub fn window_is_maximized(handle: f64) -> bool {
     unsafe {
@@ -358,6 +388,7 @@ pub fn window_is_maximized(handle: f64) -> bool {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setTopMost")]
 pub fn window_set_top_most(handle: f64, top_most: bool) {
     unsafe {
@@ -368,6 +399,7 @@ pub fn window_set_top_most(handle: f64, top_most: bool) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setBorderless")]
 pub fn window_set_borderless(handle: f64, borderless: bool) {
     unsafe {
@@ -392,6 +424,7 @@ pub fn window_set_borderless(handle: f64, borderless: bool) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setMinimized")]
 pub fn window_set_minimized(handle: f64, minimized: bool) {
     unsafe {
@@ -402,6 +435,7 @@ pub fn window_set_minimized(handle: f64, minimized: bool) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setMaximized")]
 pub fn window_set_maximized(handle: f64, maximized: bool) {
     unsafe {
@@ -413,6 +447,7 @@ pub fn window_set_maximized(handle: f64, maximized: bool) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getProcess")]
 pub fn window_get_process(handle: f64) -> f64 {
     unsafe {
@@ -422,6 +457,7 @@ pub fn window_get_process(handle: f64) -> f64 {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getPID")]
 pub fn window_get_pid(handle: f64) -> f64 {
     unsafe {
@@ -431,16 +467,19 @@ pub fn window_get_pid(handle: f64) -> f64 {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getHandle")]
 pub fn window_get_handle(handle: f64) -> f64 {
     handle
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setHandle")]
 pub fn window_set_handle(handle: f64, new_handle: f64) -> bool {
     unsafe { validate_handle(new_handle as u64) != 0 || new_handle == 0.0 }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getTitle")]
 pub fn window_get_title(handle: f64) -> String {
     unsafe {
@@ -450,6 +489,7 @@ pub fn window_get_title(handle: f64) -> String {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setTitle")]
 pub fn window_set_title(handle: f64, title: String) {
     unsafe {
@@ -463,6 +503,7 @@ pub fn window_set_title(handle: f64, title: String) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getBounds")]
 pub fn window_get_bounds(env: Env, handle: f64) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
@@ -483,6 +524,7 @@ pub fn window_get_bounds(env: Env, handle: f64) -> Result<napi::JsObject> {
     Ok(obj)
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setBounds")]
 pub fn window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
@@ -497,6 +539,7 @@ pub fn window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getClient")]
 pub fn window_get_client(env: Env, handle: f64) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
@@ -513,6 +556,7 @@ pub fn window_get_client(env: Env, handle: f64) -> Result<napi::JsObject> {
     Ok(obj)
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setClient")]
 pub fn window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
@@ -524,6 +568,7 @@ pub fn window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_mapToClient")]
 pub fn window_map_to_client(env: Env, handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
@@ -541,6 +586,7 @@ pub fn window_map_to_client(env: Env, handle: f64, x: i32, y: i32) -> Result<nap
     Ok(obj)
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_mapToScreen")]
 pub fn window_map_to_screen(env: Env, handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
@@ -558,6 +604,7 @@ pub fn window_map_to_screen(env: Env, handle: f64, x: i32, y: i32) -> Result<nap
     Ok(obj)
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getList")]
 pub fn window_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsObject> {
     unsafe {
@@ -581,6 +628,7 @@ pub fn window_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsOb
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_getActive")]
 pub fn window_get_active() -> f64 {
     unsafe {
@@ -602,19 +650,143 @@ pub fn window_get_active() -> f64 {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_setActive")]
 pub fn window_set_active(handle: f64) {
     unsafe {
         let h = handle as u64;
         if h == 0 { return; }
-        let d = get_display();
         let _xe = XDismissErrors::new();
         window_set_active_internal(h as Window);
     }
 }
 
+#[cfg(target_os = "linux")]
 #[napi(js_name = "window_isAxEnabled")]
 pub fn window_is_ax_enabled(_prompt: Option<bool>) -> bool {
-    // On Linux, accessibility is always "enabled" (no macOS TCC gate)
     true
 }
+
+// ==================== Non-Linux stubs ====================
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_isValid")]
+pub fn window_is_valid(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_close")]
+pub fn window_close(_handle: f64) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_isTopMost")]
+pub fn window_is_top_most(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_isBorderless")]
+pub fn window_is_borderless(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_isMinimized")]
+pub fn window_is_minimized(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_isMaximized")]
+pub fn window_is_maximized(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setTopMost")]
+pub fn window_set_top_most(_handle: f64, _top_most: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setBorderless")]
+pub fn window_set_borderless(_handle: f64, _borderless: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setMinimized")]
+pub fn window_set_minimized(_handle: f64, _minimized: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setMaximized")]
+pub fn window_set_maximized(_handle: f64, _maximized: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getProcess")]
+pub fn window_get_process(_handle: f64) -> f64 { 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getPID")]
+pub fn window_get_pid(_handle: f64) -> f64 { 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getHandle")]
+pub fn window_get_handle(handle: f64) -> f64 { handle }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setHandle")]
+pub fn window_set_handle(_handle: f64, _new_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getTitle")]
+pub fn window_get_title(_handle: f64) -> String { String::new() }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setTitle")]
+pub fn window_set_title(_handle: f64, _title: String) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getBounds")]
+pub fn window_get_bounds(env: Env, _handle: f64) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
+    Ok(obj)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setBounds")]
+pub fn window_set_bounds(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getClient")]
+pub fn window_get_client(env: Env, _handle: f64) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
+    Ok(obj)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setClient")]
+pub fn window_set_client(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_mapToClient")]
+pub fn window_map_to_client(env: Env, _handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", x)?; obj.set("y", y)?;
+    Ok(obj)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_mapToScreen")]
+pub fn window_map_to_screen(env: Env, _handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", x)?; obj.set("y", y)?;
+    Ok(obj)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getList")]
+pub fn window_get_list(env: Env, _regex_str: Option<String>) -> Result<napi::JsObject> {
+    Ok(env.create_array(0)?.coerce_to_object()?)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_getActive")]
+pub fn window_get_active() -> f64 { 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_setActive")]
+pub fn window_set_active(_handle: f64) {}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "window_isAxEnabled")]
+pub fn window_is_ax_enabled(_prompt: Option<bool>) -> bool { false }

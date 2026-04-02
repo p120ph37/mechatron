@@ -105,12 +105,26 @@ export interface NativeBackend {
 
 let _backend: NativeBackend | null = null;
 
+function getRustNodeFile(): string {
+  const p = process.platform;
+  const a = process.arch;
+  const map: Record<string, string> = {
+    "linux-x64":    "mechatron-native.linux-x64-gnu.node",
+    "linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
+    "darwin-x64":   "mechatron-native.darwin-x64.node",
+    "darwin-arm64": "mechatron-native.darwin-arm64.node",
+    "win32-x64":    "mechatron-native.win32-x64-msvc.node",
+    "win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
+  };
+  return map[`${p}-${a}`] || `mechatron-native.${p}-${a}.node`;
+}
+
 export function getNativeBackend(): NativeBackend {
   if (_backend) return _backend;
   // Try Rust napi module first, fall back to C++ node-gyp-build addon
   try {
     const path = require("path");
-    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", "mechatron-native.linux-x64-gnu.node"));
+    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", getRustNodeFile()));
     _backend = rustAddon as NativeBackend;
   } catch (_e) {
     const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));

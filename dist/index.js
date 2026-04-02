@@ -528,12 +528,25 @@ __export(exports_native, {
   setNativeBackend: () => setNativeBackend,
   getNativeBackend: () => getNativeBackend
 });
+function getRustNodeFile() {
+  const p = process.platform;
+  const a = process.arch;
+  const map = {
+    "linux-x64": "mechatron-native.linux-x64-gnu.node",
+    "linux-arm64": "mechatron-native.linux-arm64-gnu.node",
+    "darwin-x64": "mechatron-native.darwin-x64.node",
+    "darwin-arm64": "mechatron-native.darwin-arm64.node",
+    "win32-x64": "mechatron-native.win32-x64-msvc.node",
+    "win32-ia32": "mechatron-native.win32-ia32-msvc.node"
+  };
+  return map[`${p}-${a}`] || `mechatron-native.${p}-${a}.node`;
+}
 function getNativeBackend() {
   if (_backend)
     return _backend;
   try {
     const path = require("path");
-    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", "mechatron-native.linux-x64-gnu.node"));
+    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", getRustNodeFile()));
     _backend = rustAddon;
   } catch (_e) {
     const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
@@ -630,8 +643,8 @@ class Process {
   static isSys64Bit() {
     return getNative3().process_isSys64Bit();
   }
-  static _getSegments(process, base) {
-    return getNative3().process_getSegments(process._pid, base);
+  static _getSegments(process2, base) {
+    return getNative3().process_getSegments(process2._pid, base);
   }
 }
 var init_Process = __esm(() => {
@@ -2313,11 +2326,11 @@ class Memory {
   static Stats = Stats;
   static Region = Region;
   _pid;
-  constructor(process) {
-    if (process instanceof Memory) {
-      this._pid = process._pid;
-    } else if (process instanceof Process) {
-      this._pid = process.getPID();
+  constructor(process2) {
+    if (process2 instanceof Memory) {
+      this._pid = process2._pid;
+    } else if (process2 instanceof Process) {
+      this._pid = process2.getPID();
     } else {
       this._pid = 0;
     }

@@ -1,13 +1,21 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+
+#[cfg(target_os = "linux")]
 use std::ffi::{CStr, CString};
+#[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
 use crate::x11::*;
+#[cfg(target_os = "linux")]
 use crate::window;
 
-// Process info for Linux — open /proc/pid/ to get details
+// ── Linux internals ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 struct ProcInfo {
     pid: i32,
     name: String,
@@ -15,6 +23,7 @@ struct ProcInfo {
     is_64bit: bool,
 }
 
+#[cfg(target_os = "linux")]
 fn proc_open(pid: i32) -> Option<ProcInfo> {
     if pid <= 0 { return None; }
 
@@ -46,32 +55,72 @@ fn proc_open(pid: i32) -> Option<ProcInfo> {
     Some(ProcInfo { pid, name, path, is_64bit })
 }
 
+#[cfg(target_os = "linux")]
 fn proc_has_exited(pid: i32) -> bool {
     if pid <= 0 { return true; }
     // Check if /proc/pid exists
     !Path::new(&format!("/proc/{}", pid)).exists()
 }
 
+// ── process_open ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_open")]
 pub fn process_open(pid: i32) -> bool {
     proc_open(pid).is_some()
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_open")]
+pub fn process_open(_pid: i32) -> bool {
+    false
+}
+
+// ── process_close ───────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_close")]
 pub fn process_close(_pid: i32) {
     // No-op on Linux (no handle to close)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_close")]
+pub fn process_close(_pid: i32) {
+    // No-op stub
+}
+
+// ── process_isValid ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_isValid")]
 pub fn process_is_valid(pid: i32) -> bool {
     proc_open(pid).is_some()
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_isValid")]
+pub fn process_is_valid(_pid: i32) -> bool {
+    false
+}
+
+// ── process_is64Bit ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_is64Bit")]
 pub fn process_is_64_bit(pid: i32) -> bool {
     proc_open(pid).map(|p| p.is_64bit).unwrap_or(false)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_is64Bit")]
+pub fn process_is_64_bit(_pid: i32) -> bool {
+    false
+}
+
+// ── process_isDebugged ──────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_isDebugged")]
 pub fn process_is_debugged(pid: i32) -> bool {
     // Check TracerPid in /proc/pid/status
@@ -87,21 +136,57 @@ pub fn process_is_debugged(pid: i32) -> bool {
     false
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_isDebugged")]
+pub fn process_is_debugged(_pid: i32) -> bool {
+    false
+}
+
+// ── process_getPID ──────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getPID")]
 pub fn process_get_pid(pid: i32) -> f64 {
     pid as f64
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getPID")]
+pub fn process_get_pid(_pid: i32) -> f64 {
+    0.0
+}
+
+// ── process_getName ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getName")]
 pub fn process_get_name(pid: i32) -> String {
     proc_open(pid).map(|p| p.name).unwrap_or_default()
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getName")]
+pub fn process_get_name(_pid: i32) -> String {
+    String::new()
+}
+
+// ── process_getPath ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getPath")]
 pub fn process_get_path(pid: i32) -> String {
     proc_open(pid).map(|p| p.path).unwrap_or_default()
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getPath")]
+pub fn process_get_path(_pid: i32) -> String {
+    String::new()
+}
+
+// ── process_exit ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_exit")]
 pub fn process_exit(pid: i32) {
     if pid > 0 {
@@ -109,6 +194,15 @@ pub fn process_exit(pid: i32) {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_exit")]
+pub fn process_exit(_pid: i32) {
+    // No-op stub
+}
+
+// ── process_kill ────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_kill")]
 pub fn process_kill(pid: i32) {
     if pid > 0 {
@@ -116,11 +210,29 @@ pub fn process_kill(pid: i32) {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_kill")]
+pub fn process_kill(_pid: i32) {
+    // No-op stub
+}
+
+// ── process_hasExited ───────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_hasExited")]
 pub fn process_has_exited(pid: i32) -> bool {
     proc_has_exited(pid)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_hasExited")]
+pub fn process_has_exited(_pid: i32) -> bool {
+    true
+}
+
+// ── process_getModules ──────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getModules")]
 pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Result<napi::JsObject> {
     let maps_path = format!("/proc/{}/maps", pid);
@@ -171,6 +283,15 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
     Ok(arr.coerce_to_object()?)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getModules")]
+pub fn process_get_modules(env: Env, _pid: i32, _regex_str: Option<String>) -> Result<napi::JsObject> {
+    Ok(env.create_array(0)?.coerce_to_object()?)
+}
+
+// ── process_getWindows ──────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getWindows")]
 pub fn process_get_windows(env: Env, pid: i32, regex_str: Option<String>) -> Result<napi::JsObject> {
     unsafe {
@@ -193,6 +314,15 @@ pub fn process_get_windows(env: Env, pid: i32, regex_str: Option<String>) -> Res
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getWindows")]
+pub fn process_get_windows(env: Env, _pid: i32, _regex_str: Option<String>) -> Result<napi::JsObject> {
+    Ok(env.create_array(0)?.coerce_to_object()?)
+}
+
+// ── process_getList ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getList")]
 pub fn process_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsObject> {
     let mut pids = Vec::new();
@@ -224,16 +354,43 @@ pub fn process_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsO
     Ok(arr.coerce_to_object()?)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getList")]
+pub fn process_get_list(env: Env, _regex_str: Option<String>) -> Result<napi::JsObject> {
+    Ok(env.create_array(0)?.coerce_to_object()?)
+}
+
+// ── process_getCurrent ──────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getCurrent")]
 pub fn process_get_current() -> f64 {
     unsafe { libc::getpid() as f64 }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getCurrent")]
+pub fn process_get_current() -> f64 {
+    0.0
+}
+
+// ── process_isSys64Bit ──────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_isSys64Bit")]
 pub fn process_is_sys_64_bit() -> bool {
     cfg!(target_pointer_width = "64")
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_isSys64Bit")]
+pub fn process_is_sys_64_bit() -> bool {
+    false
+}
+
+// ── process_getSegments ─────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "process_getSegments")]
 pub fn process_get_segments(env: Env, pid: i32, base: f64) -> Result<napi::JsObject> {
     // Read /proc/pid/maps and find segments for the module at base address
@@ -282,4 +439,10 @@ pub fn process_get_segments(env: Env, pid: i32, base: f64) -> Result<napi::JsObj
         arr.set(i as u32, obj)?;
     }
     Ok(arr.coerce_to_object()?)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "process_getSegments")]
+pub fn process_get_segments(env: Env, _pid: i32, _base: f64) -> Result<napi::JsObject> {
+    Ok(env.create_array(0)?.coerce_to_object()?)
 }

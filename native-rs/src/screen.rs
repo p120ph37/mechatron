@@ -1,21 +1,30 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+
+#[cfg(target_os = "linux")]
 use std::ffi::{c_int, c_long, c_ulong, c_void};
+#[cfg(target_os = "linux")]
 use std::ptr;
 
+#[cfg(target_os = "linux")]
 use crate::x11::*;
 
 // Cached screen data from last synchronize
+#[cfg(target_os = "linux")]
 struct ScreenInfo {
     bounds: (i32, i32, i32, i32),
     usable: (i32, i32, i32, i32),
 }
 
+#[cfg(target_os = "linux")]
 static mut SCREENS: Vec<ScreenInfo> = Vec::new();
+#[cfg(target_os = "linux")]
 static mut TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
+#[cfg(target_os = "linux")]
 static mut TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
 
 // Union two bounds (x, y, w, h)
+#[allow(dead_code)]
 fn union_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
     if a.2 == 0 && a.3 == 0 { return b; }
     if b.2 == 0 && b.3 == 0 { return a; }
@@ -26,10 +35,12 @@ fn union_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, 
     (l, t, r - l, bot - t)
 }
 
+#[allow(dead_code)]
 fn intersects(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
     a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.3 && a.1 + a.3 > b.1
 }
 
+#[allow(dead_code)]
 fn intersect_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
     let l = a.0.max(b.0);
     let t = a.1.max(b.1);
@@ -38,6 +49,11 @@ fn intersect_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i
     if r > l && bot > t { (l, t, r - l, bot - t) } else { (0, 0, 0, 0) }
 }
 
+// =============================================================================
+// screen_synchronize
+// =============================================================================
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
     unsafe {
@@ -168,6 +184,17 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_synchronize")]
+pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
+    Ok(Either::B(env.get_null()?))
+}
+
+// =============================================================================
+// screen_grabScreen
+// =============================================================================
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_grabScreen")]
 pub fn screen_grab_screen(
     env: Env,
@@ -220,16 +247,53 @@ pub fn screen_grab_screen(
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_grabScreen")]
+pub fn screen_grab_screen(
+    env: Env,
+    _x: i32, _y: i32, _w: i32, _h: i32,
+    _window_handle: Option<f64>,
+) -> Result<Either<Uint32Array, napi::JsNull>> {
+    Ok(Either::B(env.get_null()?))
+}
+
+// =============================================================================
+// screen_isCompositing
+// =============================================================================
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_isCompositing")]
 pub fn screen_is_compositing() -> bool {
     true // Always true on Linux (matching C++ behavior)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_isCompositing")]
+pub fn screen_is_compositing() -> bool {
+    false // Not implemented on this platform
+}
+
+// =============================================================================
+// screen_setCompositing
+// =============================================================================
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_setCompositing")]
 pub fn screen_set_compositing(_enabled: bool) {
     // No-op on Linux (matching C++ behavior)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_setCompositing")]
+pub fn screen_set_compositing(_enabled: bool) {
+    // No-op: not implemented on this platform
+}
+
+// =============================================================================
+// screen_getTotalBounds
+// =============================================================================
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_getTotalBounds")]
 pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
@@ -242,6 +306,22 @@ pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
     Ok(obj)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_getTotalBounds")]
+pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", 0)?;
+    obj.set("y", 0)?;
+    obj.set("w", 0)?;
+    obj.set("h", 0)?;
+    Ok(obj)
+}
+
+// =============================================================================
+// screen_getTotalUsable
+// =============================================================================
+
+#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_getTotalUsable")]
 pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
@@ -251,5 +331,16 @@ pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
         obj.set("w", TOTAL_USABLE.2)?;
         obj.set("h", TOTAL_USABLE.3)?;
     }
+    Ok(obj)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_getTotalUsable")]
+pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", 0)?;
+    obj.set("y", 0)?;
+    obj.set("w", 0)?;
+    obj.set("h", 0)?;
     Ok(obj)
 }
