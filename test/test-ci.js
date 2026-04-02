@@ -76,12 +76,14 @@ function testKeyboard()
 	assert (list.length === 6, "compile modifiers length");
 
 	// --- click/press/release + getState (needs interactive desktop) ---
-	// Probe whether input simulation actually works on this runner
-	// (Windows Session 0 and macOS without TCC permissions silently drop inputs)
+	// Probe whether input simulation fully works: press must register,
+	// AND release must take effect. Windows Session 0 can queue press
+	// via SendInput but release may not process without a message pump.
 	k.press (mRobot.KEY_SHIFT);
-	var inputWorks = Keyboard.getState (mRobot.KEY_SHIFT) === true;
+	var pressWorks = Keyboard.getState (mRobot.KEY_SHIFT) === true;
 	k.release (mRobot.KEY_SHIFT);
-	if (inputWorks)
+	var releaseWorks = pressWorks && Keyboard.getState (mRobot.KEY_SHIFT) === false;
+	if (releaseWorks)
 	{
 		k.click (mRobot.KEY_SHIFT);
 		assert (Keyboard.getState (mRobot.KEY_SHIFT) === false, "shift released after click");
@@ -134,12 +136,12 @@ function testMouse()
 		log ("(setPos unavailable) ");
 	}
 
-	// Probe whether mouse button simulation works
-	// (Windows Session 0 silently drops SendInput calls)
+	// Probe whether mouse button simulation fully works (press + release)
 	m.press (mRobot.BUTTON_LEFT);
-	var mouseInputWorks = Mouse.getState (mRobot.BUTTON_LEFT) === true;
+	var mousePressWorks = Mouse.getState (mRobot.BUTTON_LEFT) === true;
 	m.release (mRobot.BUTTON_LEFT);
-	if (mouseInputWorks)
+	var mouseReleaseWorks = mousePressWorks && Mouse.getState (mRobot.BUTTON_LEFT) === false;
+	if (mouseReleaseWorks)
 	{
 		m.press (mRobot.BUTTON_MID);
 		var bState = Mouse.getState();
