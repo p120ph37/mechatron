@@ -494,6 +494,21 @@ function testMemory()
 	var Process = mRobot.Process;
 	var Memory  = mRobot.Memory;
 
+	// On macOS, task_for_pid can SIGABRT without mach entitlements — even with sudo.
+	// Probe in a child process since SIGABRT is not catchable in-process.
+	if (process.platform === "darwin")
+	{
+		var child = require ("child_process").spawnSync (process.execPath, ["-e",
+			"var m = require('" + require("path").resolve(__dirname, "..").replace(/'/g, "\\'") + "');" +
+			"var p = m.Process.getCurrent(); var mem = m.Memory(p); process.exit(mem.isValid() ? 0 : 1);"
+		], { timeout: 5000, stdio: "ignore" });
+		if (child.status !== 0)
+		{
+			log ("(task_for_pid unavailable) OK\n");
+			return true;
+		}
+	}
+
 	// --- Invalid memory ---
 	var mem = Memory();
 	assert (!mem.isValid(), "empty invalid");

@@ -61,6 +61,7 @@ jobs:
 
       - name: Diagnose Windows desktop session
         if: runner.os == 'Windows'
+        continue-on-error: true
         shell: pwsh
         run: |
           Write-Host "Session ID: $([System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
