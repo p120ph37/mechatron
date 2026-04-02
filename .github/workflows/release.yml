@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  HOST_NODE_VERSION: "22"
+
 jobs:
   detect-release:
     runs-on: ubuntu-latest
@@ -98,7 +101,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.HOST_NODE_VERSION }}
 
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
@@ -124,7 +127,7 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      - run: npm run build -- --arch ${{ matrix.arch }}
+      - run: npm run build -- --target=$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
 
       - name: Bundle TypeScript
         run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
