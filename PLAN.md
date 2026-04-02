@@ -1,85 +1,158 @@
-# Mechatron Refactoring Plan - Flat NAPI Backend
+# Mechatron Development Plan
 
-## Completed Work
+## Project Overview
 
-### TypeScript Layer (lib/)
-All classes ported from C++ to TypeScript with full argument validation:
-- `lib/native.ts` - NativeBackend interface + bridge adapter wrapping existing class-based addon
-- `lib/index.ts` - Entry point with callableClass() proxy, constants, exports
-- `lib/Point.ts`, `lib/Size.ts`, `lib/Bounds.ts`, `lib/Range.ts`, `lib/Color.ts`
-- `lib/Hash.ts`, `lib/Image.ts`, `lib/Timer.ts`
-- `lib/Keyboard.ts`, `lib/Mouse.ts`, `lib/Clipboard.ts`
-- `lib/Screen.ts`, `lib/Window.ts`, `lib/Process.ts`, `lib/Module.ts`, `lib/Memory.ts`
-- `tsconfig.json`
+Mechatron is a Node.js native addon for desktop automation — keyboard, mouse,
+screen capture, clipboard, process/memory inspection, and window management.
+Derived from the robot-js / Robot C++ library.
 
-### Build & Test
-- Bun bundler: `/root/.bun/bin/bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path`
-- `package.json` main changed to `dist/index.js`
-- **Tests passing**: `node test/test.js types timer` both pass
+---
 
-## Next Step: Thin the C++ NAPI Addon
+## Phase 1: C++ NAPI Port (COMPLETE)
 
-### Goal
-Replace the class-based C++ adapter layer with a single flat-function NAPI module matching the `NativeBackend` interface in `lib/native.ts`. Then update `native.ts` to call flat functions directly instead of using the bridge adapter.
+### 1a. TypeScript Wrapper Layer
+All classes ported from C++ adapter classes to TypeScript with full argument
+validation.  A bundled JS entry point (`dist/index.js`) wraps the flat native
+backend.
 
-### Current Architecture (to be replaced)
-```
-lib/native.ts (createBridgeBackend) → wraps class-based addon → 16 *Adapter.cc files → Robot:: C++ classes
-```
+Files:
+- `lib/*.ts` — TypeScript class wrappers (Keyboard, Mouse, Clipboard, Screen,
+  Window, Process, Memory, Image, Timer, plus data types)
+- `lib/native.ts` — NativeBackend interface + bridge adapter
+- `lib/index.ts` — Entry point with `callableClass()` proxy, constants, exports
+- `dist/index.js` — Bun-bundled CJS output (committed)
 
-### Target Architecture
-```
-lib/native.ts (direct flat calls) → single NativeBackend.cc → Robot:: C++ classes
-```
+### 1b. Flat Native Backend
+Replaced the 16-pair `*Adapter.cc/.h` class-based NAPI layer with a flat
+function backend in `src/native/`.
 
-### Files to Create
-- `src/NativeBackend.cc` - Single file exporting all flat NAPI functions
+Files:
+- `src/native/init.cc` — Module init, constant exports
+- `src/native/keyboard.cc`, `mouse.cc`, `clipboard.cc`, `screen.cc`,
+  `window.cc`, `process.cc`, `memory.cc` — Flat NAPI function exports
+- `src/native/native.h` — Shared declarations
 
-### Files to Modify
-- `binding.gyp` - Replace 17 adapter .cc files with single `src/NativeBackend.cc`
-- `lib/native.ts` - Remove `createBridgeBackend()`, call flat addon functions directly
+The old adapter layer (`src/*Adapter.cc/.h`, `src/ClassAdapter.h`,
+`src/RobotAdapter.cc/.h`) is still present but unused — to be removed in
+cleanup.
 
-### Files to Keep (Robot C++ library - unchanged)
-- `src/robot/*.cc` and `src/robot/*.h` - All 16 Robot implementation files
+### 1c. Robot C++ Library
+The core platform abstraction layer is unchanged:
+- `src/robot/*.cc` and `src/robot/*.h` — 16 implementation files covering
+  Keyboard, Mouse, Clipboard, Screen, Window, Process, Memory, Image, Timer,
+  plus data types (Bounds, Point, Size, Range, Color, Hash, Module)
 
-### Files to Remove (old adapter layer)
-- `src/RobotAdapter.cc`, `src/RobotAdapter.h`
-- `src/ClassAdapter.h`
-- `src/*Adapter.cc` and `src/*Adapter.h` (16 pairs: Bounds, Clipboard, Color, Hash, Image, Keyboard, Memory, Module, Mouse, Point, Process, Range, Screen, Size, Timer, Window)
+### 1d. Build System
+- **cmake-js** primary build via `prebuildify --backend cmake-js --napi`
+- **node-gyp** fallback via `prebuildify --napi` / `binding.gyp`
+- Prebuilt binaries for: Linux x64/arm64, macOS arm64/x64, Windows x64/ia32
+- Cross-compilation: macOS arm64 runners build x64 via `--arch x64`
 
-### Implementation Details for NativeBackend.cc
+### 1e. CI / Testing
+- GitHub Actions workflow builds and tests all 6 platform/arch combinations
+- `test/test-ci.js` — comprehensive test suite exercising all subsystems
+- TCC grants for macOS (accessibility, post-event, screen capture)
+- Platform capability expectations table prevents silent test regressions
+- Mach VM probe guards against SIGABRT on macOS arm64 (entitlement limitation)
+- Graceful degradation with hard-fail if expected capability regresses
 
-The file should:
-1. Include all Robot:: headers directly
-2. Use `Napi::Object` exports with flat `Napi::Function` entries (no classes)
-3. Use `NODE_API_MODULE` macro (not `NODE_API_ADDON` class pattern)
-4. Keep global `Robot::Keyboard` and `Robot::Mouse` instances for stateful operations
-5. Create `Robot::Window(handle)`, `Robot::Process(pid)`, `Robot::Memory(Process(pid))` per-call for handle-based operations
-6. Export all KEY_* and BUTTON_* constants
-7. Export version constants
+---
 
-### Key Patterns from Existing Adapters
+## Phase 2: Rust NAPI Rewrite (PLANNED)
 
-**Keyboard** (KeyboardAdapter.cc): Global instance, `Click(Key)`, `Press(Key)`, `Release(Key)`. Static: `Compile(string) -> KeyList`, `GetState() -> KeyState/bool`.
+Replace the C++ native layer with Rust using `napi-rs`.
 
-**Mouse** (MouseAdapter.cc): Global instance, `Click(Button)`, `Press/Release(Button)`, `ScrollH/V(int32)`. Static: `GetPos() -> Point`, `SetPos(Point)`, `GetState() -> ButtonState/bool`.
+### Motivation
+- Memory safety without manual `new`/`delete` or prevent-copy patterns
+- `napi-rs` provides ergonomic N-API bindings with automatic type marshalling
+- Cargo/crate ecosystem for platform APIs (e.g. `windows`, `core-graphics`,
+  `x11rb`) replaces hand-rolled platform `#ifdef` blocks
+- `napi-rs` has first-class `prebuildify`-compatible cross-compilation and
+  GitHub Actions integration (`napi-rs/napi-rs` build matrix)
+- Easier to add new platform support and maintain existing code
 
-**Clipboard** (ClipboardAdapter.cc): All static. `Clear()`, `HasText()`, `GetText()`, `SetText(string)`, `HasImage()`, `GetImage(Image&)`, `SetImage(Image&)`, `GetSequence()`.
+### Approach
+1. Create `src-rs/` (or a Cargo workspace) alongside existing `src/`
+2. Port `src/robot/` platform abstraction to Rust crate(s)
+3. Port `src/native/` NAPI bindings to `napi-rs` `#[napi]` exports
+4. Update build scripts: `@napi-rs/cli` replaces cmake-js/node-gyp
+5. Verify identical behaviour via existing `test/test-ci.js` (no test changes)
+6. Remove C++ source (`src/robot/`, `src/native/`, old adapters)
+7. Remove cmake-js, node-gyp, node-addon-api dependencies
 
-**Screen** (Screen.h): `Synchronize()`, `GetList()`, `GrabScreen(Image&, Bounds, Window)`, `GetTotalBounds()`, `GetTotalUsable()`, `IsCompositing()`, `SetCompositing(bool)`.
+### Build Tooling Changes
+- `Cargo.toml` + `@napi-rs/cli` replace `CMakeLists.txt` + `binding.gyp`
+- `npm run build` invokes `napi build --platform` instead of `prebuildify`
+- Prebuilt `.node` binaries generated per-platform via `napi-rs` CI template
+- The TypeScript wrapper layer (`lib/`) and bundled output (`dist/`) remain
+  unchanged — only the `.node` binary interface is reimplemented
 
-**Window** (Window.h): Construct with `Window(uintptr handle)`. Instance: `IsValid()`, `Close()`, `IsTopMost/Borderless/Minimized/Maximized()`, setters, `GetProcess()`, `GetPID()`, `GetHandle()`, `GetTitle()`, `SetTitle()`, `GetBounds/Client()`, `SetBounds/Client()`, `MapToClient/Screen()`. Static: `GetList(title)`, `GetActive()`, `SetActive(Window)`, `IsAxEnabled(bool)`.
+---
 
-**Process** (Process.h): Construct with `Process(int32 pid)`. Instance: `Open(pid)`, `Close()`, `IsValid()`, `Is64Bit()`, `IsDebugged()`, `GetPID()`, `GetName()`, `GetPath()`, `Exit()`, `Kill()`, `HasExited()`, `GetModules(name)`, `GetWindows(title)`. Static: `GetList(name)`, `GetCurrent()`, `IsSys64Bit()`. Segments via: `Module(proc, "", "", base, 0).GetSegments()`.
+## Phase 3: robot-js Compatibility Shim (PLANNED)
 
-**Memory** (Memory.h): Construct with `Memory(Process)`. Instance: `IsValid()`, `GetRegion(addr)`, `GetRegions(start,stop)`, `SetAccess(Region, flags/bools)`, `Find(pattern,...)`, `ReadData(addr,buf,len,flags)`, `WriteData(addr,buf,len,flags)`, `CreateCache(...)`, `ClearCache()`, `DeleteCache()`, `IsCaching()`, `GetCacheSize()`, `GetPtrSize()`, `GetMin/MaxAddress()`, `GetPageSize()`.
+Create a `mechatron-robot-js` package that provides a drop-in replacement for
+the original `robot-js` API, backed by mechatron.
 
-**Image for clipboard**: `Image()` default constructor, `Image.Create(w,h)`, `Image.GetData()` returns uint32*, `Image.GetWidth/Height()`.
+### Motivation
+- Enable existing robot-js applications to migrate to mechatron with zero code
+  changes (`npm install mechatron-robot-js` as alias for `robot-js`)
+- Validate API completeness — any robot-js function not covered is a gap
+- Provide a stable compatibility layer before modernizing mechatron's own API
 
-### NativeBackend interface reference
-See `lib/native.ts` lines 1-104 for the complete flat function interface.
+### Approach
+1. Create `packages/mechatron-robot-js/` subproject (or separate repo)
+2. Export the exact robot-js public API surface, delegating to mechatron
+3. Match robot-js argument handling, return types, and error behaviour
+4. Add robot-js test suite as integration/conformance tests
+5. Publish as `mechatron-robot-js` on npm
 
-### After Thinning
-- Configure `package.json` dual entry points: `"bun"` for TS, `"default"` for bundled JS
-- Add `bun build` script to `package.json`
-- Consider removing dist/ from git and building on install
+---
+
+## Phase 4: API Modernization & Modular Split (PLANNED)
+
+Once the compatibility shim exists as a stable bridge for legacy consumers,
+redesign the mechatron API and split the implementation into focused packages.
+
+### API Modernization
+- Async/Promise-based APIs where appropriate (e.g. screen grab, process list)
+- TypeScript-first public API with proper generics and discriminated unions
+- Modern event patterns (EventEmitter / AsyncIterator for key/mouse listeners)
+- Drop legacy `callableClass()` pattern — use standard constructors/statics
+- Proper ESM support alongside CJS
+
+### Modular Split
+Split mechatron into capability-specific packages so consumers only install
+what they need:
+
+| Package | Capabilities |
+|---------|-------------|
+| `mechatron` | Meta-package / re-exports all |
+| `@mechatron/keyboard` | Keyboard simulation and state |
+| `@mechatron/mouse` | Mouse simulation and state |
+| `@mechatron/clipboard` | Clipboard read/write (text + image) |
+| `@mechatron/screen` | Screen enumeration and capture |
+| `@mechatron/window` | Window enumeration and management |
+| `@mechatron/process` | Process enumeration and inspection |
+| `@mechatron/memory` | Process memory read/write/search |
+| `@mechatron/types` | Shared types (Point, Bounds, Image, etc.) |
+
+### Motivation for Split
+- **AV false positives**: Memory inspection (read/write foreign process memory,
+  module enumeration) triggers antivirus heuristics.  Applications that only
+  need keyboard/mouse/screen should not ship memory-related native code.
+- **Install size**: Each native binary includes all platform code.  Splitting
+  lets consumers download only the capabilities they use.
+- **Security surface**: Consumers can audit and permission-gate specific
+  capabilities rather than granting access to everything.
+
+---
+
+## Roadmap Summary
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1 | **Complete** | C++ NAPI port, flat backend, CI on 6 platforms |
+| 2 | Planned | Rust NAPI rewrite via napi-rs |
+| 3 | Planned | mechatron-robot-js compatibility shim |
+| 4 | Planned | API modernization + modular package split |

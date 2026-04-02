@@ -1,8 +1,20 @@
 # mechatron
 
-Node.js native addon for desktop automation — keyboard, mouse, screen capture, process/memory inspection, and window management.
+Node.js native addon for desktop automation — keyboard, mouse, screen capture,
+clipboard, process/memory inspection, and window management.
 
-Derived from [robot-js](https://github.com/nickvdp/robot-js) and the [Robot](https://github.com/nickvdp/robot) C++ library.
+Derived from [robot-js](https://github.com/nickvdp/robot-js) and the
+[Robot](https://github.com/nickvdp/robot) C++ library.
+
+## Platforms
+
+Prebuilt binaries are included for:
+
+| OS | Architectures |
+|----|--------------|
+| Linux | x64, arm64 |
+| macOS | arm64, x64 |
+| Windows | x64, ia32 |
 
 ## Install
 
@@ -10,12 +22,46 @@ Derived from [robot-js](https://github.com/nickvdp/robot-js) and the [Robot](htt
 npm install mechatron
 ```
 
-Prebuilt binaries are included for:
-- Linux x64, arm64
-- macOS arm64, x64
-- Windows x64, ia32
+## Usage
 
-## Build from source
+```js
+var mechatron = require("mechatron");
+
+// Keyboard
+var kb = mechatron.Keyboard();
+kb.click(mechatron.KEY_A);
+console.log(mechatron.Keyboard.getState(mechatron.KEY_SHIFT));
+
+// Mouse
+var mouse = mechatron.Mouse();
+mouse.click(mechatron.BUTTON_LEFT);
+var pos = mechatron.Mouse.getPos();
+mechatron.Mouse.setPos(100, 200);
+
+// Clipboard
+mechatron.Clipboard.setText("hello");
+console.log(mechatron.Clipboard.getText());
+
+// Screen
+mechatron.Screen.synchronize();
+var screens = mechatron.Screen.getList();
+var img = mechatron.Image();
+mechatron.Screen.grabScreen(img, 0, 0, 100, 100);
+
+// Window
+var windows = mechatron.Window.getList();
+var active = mechatron.Window.getActive();
+
+// Process
+var procs = mechatron.Process.getList();
+var curr = mechatron.Process.getCurrent();
+
+// Memory
+var mem = mechatron.Memory(curr);
+var regions = mem.getRegions();
+```
+
+## Build from Source
 
 Requires: C++ compiler, CMake, Node.js 18+
 
@@ -23,16 +69,21 @@ Requires: C++ compiler, CMake, Node.js 18+
 npm install
 npm run build:dev   # cmake-js
 # or
-npx node-gyp rebuild  # node-gyp (fallback)
+npx node-gyp rebuild  # node-gyp fallback
 ```
 
 ## Test
 
 ```sh
-npm test            # types + timer (safe to run headless)
-npm run test:ci     # types only (CI-safe, no GUI required)
+# Safe headless tests (types + timer)
+npm test
+
+# Full CI test suite (requires desktop session / TCC grants on macOS)
+sudo node test/test-ci.js all
 ```
 
 ## License
 
-[MIT](LICENSE) — see LICENSE file for the original Robot library acknowledgement.
+[MIT](LICENSE) — Copyright (c) 2024 Aaron Meriwether
+
+See LICENSE file for the original Robot library acknowledgement.
