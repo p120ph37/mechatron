@@ -457,9 +457,28 @@ function testMemory()
 {
 	log ("  Memory... ");
 
+	var Module  = mRobot.Module;
+
+	// --- Module (data type only, no native calls) ---
+	var mod = Module();
+	assert (mod.valid === false, "empty module invalid");
+	assert (mod.name === "", "empty module name");
+	assert (mod.base === 0, "empty module base");
+	assert (mod.size === 0, "empty module size");
+	assert (mod.isValid() === false, "empty module isValid");
+	assert (mod.getName() === "", "empty module getName");
+	assert (mod.getBase() === 0, "empty module getBase");
+	assert (mod.getSize() === 0, "empty module getSize");
+
+	// On macOS, memory operations can SIGABRT without entitlements
+	if (process.platform === "darwin")
+	{
+		log ("OK (macOS - skipping native memory ops)\n");
+		return true;
+	}
+
 	var Process = mRobot.Process;
 	var Memory  = mRobot.Memory;
-	var Module  = mRobot.Module;
 
 	// --- Invalid memory ---
 	var mem = Memory();
@@ -482,72 +501,61 @@ function testMemory()
 	// Invalid find
 	assert (mem.find ("  ").length === 0, "invalid find empty");
 
-	// --- Module (data type only, no native calls) ---
-	var mod = Module();
-	assert (mod.valid === false, "empty module invalid");
-	assert (mod.name === "", "empty module name");
-	assert (mod.base === 0, "empty module base");
-	assert (mod.size === 0, "empty module size");
+	// --- Open current process ---
+	proc = Process.getCurrent();
+	mem = Memory (proc);
+	assert (mem.isValid(), "current mem valid");
 
-	// --- Open current process memory ---
-	// On macOS, memory operations on own process can SIGABRT without entitlements
-	if (process.platform !== "darwin")
+	// Ptr size
+	var ptrSize = mem.getPtrSize();
+	assert (ptrSize === 4 || ptrSize === 8, "ptrSize 4 or 8");
+
+	// Min/max address, page size
+	var minAddr = mem.getMinAddress();
+	var maxAddr = mem.getMaxAddress();
+	var pageSize = mem.getPageSize();
+	assert (minAddr >= 0, "minAddress >= 0");
+	assert (maxAddr > 0, "maxAddress > 0");
+	assert (maxAddr > minAddr, "maxAddress > minAddress");
+	assert (pageSize > 0, "pageSize > 0");
+
+	// --- Regions and read operations ---
+	var regions = mem.getRegions();
+	assert (regions.length > 0, "regions non-empty");
+
+	// Find a readable region
+	var readable = null;
+	for (var i = 0; i < regions.length; ++i)
 	{
-		proc = Process.getCurrent();
-		mem = Memory (proc);
-		assert (mem.isValid(), "current mem valid");
-
-		// Ptr size
-		var ptrSize = mem.getPtrSize();
-		assert (ptrSize === 4 || ptrSize === 8, "ptrSize 4 or 8");
-
-		// Min/max address, page size
-		var minAddr = mem.getMinAddress();
-		var maxAddr = mem.getMaxAddress();
-		var pageSize = mem.getPageSize();
-		assert (minAddr >= 0, "minAddress >= 0");
-		assert (maxAddr > 0, "maxAddress > 0");
-		assert (maxAddr > minAddr, "maxAddress > minAddress");
-		assert (pageSize > 0, "pageSize > 0");
-
-		// --- Regions and read operations ---
-		var regions = mem.getRegions();
-		assert (regions.length > 0, "regions non-empty");
-
-		// Find a readable region
-		var readable = null;
-		for (var i = 0; i < regions.length; ++i)
+		if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16)
 		{
-			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16)
-			{
-				readable = regions[i];
-				break;
-			}
+			readable = regions[i];
+			break;
 		}
-
-		assert (readable !== null, "found readable region");
-
-		// --- Read from readable region ---
-		buf = Buffer.alloc (16);
-		var bytesRead = mem.readData (readable.start, buf, 16);
-		assert (bytesRead === 16, "readData 16 bytes");
-
-		// --- getRegion for known address ---
-		var region = mem.getRegion (readable.start);
-		assert (region.valid, "getRegion valid");
-		assert (region.bound, "getRegion bound");
-		assert (region.readable, "getRegion readable");
-
-		// --- Cache operations ---
-		assert (typeof mem.isCaching() === "boolean", "isCaching bool");
-		assert (typeof mem.getCacheSize() === "number", "getCacheSize number");
-
-		// Modules of current process
-		var mods = proc.getModules();
-		assert (mods.length > 0, "current proc has modules");
-
-		proc.close();
 	}
+
+	assert (readable !== null, "found readable region");
+
+	// --- Read from readable region ---
+	buf = Buffer.alloc (16);
+	var bytesRead = mem.readData (readable.start, buf, 16);
+	assert (bytesRead === 16, "readData 16 bytes");
+
+	// --- getRegion for known address ---
+	var region = mem.getRegion (readable.start);
+	assert (region.valid, "getRegion valid");
+	assert (region.bound, "getRegion bound");
+	assert (region.readable, "getRegion readable");
+
+	// --- Cache operations ---
+	assert (typeof mem.isCaching() === "boolean", "isCaching bool");
+	assert (typeof mem.getCacheSize() === "number", "getCacheSize number");
+
+	// Modules of current process
+	var mods = proc.getModules();
+	assert (mods.length > 0, "current proc has modules");
+
+	proc.close();
 
 	log ("OK\n");
 	return true;
