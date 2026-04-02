@@ -494,17 +494,31 @@ function testMemory()
 	var Process = mRobot.Process;
 	var Memory  = mRobot.Memory;
 
-	// On macOS, task_for_pid can SIGABRT without mach entitlements — even with sudo.
+	// On macOS, mach VM operations can SIGABRT without proper entitlements.
+	// Even with sudo, task_for_pid may succeed but mach_vm_read can still crash.
 	// Probe in a child process since SIGABRT is not catchable in-process.
 	if (process.platform === "darwin")
 	{
+		var probePath = require("path").resolve(__dirname, "..").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 		var child = require ("child_process").spawnSync (process.execPath, ["-e",
-			"var m = require('" + require("path").resolve(__dirname, "..").replace(/'/g, "\\'") + "');" +
-			"var p = m.Process.getCurrent(); var mem = m.Memory(p); process.exit(mem.isValid() ? 0 : 1);"
-		], { timeout: 5000, stdio: "ignore" });
+			"var m = require('" + probePath + "');" +
+			"var p = m.Process.getCurrent(); var mem = m.Memory(p);" +
+			"if (!mem.isValid()) process.exit(1);" +
+			// Also test an actual memory read — task_for_pid may succeed
+			// but mach_vm_read_overwrite can still SIGABRT
+			"var regions = mem.getRegions();" +
+			"if (regions.length === 0) process.exit(1);" +
+			"var buf = Buffer.alloc(16);" +
+			"for (var i = 0; i < regions.length; i++) {" +
+			"  if (regions[i].valid && regions[i].readable && regions[i].size > 16) {" +
+			"    mem.readData(regions[i].start, buf, 16); break;" +
+			"  }" +
+			"}" +
+			"process.exit(0);"
+		], { timeout: 10000, stdio: "ignore" });
 		if (child.status !== 0)
 		{
-			log ("(task_for_pid unavailable) OK\n");
+			log ("(macOS mach VM unavailable" + (child.signal ? ": " + child.signal : "") + ") OK\n");
 			return true;
 		}
 	}
