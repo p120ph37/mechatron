@@ -106,14 +106,29 @@ jobs:
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
 
-      - name: Grant macOS accessibility & memory permissions
+      - name: Grant macOS accessibility permissions
         if: runner.os == 'macOS'
         run: |
+          echo "=== SIP Status ==="
+          csrutil status || true
+          TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+          COLS=$(sudo sqlite3 "$TCC_DB" "PRAGMA table_info(access);" 2>/dev/null | wc -l || echo "0")
+          echo "=== TCC access table columns: $COLS ==="
           NODE_BIN=$(which node)
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
-            "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','$NODE_BIN',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s),NULL,NULL,'UNUSED',$(date +%s));" 2>/dev/null || true
-          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
-            "SELECT client FROM access WHERE service='kTCCServiceAccessibility';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
+          TS=$(date +%s)
+          if [ "$COLS" -ge 17 ]; then
+            VALS="1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,${TS},NULL,NULL,'UNUSED',${TS}"
+          else
+            VALS="1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,${TS}"
+          fi
+          for DB in "$TCC_DB" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
+            for CLIENT in "$NODE_BIN" "/bin/bash"; do
+              for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+                sudo sqlite3 "$DB" "INSERT OR REPLACE INTO access VALUES('$SVC','$CLIENT',$VALS);" 2>/dev/null || true
+              done
+            done
+          done
+          sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE service IN ('kTCCServiceAccessibility','kTCCServicePostEvent');" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
 
       - uses: oven-sh/setup-bun@v2
         with:

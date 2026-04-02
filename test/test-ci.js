@@ -16,6 +16,35 @@ var mRobot = require ("..");
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// On macOS, mach VM operations (used by Memory and Process.getModules) can
+// SIGABRT without proper entitlements.  Even with sudo, task_for_pid may
+// succeed while subsequent mach_vm_read_overwrite crashes.  Probe once in a
+// child process (SIGABRT is not catchable in-process) and record the result.
+var gMachVMAvailable = (process.platform !== "darwin");
+if (process.platform === "darwin")
+{
+	var _probePath = require("path").resolve(__dirname, "..").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+	var _child = require ("child_process").spawnSync (process.execPath, ["-e",
+		"var m = require('" + _probePath + "');" +
+		"var p = m.Process.getCurrent(); var mem = m.Memory(p);" +
+		"if (!mem.isValid()) process.exit(1);" +
+		"var regions = mem.getRegions();" +
+		"if (regions.length === 0) process.exit(1);" +
+		"var buf = Buffer.alloc(16);" +
+		"for (var i = 0; i < regions.length; i++) {" +
+		"  if (regions[i].valid && regions[i].readable && regions[i].size > 16) {" +
+		"    mem.readData(regions[i].start, buf, 16); break;" +
+		"  }" +
+		"}" +
+		"var mods = p.getModules();" +
+		"if (mods.length === 0) process.exit(1);" +
+		"process.exit(0);"
+	], { timeout: 10000, stdio: "ignore" });
+	gMachVMAvailable = (_child.status === 0);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 function log (msg)
 {
 	process.stdout.write (msg);
@@ -313,10 +342,17 @@ function testProcess()
 	// --- isSys64Bit ---
 	assert (typeof Process.isSys64Bit() === "boolean", "isSys64Bit bool");
 
-	// --- getModules ---
-	var mods = curr.getModules();
-	assert (mods instanceof Array, "getModules is array");
-	assert (mods.length > 0, "getModules non-empty");
+	// --- getModules (uses mach_vm_read on macOS, may SIGABRT) ---
+	if (gMachVMAvailable)
+	{
+		var mods = curr.getModules();
+		assert (mods instanceof Array, "getModules is array");
+		assert (mods.length > 0, "getModules non-empty");
+	}
+	else
+	{
+		log ("(getModules unavailable) ");
+	}
 
 	// --- is64Bit, isDebugged ---
 	assert (typeof curr.is64Bit() === "boolean", "is64Bit bool");
@@ -495,32 +531,11 @@ function testMemory()
 	var Memory  = mRobot.Memory;
 
 	// On macOS, mach VM operations can SIGABRT without proper entitlements.
-	// Even with sudo, task_for_pid may succeed but mach_vm_read can still crash.
-	// Probe in a child process since SIGABRT is not catchable in-process.
-	if (process.platform === "darwin")
+	// The global probe (gMachVMAvailable) already tested this at startup.
+	if (!gMachVMAvailable)
 	{
-		var probePath = require("path").resolve(__dirname, "..").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-		var child = require ("child_process").spawnSync (process.execPath, ["-e",
-			"var m = require('" + probePath + "');" +
-			"var p = m.Process.getCurrent(); var mem = m.Memory(p);" +
-			"if (!mem.isValid()) process.exit(1);" +
-			// Also test an actual memory read — task_for_pid may succeed
-			// but mach_vm_read_overwrite can still SIGABRT
-			"var regions = mem.getRegions();" +
-			"if (regions.length === 0) process.exit(1);" +
-			"var buf = Buffer.alloc(16);" +
-			"for (var i = 0; i < regions.length; i++) {" +
-			"  if (regions[i].valid && regions[i].readable && regions[i].size > 16) {" +
-			"    mem.readData(regions[i].start, buf, 16); break;" +
-			"  }" +
-			"}" +
-			"process.exit(0);"
-		], { timeout: 10000, stdio: "ignore" });
-		if (child.status !== 0)
-		{
-			log ("(macOS mach VM unavailable" + (child.signal ? ": " + child.signal : "") + ") OK\n");
-			return true;
-		}
+		log ("(macOS mach VM unavailable) OK\n");
+		return true;
 	}
 
 	// --- Invalid memory ---
@@ -680,6 +695,8 @@ function main()
 	log ("Platform: " + process.platform + " " + process.arch + "\n");
 	log ("Node: " + process.version + "\n");
 	log ("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
+	if (process.platform === "darwin")
+		log ("Mach VM: " + (gMachVMAvailable ? "available" : "unavailable") + "\n");
 	log ("------------------------------\n\n");
 
 	var tests = [
