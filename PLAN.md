@@ -128,14 +128,14 @@ what they need:
 | Package | Capabilities |
 |---------|-------------|
 | `mechatron` | Meta-package / re-exports all |
-| `@mechatron/keyboard` | Keyboard simulation and state |
-| `@mechatron/mouse` | Mouse simulation and state |
-| `@mechatron/clipboard` | Clipboard read/write (text + image) |
-| `@mechatron/screen` | Screen enumeration and capture |
-| `@mechatron/window` | Window enumeration and management |
-| `@mechatron/process` | Process enumeration and inspection |
-| `@mechatron/memory` | Process memory read/write/search |
-| `@mechatron/types` | Shared types (Point, Bounds, Image, etc.) |
+| `mechatron-keyboard` | Keyboard simulation and state |
+| `mechatron-mouse` | Mouse simulation and state |
+| `mechatron-clipboard` | Clipboard read/write (text + image) |
+| `mechatron-screen` | Screen enumeration and capture |
+| `mechatron-window` | Window enumeration and management |
+| `mechatron-process` | Process enumeration and inspection |
+| `mechatron-memory` | Process memory read/write/search |
+| `mechatron-types` | Shared types (Point, Bounds, Image, etc.) |
 
 ### Motivation for Split
 - **AV false positives**: Memory inspection (read/write foreign process memory,
