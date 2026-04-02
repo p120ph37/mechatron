@@ -43,7 +43,7 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      - run: npm run build -- --target=node-v$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
+      - run: npm run build -- --target=$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
 
       - name: Run tests
         run: |
