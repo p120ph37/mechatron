@@ -45,6 +45,42 @@ if (process.platform === "darwin")
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Platform capability expectations.  When a capability is expected (true),
+// the corresponding probe MUST succeed — a skip becomes a hard failure.
+// This prevents regressions from being silently masked by graceful probes.
+//
+// The key is "platform-arch" (e.g. "darwin-arm64", "win32-x64").
+// Capabilities:
+//   keyboardSim  — press/release registers in getState
+//   mousePos     — setPos round-trips through getPos
+//   mouseSim     — press/release registers in getState
+//   grabScreen   — Screen.grabScreen returns valid image
+//   machVM       — mach VM read/getModules (macOS only)
+
+var gExpected = {
+	"linux-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+	"linux-arm64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+	"darwin-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+	"darwin-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: true  },
+	"win32-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+	"win32-ia32":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+};
+
+var gPlatformKey = process.platform + "-" + process.arch;
+var gExpect = gExpected[gPlatformKey] || {};
+
+// Check whether skipping a capability is allowed.  If the capability is
+// expected for this platform, throw an assertion failure instead of skipping.
+function expectOrSkip (capability, label)
+{
+	if (gExpect[capability])
+	{
+		assert (false, label + " — expected to work on " + gPlatformKey + " but probe failed (regression!)");
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 function log (msg)
 {
 	process.stdout.write (msg);
@@ -124,6 +160,7 @@ function testKeyboard()
 	}
 	else
 	{
+		expectOrSkip ("keyboardSim", "Keyboard input simulation");
 		log ("(input sim unavailable) ");
 	}
 
@@ -162,6 +199,7 @@ function testMouse()
 	}
 	else
 	{
+		expectOrSkip ("mousePos", "Mouse setPos");
 		log ("(setPos unavailable) ");
 	}
 
@@ -190,6 +228,7 @@ function testMouse()
 	}
 	else
 	{
+		expectOrSkip ("mouseSim", "Mouse input simulation");
 		log ("(input sim unavailable) ");
 		var bState = Mouse.getState();
 		assert (typeof bState === "object", "getState returns object");
@@ -351,6 +390,7 @@ function testProcess()
 	}
 	else
 	{
+		expectOrSkip ("machVM", "Process.getModules (mach VM)");
 		log ("(getModules unavailable) ");
 	}
 
@@ -507,6 +547,7 @@ function testScreen()
 	}
 	else
 	{
+		expectOrSkip ("grabScreen", "Screen.grabScreen");
 		log ("(grabScreen unavailable) ");
 	}
 
@@ -540,6 +581,7 @@ function testMemory()
 	// The global probe (gMachVMAvailable) already tested this at startup.
 	if (!gMachVMAvailable)
 	{
+		expectOrSkip ("machVM", "Memory (mach VM)");
 		log ("(macOS mach VM unavailable) OK\n");
 		return true;
 	}
@@ -703,6 +745,16 @@ function main()
 	log ("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
 	if (process.platform === "darwin")
 		log ("Mach VM: " + (gMachVMAvailable ? "available" : "unavailable") + "\n");
+	var expectKeys = Object.keys (gExpect);
+	if (expectKeys.length > 0)
+	{
+		var required = expectKeys.filter (function (k) { return gExpect[k]; });
+		log ("Expected: " + (required.length > 0 ? required.join (", ") : "(none)") + "\n");
+	}
+	else
+	{
+		log ("Expected: (no expectations defined for " + gPlatformKey + ")\n");
+	}
 	log ("------------------------------\n\n");
 
 	var tests = [
