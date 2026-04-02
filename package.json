@@ -1,0 +1,45 @@
+{
+  "name": "mechatron",
+  "version": "0.0.0",
+  "description": "Node.js native addon for desktop automation (keyboard, mouse, screen, process, memory, window)",
+  "main": "dist/index.js",
+  "gypfile": true,
+  "scripts": {
+    "install": "node-gyp-build",
+    "build": "prebuildify --backend cmake-js --napi",
+    "build:gyp": "prebuildify --napi",
+    "build:dev": "cmake-js compile",
+    "test": "node test/test.js types timer",
+    "test:ci": "node test/test.js types"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p120ph37/mechatron.git"
+  },
+  "author": "Aaron Meriwether",
+  "license": "MIT",
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "files": [
+    "prebuilds/",
+    "src/",
+    "dist/",
+    "binding.gyp",
+    "CMakeLists.txt"
+  ],
+  "devDependencies": {
+    "cmake-js": "^7.3.0",
+    "node-gyp": "^10.3.1",
+    "pngjs": "^6.0.0",
+    "prebuildify": "^6.0.1",
+    "readline-sync": "~1.4",
+    "sprintf-js": "~1.1"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.1",
+    "node-gyp-build": "^4.8.4"
+  }
+}

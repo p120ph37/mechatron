@@ -1,0 +1,117 @@
+name: Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+env:
+  HOST_NODE_VERSION: "22"
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-14
+            arch: arm64
+          - os: macos-14
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: windows-2022
+            arch: ia32
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.HOST_NODE_VERSION }}
+
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
+
+      - if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Grant macOS TCC permissions
+        if: runner.os == 'macOS'
+        run: |
+          # Grant accessibility, input-event, and screen-capture permissions to
+          # the node binary so tests can exercise CGEventPost, CGWarpMouse, and
+          # CGWindowListCreateImage.  SIP is disabled on GitHub-hosted macOS
+          # runners, which allows direct writes to the system TCC.db.
+          # Ref: actions/runner-images configure-tccdb-macos.sh
+          TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+          SVCS=(kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture)
+          NODE_BIN=$(which node)
+          for SVC in "${SVCS[@]}"; do
+            sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$NODE_BIN',1,2,4,1,0);" 2>/dev/null || true
+          done
+          # Restart TCC daemon so it picks up the new grants
+          sudo launchctl stop com.apple.tccd 2>/dev/null || true
+          sleep 1
+          # Diagnostic
+          sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build -- --target=$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
+
+      - name: Bundle TypeScript
+        run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
+
+      - name: Run tests
+        run: |
+          TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+          run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            # Cross-compiled x64 on arm64 macOS — download x64 node to run tests
+            NODE_VERSION=$(node -v)
+            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            # Grant TCC to this binary too
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            X64_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_ABS',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
+            run_and_log sudo "$X64_ABS" test/test-ci.js all
+          elif [ "${{ matrix.arch }}" = "ia32" ]; then
+            NODE_VERSION=$(node -v)
+            curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
+            unzip -q "node-${NODE_VERSION}-win-x86.zip"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            run_and_log xvfb-run --auto-servernum node test/test-ci.js all
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            run_and_log sudo node test/test-ci.js all
+          else
+            run_and_log node test/test-ci.js all
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-log-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/test-output.txt
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
+          path: prebuilds/
+          if-no-files-found: error

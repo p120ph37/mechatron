@@ -1,0 +1,228 @@
+name: Release from Changelog
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  detect-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      prerelease: ${{ steps.parse.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Parse latest changelog version
+        id: parse
+        run: |
+          # Extract the first heading that matches: ## [vX.Y.Z...] - YYYY-MM-DD
+          # The date is required — headings without a date are treated as drafts.
+          HEADING=$(grep -P '^## \[v[^\]]+\]\s+-\s+\d{4}-\d{2}-\d{2}' CHANGELOG.md | head -1)
+
+          if [ -z "$HEADING" ]; then
+            echo "No dated release heading found — nothing to release."
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION=$(echo "$HEADING" | grep -oP '(?<=\[)[^\]]+')
+
+          # Must be valid semver with v prefix
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$ ]]; then
+            echo "::error::First changelog heading '$VERSION' is not valid semver with v prefix"
+            exit 1
+          fi
+
+          # Verify the date is today (UTC +/- 12h to accommodate any timezone)
+          ENTRY_DATE=$(echo "$HEADING" | grep -oP '\d{4}-\d{2}-\d{2}')
+          YESTERDAY=$(date -u -d '-12 hours' +%Y-%m-%d)
+          TODAY=$(date -u +%Y-%m-%d)
+          TOMORROW=$(date -u -d '+12 hours' +%Y-%m-%d)
+          if [[ "$ENTRY_DATE" != "$YESTERDAY" && "$ENTRY_DATE" != "$TODAY" && "$ENTRY_DATE" != "$TOMORROW" ]]; then
+            echo "::error::Changelog date $ENTRY_DATE does not match today — expected $YESTERDAY, $TODAY, or $TOMORROW"
+            exit 1
+          fi
+
+          # Check if this tag already exists on the remote
+          if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists — skipping release."
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check if a GitHub release already exists
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::GitHub release $VERSION already exists but tag does not — manual cleanup needed"
+            exit 1
+          fi
+
+          PRERELEASE="false"
+          SEMVER="${VERSION#v}"
+          if [[ "$SEMVER" =~ - ]]; then
+            PRERELEASE="true"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Detected version=$VERSION prerelease=$PRERELEASE"
+
+  build:
+    needs: detect-release
+    if: needs.detect-release.outputs.version != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-14
+            arch: arm64
+          - os: macos-14
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: windows-2022
+            arch: ia32
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
+
+      - if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Grant macOS TCC permissions
+        if: runner.os == 'macOS'
+        run: |
+          TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+          SVCS=(kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture)
+          NODE_BIN=$(which node)
+          for SVC in "${SVCS[@]}"; do
+            sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$NODE_BIN',1,2,4,1,0);" 2>/dev/null || true
+          done
+          sudo launchctl stop com.apple.tccd 2>/dev/null || true
+          sleep 1
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build -- --arch ${{ matrix.arch }}
+
+      - name: Bundle TypeScript
+        run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
+
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            NODE_VERSION=$(node -v)
+            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            X64_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_ABS',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
+            sudo "$X64_ABS" test/test-ci.js all
+          elif [ "${{ matrix.arch }}" = "ia32" ]; then
+            NODE_VERSION=$(node -v)
+            curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
+            unzip -q "node-${NODE_VERSION}-win-x86.zip"
+            ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run --auto-servernum node test/test-ci.js all
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            sudo node test/test-ci.js all
+          else
+            node test/test-ci.js all
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
+          path: prebuilds/
+          if-no-files-found: error
+
+  release:
+    needs: [detect-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: prebuilds-*
+          merge-multiple: true
+          path: prebuilds
+
+      - name: Set package version
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          npm version "${VERSION#v}" --no-git-tag-version
+
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          BODY=$(awk '/^## \[/{if(found) exit; found=1; next} found' CHANGELOG.md)
+          echo "$BODY" > /tmp/release-body.md
+
+      - name: Create Git tag
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          PRERELEASE="${{ needs.detect-release.outputs.prerelease }}"
+          FLAGS=""
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS="--prerelease"
+          fi
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes-file /tmp/release-body.md \
+            $FLAGS
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm ci --ignore-scripts
+          TAG="latest"
+          if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
+            TAG="next"
+          fi
+          npm publish --access public --tag "$TAG"
