@@ -90,10 +90,13 @@ export class Window {
     return new Bounds(b.x, b.y, b.w, b.h);
   }
 
+  setBounds(): void;
   setBounds(bounds: Bounds | { x: number; y: number; w: number; h: number }): void;
   setBounds(x: number, y: number, w: number, h: number): void;
-  setBounds(a: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): void {
-    if (typeof a === "number") {
+  setBounds(a?: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): void {
+    if (a === undefined) {
+      getNative().window_setBounds(this._handle, 0, 0, 0, 0);
+    } else if (typeof a === "number") {
       getNative().window_setBounds(this._handle, a, b!, c!, d!);
     } else {
       getNative().window_setBounds(this._handle, a.x, a.y, a.w, a.h);
@@ -105,22 +108,28 @@ export class Window {
     return new Bounds(b.x, b.y, b.w, b.h);
   }
 
+  setClient(): void;
   setClient(bounds: Bounds | { x: number; y: number; w: number; h: number }): void;
   setClient(x: number, y: number, w: number, h: number): void;
-  setClient(a: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): void {
-    if (typeof a === "number") {
+  setClient(a?: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): void {
+    if (a === undefined) {
+      getNative().window_setClient(this._handle, 0, 0, 0, 0);
+    } else if (typeof a === "number") {
       getNative().window_setClient(this._handle, a, b!, c!, d!);
     } else {
       getNative().window_setClient(this._handle, a.x, a.y, a.w, a.h);
     }
   }
 
+  mapToClient(): Point;
   mapToClient(point: Point | { x: number; y: number }): Point;
   mapToClient(x: number, y: number): Point;
-  mapToClient(a: Point | { x: number; y: number } | number, b?: number): Point {
+  mapToClient(a?: Point | { x: number; y: number } | number, b?: number): Point {
     let x: number, y: number;
-    if (typeof a === "number") {
-      x = a; y = b!;
+    if (a === undefined) {
+      x = 0; y = 0;
+    } else if (typeof a === "number") {
+      x = a; y = b !== undefined ? b : a;
     } else {
       x = a.x; y = a.y;
     }
@@ -128,12 +137,15 @@ export class Window {
     return new Point(p.x, p.y);
   }
 
+  mapToScreen(): Point;
   mapToScreen(point: Point | { x: number; y: number }): Point;
   mapToScreen(x: number, y: number): Point;
-  mapToScreen(a: Point | { x: number; y: number } | number, b?: number): Point {
+  mapToScreen(a?: Point | { x: number; y: number } | number, b?: number): Point {
     let x: number, y: number;
-    if (typeof a === "number") {
-      x = a; y = b!;
+    if (a === undefined) {
+      x = 0; y = 0;
+    } else if (typeof a === "number") {
+      x = a; y = b !== undefined ? b : a;
     } else {
       x = a.x; y = a.y;
     }

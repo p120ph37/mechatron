@@ -100,18 +100,19 @@ export class Screen {
     return Screen.getMain();
   }
 
-  static grabScreen(image: Image, x: number, y: number, w: number, h: number, windowHandle?: number): boolean;
-  static grabScreen(image: Image, bounds: Bounds, windowHandle?: number): boolean;
-  static grabScreen(image: Image, a: number | Bounds, b?: number | number, c?: number, d?: number, e?: number): boolean {
+  static grabScreen(image: Image, x: number, y: number, w: number, h: number, window?: any): boolean;
+  static grabScreen(image: Image, bounds: Bounds, window?: any): boolean;
+  static grabScreen(image: Image, a: number | Bounds, b?: any, c?: number, d?: number, e?: any): boolean {
     image.destroy();
     let x: number, y: number, w: number, h: number;
     let windowHandle: number | undefined;
     if (a instanceof Bounds) {
       x = a.x; y = a.y; w = a.w; h = a.h;
-      windowHandle = b as number | undefined;
+      // b is window or handle
+      windowHandle = Screen._resolveWindowHandle(b);
     } else {
       x = a; y = b as number; w = c!; h = d!;
-      windowHandle = e;
+      windowHandle = Screen._resolveWindowHandle(e);
     }
     const result = getNative().screen_grabScreen(x, y, w, h, windowHandle);
     if (!result) return false;
@@ -119,6 +120,14 @@ export class Screen {
     const data = image.getData();
     if (data) data.set(result);
     return true;
+  }
+
+  private static _resolveWindowHandle(w: any): number | undefined {
+    if (w === undefined || w === null) return undefined;
+    if (typeof w === "number") return w;
+    // Window-like object with getHandle()
+    if (typeof w.getHandle === "function") return w.getHandle();
+    return undefined;
   }
 
   static getTotalBounds(): Bounds {

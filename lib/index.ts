@@ -28,21 +28,25 @@ const ROBOT_VERSION_STR = "2.0.0 (0.0.0)";
 const ADDON_VERSION = 0x000000;
 const ADDON_VERSION_STR = "0.0.0";
 
-// Platform-specific key constants
-// These are loaded from the native addon at runtime so they match the compiled platform
-function getKeyConstants(): Record<string, number> {
+// Platform-specific key and button constants
+// Read from the native addon at runtime so they match the compiled platform
+function getConstants(): Record<string, number> {
   try {
-    const native = getNativeBackend();
-    // The thin native addon exports key constants directly
-    // For now, use the X11 keysym values (Linux) as defaults
-    return _linuxKeys;
+    const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
+    const constants: Record<string, number> = {};
+    for (const key of Object.keys(addon)) {
+      if ((key.startsWith("KEY_") || key.startsWith("BUTTON_")) && typeof addon[key] === "number") {
+        constants[key] = addon[key];
+      }
+    }
+    return constants;
   } catch {
-    return _linuxKeys;
+    return _fallbackKeys;
   }
 }
 
-// Linux (X11 keysym) key constants - used as compile-time defaults
-const _linuxKeys: Record<string, number> = {
+// Fallback key constants (X11 keysym values) - used only if native addon fails to load
+const _fallbackKeys: Record<string, number> = {
   KEY_SPACE: 0x0020,
   KEY_ESCAPE: 0xFF1B,
   KEY_TAB: 0xFF09,
@@ -152,13 +156,15 @@ const _linuxKeys: Record<string, number> = {
   KEY_NUM_LOCK: 0xFF7F,
 };
 
-// Button constants (platform-independent)
-const BUTTON_LEFT = 0;
-const BUTTON_MID = 1;
-const BUTTON_MIDDLE = 1;
-const BUTTON_RIGHT = 2;
-const BUTTON_X1 = 3;
-const BUTTON_X2 = 4;
+// Button fallback constants (used only if native addon fails to load)
+const _fallbackButtons: Record<string, number> = {
+  BUTTON_LEFT: 0,
+  BUTTON_MID: 1,
+  BUTTON_MIDDLE: 1,
+  BUTTON_RIGHT: 2,
+  BUTTON_X1: 3,
+  BUTTON_X2: 4,
+};
 
 // Wrap ES6 classes so they can be called without `new` (matching C++ NAPI OnCalledAsFunction behavior)
 function callableClass<T extends new (...args: any[]) => any>(Cls: T): T {
@@ -203,7 +209,7 @@ Process.prototype.getModules = function(this: Process, regex?: string) {
 } as any;
 
 // Export everything as a single module object (matching the original index.js pattern)
-const keys = getKeyConstants();
+const _nativeConstants = getConstants();
 
 const mRobot = {
   // Version info
@@ -234,16 +240,9 @@ const mRobot = {
   Timer: callableClass(Timer),
   Window: callableClass(Window),
 
-  // Key constants
-  ...keys,
-
-  // Button constants
-  BUTTON_LEFT,
-  BUTTON_MID,
-  BUTTON_MIDDLE,
-  BUTTON_RIGHT,
-  BUTTON_X1,
-  BUTTON_X2,
+  // Key and button constants from native addon (platform-specific)
+  ..._fallbackButtons,
+  ..._nativeConstants,
 
   // Backend management (new in TS layer)
   getNativeBackend,

@@ -91,7 +91,8 @@ export class Module {
   constructor();
   constructor(other: Module);
   constructor(data: ModuleData);
-  constructor(a?: Module | ModuleData) {
+  constructor(process: Process, name: string, path: string, base: number, size: number);
+  constructor(a?: Module | ModuleData | Process, b?: string, c?: string, d?: number, e?: number) {
     if (a instanceof Module) {
       this.valid = a.valid;
       this.name = a.name;
@@ -99,13 +100,21 @@ export class Module {
       this.base = a.base;
       this.size = a.size;
       this.process = a.process;
+    } else if (a instanceof Process && typeof b === "string") {
+      // Module(process, name, path, base, size)
+      this.valid = true;
+      this.name = b;
+      this.path = c || "";
+      this.base = d || 0;
+      this.size = e || 0;
+      this.process = a;
     } else if (a && typeof a === "object" && "pid" in a) {
-      this.valid = a.valid;
-      this.name = a.name;
-      this.path = a.path;
-      this.base = a.base;
-      this.size = a.size;
-      this.process = new Process(a.pid);
+      this.valid = (a as ModuleData).valid;
+      this.name = (a as ModuleData).name;
+      this.path = (a as ModuleData).path;
+      this.base = (a as ModuleData).base;
+      this.size = (a as ModuleData).size;
+      this.process = new Process((a as ModuleData).pid);
     } else {
       this.valid = false;
       this.name = "";
@@ -115,6 +124,14 @@ export class Module {
       this.process = new Process();
     }
   }
+
+  // Getter methods (matching original C++ adapter API)
+  isValid(): boolean { return this.valid; }
+  getName(): string { return this.name; }
+  getPath(): string { return this.path; }
+  getBase(): number { return this.base; }
+  getSize(): number { return this.size; }
+  getProcess(): Process { return this.process; }
 
   contains(address: number): boolean {
     return address >= this.base && address < this.base + this.size;

@@ -545,16 +545,21 @@ class Process {
   constructor(pid) {
     if (pid instanceof Process) {
       this._pid = pid._pid;
+    } else if (typeof pid === "number" && pid > 0) {
+      const valid = getNative3().process_open(pid);
+      this._pid = valid ? pid : 0;
     } else {
-      this._pid = pid || 0;
+      this._pid = 0;
     }
   }
   open(pid) {
-    this._pid = pid;
-    return getNative3().process_open(pid);
+    const valid = getNative3().process_open(pid);
+    this._pid = valid ? pid : 0;
+    return valid;
   }
   close() {
     getNative3().process_close(this._pid);
+    this._pid = 0;
   }
   isValid() {
     return getNative3().process_isValid(this._pid);
@@ -692,7 +697,9 @@ class Window {
     return new Bounds(b.x, b.y, b.w, b.h);
   }
   setBounds(a, b, c, d) {
-    if (typeof a === "number") {
+    if (a === undefined) {
+      getNative4().window_setBounds(this._handle, 0, 0, 0, 0);
+    } else if (typeof a === "number") {
       getNative4().window_setBounds(this._handle, a, b, c, d);
     } else {
       getNative4().window_setBounds(this._handle, a.x, a.y, a.w, a.h);
@@ -703,7 +710,9 @@ class Window {
     return new Bounds(b.x, b.y, b.w, b.h);
   }
   setClient(a, b, c, d) {
-    if (typeof a === "number") {
+    if (a === undefined) {
+      getNative4().window_setClient(this._handle, 0, 0, 0, 0);
+    } else if (typeof a === "number") {
       getNative4().window_setClient(this._handle, a, b, c, d);
     } else {
       getNative4().window_setClient(this._handle, a.x, a.y, a.w, a.h);
@@ -711,9 +720,12 @@ class Window {
   }
   mapToClient(a, b) {
     let x, y;
-    if (typeof a === "number") {
+    if (a === undefined) {
+      x = 0;
+      y = 0;
+    } else if (typeof a === "number") {
       x = a;
-      y = b;
+      y = b !== undefined ? b : a;
     } else {
       x = a.x;
       y = a.y;
@@ -723,9 +735,12 @@ class Window {
   }
   mapToScreen(a, b) {
     let x, y;
-    if (typeof a === "number") {
+    if (a === undefined) {
+      x = 0;
+      y = 0;
+    } else if (typeof a === "number") {
       x = a;
-      y = b;
+      y = b !== undefined ? b : a;
     } else {
       x = a.x;
       y = a.y;
@@ -1905,13 +1920,13 @@ class Screen {
       y = a.y;
       w = a.w;
       h = a.h;
-      windowHandle = b;
+      windowHandle = Screen._resolveWindowHandle(b);
     } else {
       x = a;
       y = b;
       w = c;
       h = d;
-      windowHandle = e;
+      windowHandle = Screen._resolveWindowHandle(e);
     }
     const result = getNative2().screen_grabScreen(x, y, w, h, windowHandle);
     if (!result)
@@ -1921,6 +1936,15 @@ class Screen {
     if (data)
       data.set(result);
     return true;
+  }
+  static _resolveWindowHandle(w) {
+    if (w === undefined || w === null)
+      return;
+    if (typeof w === "number")
+      return w;
+    if (typeof w.getHandle === "function")
+      return w.getHandle();
+    return;
   }
   static getTotalBounds() {
     const b = getNative2().screen_getTotalBounds();
@@ -2026,7 +2050,7 @@ class Module {
   process;
   _segments = null;
   _proc = null;
-  constructor(a) {
+  constructor(a, b, c, d, e) {
     if (a instanceof Module) {
       this.valid = a.valid;
       this.name = a.name;
@@ -2034,6 +2058,13 @@ class Module {
       this.base = a.base;
       this.size = a.size;
       this.process = a.process;
+    } else if (a instanceof Process && typeof b === "string") {
+      this.valid = true;
+      this.name = b;
+      this.path = c || "";
+      this.base = d || 0;
+      this.size = e || 0;
+      this.process = a;
     } else if (a && typeof a === "object" && "pid" in a) {
       this.valid = a.valid;
       this.name = a.name;
@@ -2049,6 +2080,24 @@ class Module {
       this.size = 0;
       this.process = new Process;
     }
+  }
+  isValid() {
+    return this.valid;
+  }
+  getName() {
+    return this.name;
+  }
+  getPath() {
+    return this.path;
+  }
+  getBase() {
+    return this.base;
+  }
+  getSize() {
+    return this.size;
+  }
+  getProcess() {
+    return this.process;
   }
   contains(address) {
     return address >= this.base && address < this.base + this.size;
@@ -2528,19 +2577,26 @@ class Memory {
 }
 
 // lib/index.ts
+var __dirname = "/home/user/mechatron/lib";
 var ROBOT_VERSION = 131072;
 var ROBOT_VERSION_STR = "2.0.0 (0.0.0)";
 var ADDON_VERSION = 0;
 var ADDON_VERSION_STR = "0.0.0";
-function getKeyConstants() {
+function getConstants() {
   try {
-    const native = getNativeBackend();
-    return _linuxKeys;
+    const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
+    const constants = {};
+    for (const key of Object.keys(addon)) {
+      if ((key.startsWith("KEY_") || key.startsWith("BUTTON_")) && typeof addon[key] === "number") {
+        constants[key] = addon[key];
+      }
+    }
+    return constants;
   } catch {
-    return _linuxKeys;
+    return _fallbackKeys;
   }
 }
-var _linuxKeys = {
+var _fallbackKeys = {
   KEY_SPACE: 32,
   KEY_ESCAPE: 65307,
   KEY_TAB: 65289,
@@ -2649,12 +2705,14 @@ var _linuxKeys = {
   KEY_SCROLL_LOCK: 65300,
   KEY_NUM_LOCK: 65407
 };
-var BUTTON_LEFT = 0;
-var BUTTON_MID = 1;
-var BUTTON_MIDDLE = 1;
-var BUTTON_RIGHT = 2;
-var BUTTON_X1 = 3;
-var BUTTON_X2 = 4;
+var _fallbackButtons = {
+  BUTTON_LEFT: 0,
+  BUTTON_MID: 1,
+  BUTTON_MIDDLE: 1,
+  BUTTON_RIGHT: 2,
+  BUTTON_X1: 3,
+  BUTTON_X2: 4
+};
 function callableClass(Cls) {
   return new Proxy(Cls, {
     apply(_target, _thisArg, args) {
@@ -2684,7 +2742,7 @@ Process.prototype.getModules = function(regex) {
     return mod;
   });
 };
-var keys = getKeyConstants();
+var _nativeConstants = getConstants();
 var mRobot = {
   ROBOT_VERSION,
   ROBOT_VERSION_STR,
@@ -2708,13 +2766,8 @@ var mRobot = {
   Size: callableClass(Size),
   Timer: callableClass(Timer),
   Window: callableClass(Window),
-  ...keys,
-  BUTTON_LEFT,
-  BUTTON_MID,
-  BUTTON_MIDDLE,
-  BUTTON_RIGHT,
-  BUTTON_X1,
-  BUTTON_X2,
+  ..._fallbackButtons,
+  ..._nativeConstants,
   getNativeBackend,
   setNativeBackend
 };
