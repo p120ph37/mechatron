@@ -132,9 +132,27 @@ jobs:
             NODE_VERSION=$(node -v)
             curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
             X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
-            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
-              "INSERT OR REPLACE INTO access VALUES('kTCCServiceAccessibility','$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s),NULL,NULL,'UNUSED',$(date +%s));" 2>/dev/null || true
-            sudo $X64_NODE test/test-ci.js all
+            # Launch via Terminal.app for TCC responsible process context
+            TEST_FIFO=/tmp/mechatron-test-fifo
+            TEST_EXIT=/tmp/mechatron-test-exit
+            mkfifo "$TEST_FIFO"
+            WORK_DIR="$(pwd)"
+            X64_NODE_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
+            printf '#!/bin/bash\ncd "%s"\nsudo "%s" test/test-ci.js all > "%s" 2>&1\necho $? > "%s"\n' \
+              "$WORK_DIR" "$X64_NODE_ABS" "$TEST_FIFO" "$TEST_EXIT" > /tmp/mechatron-test-runner.sh
+            chmod +x /tmp/mechatron-test-runner.sh
+            if open -a Terminal /tmp/mechatron-test-runner.sh 2>/dev/null; then
+              cat "$TEST_FIFO"
+              sleep 1
+              EXIT_CODE=$(cat "$TEST_EXIT" 2>/dev/null || echo "1")
+            else
+              echo "Terminal.app launch failed, falling back to direct execution"
+              rm -f "$TEST_FIFO"
+              sudo "$X64_NODE_ABS" test/test-ci.js all
+              EXIT_CODE=$?
+            fi
+            rm -f "$TEST_FIFO" "$TEST_EXIT" /tmp/mechatron-test-runner.sh
+            exit $EXIT_CODE
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
@@ -143,7 +161,26 @@ jobs:
           elif [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run --auto-servernum node test/test-ci.js all
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            sudo node test/test-ci.js all
+            TEST_FIFO=/tmp/mechatron-test-fifo
+            TEST_EXIT=/tmp/mechatron-test-exit
+            mkfifo "$TEST_FIFO"
+            WORK_DIR="$(pwd)"
+            NODE_BIN="$(which node)"
+            printf '#!/bin/bash\ncd "%s"\nsudo "%s" test/test-ci.js all > "%s" 2>&1\necho $? > "%s"\n' \
+              "$WORK_DIR" "$NODE_BIN" "$TEST_FIFO" "$TEST_EXIT" > /tmp/mechatron-test-runner.sh
+            chmod +x /tmp/mechatron-test-runner.sh
+            if open -a Terminal /tmp/mechatron-test-runner.sh 2>/dev/null; then
+              cat "$TEST_FIFO"
+              sleep 1
+              EXIT_CODE=$(cat "$TEST_EXIT" 2>/dev/null || echo "1")
+            else
+              echo "Terminal.app launch failed, falling back to direct execution"
+              rm -f "$TEST_FIFO"
+              sudo "$NODE_BIN" test/test-ci.js all
+              EXIT_CODE=$?
+            fi
+            rm -f "$TEST_FIFO" "$TEST_EXIT" /tmp/mechatron-test-runner.sh
+            exit $EXIT_CODE
           else
             node test/test-ci.js all
           fi
