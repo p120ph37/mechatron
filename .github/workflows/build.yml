@@ -106,6 +106,8 @@ jobs:
 
       - name: Run tests
         run: |
+          TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+          run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
             # Cross-compiled x64 on arm64 macOS — download x64 node to test
             NODE_VERSION=$(node -v)
@@ -121,13 +123,13 @@ jobs:
               "$WORK_DIR" "$X64_NODE_ABS" "$TEST_FIFO" "$TEST_EXIT" > /tmp/mechatron-test-runner.sh
             chmod +x /tmp/mechatron-test-runner.sh
             if open -a Terminal /tmp/mechatron-test-runner.sh 2>/dev/null; then
-              cat "$TEST_FIFO"
+              cat "$TEST_FIFO" | tee "$TEST_LOG"
               sleep 1
               EXIT_CODE=$(cat "$TEST_EXIT" 2>/dev/null || echo "1")
             else
               echo "Terminal.app launch failed, falling back to direct execution"
               rm -f "$TEST_FIFO"
-              sudo "$X64_NODE_ABS" test/test-ci.js all
+              run_and_log sudo "$X64_NODE_ABS" test/test-ci.js all
               EXIT_CODE=$?
             fi
             rm -f "$TEST_FIFO" "$TEST_EXIT" /tmp/mechatron-test-runner.sh
@@ -136,9 +138,9 @@ jobs:
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run --auto-servernum node test/test-ci.js all
+            run_and_log xvfb-run --auto-servernum node test/test-ci.js all
           elif [ "${{ runner.os }}" = "macOS" ]; then
             # Try launching via Terminal.app so it becomes the "responsible process"
             # for TCC — Terminal.app has kTCCServiceAccessibility pre-granted.
@@ -152,20 +154,27 @@ jobs:
             chmod +x /tmp/mechatron-test-runner.sh
             if open -a Terminal /tmp/mechatron-test-runner.sh 2>/dev/null; then
               # Stream output from FIFO (blocks until writer closes)
-              cat "$TEST_FIFO"
+              cat "$TEST_FIFO" | tee "$TEST_LOG"
               sleep 1
               EXIT_CODE=$(cat "$TEST_EXIT" 2>/dev/null || echo "1")
             else
               echo "Terminal.app launch failed, falling back to direct execution"
               rm -f "$TEST_FIFO"
-              sudo "$NODE_BIN" test/test-ci.js all
+              run_and_log sudo "$NODE_BIN" test/test-ci.js all
               EXIT_CODE=$?
             fi
             rm -f "$TEST_FIFO" "$TEST_EXIT" /tmp/mechatron-test-runner.sh
             exit $EXIT_CODE
           else
-            node test/test-ci.js all
+            run_and_log node test/test-ci.js all
           fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-log-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/test-output.txt
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
