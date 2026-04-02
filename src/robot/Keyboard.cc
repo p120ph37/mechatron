@@ -72,7 +72,7 @@ ROBOT_NS_BEGIN
 #ifdef ROBOT_OS_WIN
 
 	#define SET_KEY_STATE( keycode )								\
-		result[keycode] = GetKeyState (keycode) != 0;
+		result[keycode] = (GetAsyncKeyState (keycode) & 0x8000) != 0;
 
 #endif
 
@@ -693,8 +693,11 @@ bool Keyboard::GetState (Key keycode)
 #endif
 #ifdef ROBOT_OS_WIN
 
-	// Check if keycode is currently pressed
-	return GetKeyState (keycode) != 0;
+	// Use GetAsyncKeyState to read the physical key state
+	// directly, without requiring a message pump.  GetKeyState
+	// only reflects keys processed by the thread's message
+	// queue, which may not have been pumped yet after SendInput.
+	return (GetAsyncKeyState (keycode) & 0x8000) != 0;
 
 #endif
 }

@@ -675,11 +675,11 @@ bool Mouse::GetState (Button button)
 
 	switch (button)
 	{
-		case ButtonLeft : return GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) != 0;
-		case ButtonMid  : return GetAsyncKeyState (VK_MBUTTON) != 0;
-		case ButtonRight: return GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON) != 0;
-		case ButtonX1   : return GetAsyncKeyState (VK_XBUTTON1) != 0;
-		case ButtonX2   : return GetAsyncKeyState (VK_XBUTTON2) != 0;
+		case ButtonLeft : return (GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+		case ButtonMid  : return (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0;
+		case ButtonRight: return (GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON) & 0x8000) != 0;
+		case ButtonX1   : return (GetAsyncKeyState (VK_XBUTTON1) & 0x8000) != 0;
+		case ButtonX2   : return (GetAsyncKeyState (VK_XBUTTON2) & 0x8000) != 0;
 	}
 
 #endif
@@ -737,11 +737,11 @@ bool Mouse::GetState (ButtonState& result)
 #endif
 #ifdef ROBOT_OS_WIN
 
-	result[ButtonLeft ] = GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) != 0;
-	result[ButtonMid  ] = GetAsyncKeyState (VK_MBUTTON) != 0;
-	result[ButtonRight] = GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON) != 0;
-	result[ButtonX1   ] = GetAsyncKeyState (VK_XBUTTON1) != 0;
-	result[ButtonX2   ] = GetAsyncKeyState (VK_XBUTTON2) != 0;
+	result[ButtonLeft ] = (GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+	result[ButtonMid  ] = (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0;
+	result[ButtonRight] = (GetAsyncKeyState (GetSystemMetrics (SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON) & 0x8000) != 0;
+	result[ButtonX1   ] = (GetAsyncKeyState (VK_XBUTTON1) & 0x8000) != 0;
+	result[ButtonX2   ] = (GetAsyncKeyState (VK_XBUTTON2) & 0x8000) != 0;
 
 #endif
 
