@@ -41,9 +41,16 @@ jobs:
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - run: npm ci --ignore-scripts
 
       - run: npm run build -- --target=$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
+
+      - name: Bundle TypeScript
+        run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
 
       - name: Run tests
         run: |
