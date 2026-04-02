@@ -107,9 +107,15 @@ let _backend: NativeBackend | null = null;
 
 export function getNativeBackend(): NativeBackend {
   if (_backend) return _backend;
-  // Load the flat NAPI addon directly - it already exports all functions matching NativeBackend
-  const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
-  _backend = addon as NativeBackend;
+  // Try Rust napi module first, fall back to C++ node-gyp-build addon
+  try {
+    const path = require("path");
+    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", "mechatron-native.linux-x64-gnu.node"));
+    _backend = rustAddon as NativeBackend;
+  } catch (_e) {
+    const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
+    _backend = addon as NativeBackend;
+  }
   return _backend;
 }
 

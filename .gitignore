@@ -1,8 +1,9 @@
 *~
-*.node
 *.pdb
 build/
 prebuilds/
 build-*/
 node_modules/
 .DS_STORE
+native-rs/target/
+native-rs/*.node

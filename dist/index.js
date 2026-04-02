@@ -531,8 +531,14 @@ __export(exports_native, {
 function getNativeBackend() {
   if (_backend)
     return _backend;
-  const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
-  _backend = addon;
+  try {
+    const path = require("path");
+    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", "mechatron-native.linux-x64-gnu.node"));
+    _backend = rustAddon;
+  } catch (_e) {
+    const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
+    _backend = addon;
+  }
   return _backend;
 }
 function setNativeBackend(backend) {
