@@ -513,7 +513,7 @@ pub fn screen_is_compositing() -> bool {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "screen_isCompositing")]
 pub fn screen_is_compositing() -> bool {
-    false
+    true // macOS always uses Quartz Compositor
 }
 
 // =============================================================================
