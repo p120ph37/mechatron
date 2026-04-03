@@ -37,6 +37,11 @@ static mut WIN_TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
 #[cfg(target_os = "windows")]
 static mut WIN_TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
 
+#[cfg(target_os = "macos")]
+static mut MAC_TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
+#[cfg(target_os = "macos")]
+static mut MAC_TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
+
 // Union two bounds (x, y, w, h)
 #[allow(dead_code)]
 fn union_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
@@ -288,6 +293,15 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             return Ok(Either::B(env.get_null()?));
         }
 
+        let mut b_min_x = i32::MAX;
+        let mut b_min_y = i32::MAX;
+        let mut b_max_x = i32::MIN;
+        let mut b_max_y = i32::MIN;
+        let mut u_min_x = i32::MAX;
+        let mut u_min_y = i32::MAX;
+        let mut u_max_x = i32::MIN;
+        let mut u_max_y = i32::MIN;
+
         let mut arr = env.create_array(count as u32)?;
 
         for i in 0..count {
@@ -295,23 +309,45 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             let frame = screen.frame();
             let visible = screen.visibleFrame();
 
+            let fx = frame.origin.x as i32;
+            let fy = frame.origin.y as i32;
+            let fw = frame.size.width as i32;
+            let fh = frame.size.height as i32;
+            let vx = visible.origin.x as i32;
+            let vy = visible.origin.y as i32;
+            let vw = visible.size.width as i32;
+            let vh = visible.size.height as i32;
+
+            b_min_x = b_min_x.min(fx);
+            b_min_y = b_min_y.min(fy);
+            b_max_x = b_max_x.max(fx + fw);
+            b_max_y = b_max_y.max(fy + fh);
+            u_min_x = u_min_x.min(vx);
+            u_min_y = u_min_y.min(vy);
+            u_max_x = u_max_x.max(vx + vw);
+            u_max_y = u_max_y.max(vy + vh);
+
             let mut bo = env.create_object()?;
-            bo.set("x", frame.origin.x as i32)?;
-            bo.set("y", frame.origin.y as i32)?;
-            bo.set("w", frame.size.width as i32)?;
-            bo.set("h", frame.size.height as i32)?;
+            bo.set("x", fx)?;
+            bo.set("y", fy)?;
+            bo.set("w", fw)?;
+            bo.set("h", fh)?;
 
             let mut uo = env.create_object()?;
-            uo.set("x", visible.origin.x as i32)?;
-            uo.set("y", visible.origin.y as i32)?;
-            uo.set("w", visible.size.width as i32)?;
-            uo.set("h", visible.size.height as i32)?;
+            uo.set("x", vx)?;
+            uo.set("y", vy)?;
+            uo.set("w", vw)?;
+            uo.set("h", vh)?;
 
             let mut obj = env.create_object()?;
             obj.set("bounds", bo)?;
             obj.set("usable", uo)?;
             arr.set(i as u32, obj)?;
         }
+
+        MAC_TOTAL_BOUNDS = (b_min_x, b_min_y, b_max_x - b_min_x, b_max_y - b_min_y);
+        MAC_TOTAL_USABLE = (u_min_x, u_min_y, u_max_x - u_min_x, u_max_y - u_min_y);
+
         Ok(Either::A(arr.coerce_to_object()?))
     }
 }
@@ -523,7 +559,12 @@ pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
 #[napi(js_name = "screen_getTotalBounds")]
 pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
-    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
+    unsafe {
+        obj.set("x", MAC_TOTAL_BOUNDS.0)?;
+        obj.set("y", MAC_TOTAL_BOUNDS.1)?;
+        obj.set("w", MAC_TOTAL_BOUNDS.2)?;
+        obj.set("h", MAC_TOTAL_BOUNDS.3)?;
+    }
     Ok(obj)
 }
 
@@ -561,6 +602,11 @@ pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
 #[napi(js_name = "screen_getTotalUsable")]
 pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
-    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
+    unsafe {
+        obj.set("x", MAC_TOTAL_USABLE.0)?;
+        obj.set("y", MAC_TOTAL_USABLE.1)?;
+        obj.set("w", MAC_TOTAL_USABLE.2)?;
+        obj.set("h", MAC_TOTAL_USABLE.3)?;
+    }
     Ok(obj)
 }
