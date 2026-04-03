@@ -60,8 +60,6 @@ fn platform_get_sequence() -> f64 {
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSPasteboard;
 #[cfg(target_os = "macos")]
-use objc2::AnyThread;
-#[cfg(target_os = "macos")]
 use objc2_foundation::{NSCopying, NSString};
 
 #[cfg(target_os = "macos")]
@@ -112,118 +110,142 @@ fn platform_set_text(text: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn pasteboard_type_tiff() -> &'static NSString {
-    unsafe { objc2_app_kit::NSPasteboardTypeTIFF }
-}
-
-#[cfg(target_os = "macos")]
 fn platform_has_image() -> bool {
+    use objc2::ClassType;
+    use objc2_app_kit::NSImage;
+
     unsafe {
         let board = NSPasteboard::generalPasteboard();
-        let types = objc2_foundation::NSArray::from_retained_slice(&[
-            pasteboard_type_tiff().copy(),
-        ]);
-        board.availableTypeFromArray(&types).is_some()
+        let cls = NSImage::class();
+        let class_array = objc2_foundation::NSArray::from_slice(&[cls]);
+        board.canReadObjectForClasses_options(&class_array, None)
     }
 }
 
 #[cfg(target_os = "macos")]
 fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    use objc2_app_kit::NSBitmapImageRep;
+    use objc2::ClassType;
+    use objc2_app_kit::NSImage;
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetData,
+        CGColorSpace, CGContext, CGImage, CGImageByteOrderInfo, CGImageAlphaInfo,
+    };
+    use objc2_core_foundation::CGRect;
 
     unsafe {
         let board = NSPasteboard::generalPasteboard();
-        let tiff_data = board.dataForType(pasteboard_type_tiff())?;
 
-        let rep = NSBitmapImageRep::imageRepWithData(&tiff_data)?;
-        let w = rep.pixelsWide() as u32;
-        let h = rep.pixelsHigh() as u32;
-        if w == 0 || h == 0 { return None; }
+        // Create NSImage from pasteboard (handles all image formats)
+        let ns_image = NSImage::initWithPasteboard(NSImage::alloc(), &board)?;
 
-        let ptr = rep.bitmapData();
-        if ptr.is_null() { return None; }
+        // Extract CGImage from NSImage
+        let cg_image = ns_image.CGImageForProposedRect_context_hints(
+            std::ptr::null_mut(),
+            None,
+            None,
+        )?;
 
-        let bps = rep.bitsPerSample() as u32;
-        let spp = rep.samplesPerPixel() as u32;
-        let bpr = rep.bytesPerRow() as usize;
-        let has_alpha = rep.hasAlpha();
-
-        let mut argb = vec![0u32; (w * h) as usize];
-
-        for y in 0..h as usize {
-            let row = ptr.add(y * bpr);
-            for x in 0..w as usize {
-                let (r, g, b, a) = if bps == 8 && spp >= 3 {
-                    let off = x * spp as usize;
-                    (
-                        *row.add(off),
-                        *row.add(off + 1),
-                        *row.add(off + 2),
-                        if has_alpha && spp >= 4 { *row.add(off + 3) } else { 255u8 },
-                    )
-                } else {
-                    (0, 0, 0, 255)
-                };
-                argb[y * w as usize + x] =
-                    (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | (b as u32);
-            }
+        let w = CGImage::width(Some(&cg_image));
+        let h = CGImage::height(Some(&cg_image));
+        if w == 0 || h == 0 {
+            return None;
         }
-        Some((w, h, argb))
+
+        // Create bitmap context: kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst
+        let bitmap_info = CGImageByteOrderInfo::Order32Little.0 | CGImageAlphaInfo::PremultipliedFirst.0;
+        let colorspace = CGColorSpace::new_device_rgb()?;
+        let bytes_per_row = w * 4;
+
+        let ctx = CGBitmapContextCreate(
+            std::ptr::null_mut(),
+            w,
+            h,
+            8,
+            bytes_per_row,
+            Some(&colorspace),
+            bitmap_info,
+        )?;
+
+        // Draw the CGImage into the bitmap context
+        let rect = CGRect::new(
+            objc2_core_foundation::CGPoint { x: 0.0, y: 0.0 },
+            objc2_core_foundation::CGSize { width: w as f64, height: h as f64 },
+        );
+        CGContext::draw_image(Some(&ctx), rect, Some(&cg_image));
+
+        // Read pixel data from the bitmap context
+        let data_ptr = CGBitmapContextGetData(Some(&ctx)) as *const u32;
+        if data_ptr.is_null() {
+            return None;
+        }
+
+        let pixel_count = w * h;
+        let buffer = std::slice::from_raw_parts(data_ptr, pixel_count);
+        let argb = buffer.to_vec();
+
+        Some((w as u32, h as u32, argb))
     }
 }
 
 #[cfg(target_os = "macos")]
 fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
-    use objc2_app_kit::{NSBitmapImageRep, NSBitmapFormat};
+    use objc2::runtime::ProtocolObject;
+    use objc2_app_kit::{NSImage, NSPasteboardWriting};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage,
+        CGColorSpace, CGImageByteOrderInfo, CGImageAlphaInfo,
+    };
+    use objc2_core_foundation::CGSize;
 
     unsafe {
-        // Create RGBA bitmap data
-        let mut rgba = vec![0u8; (width * height * 4) as usize];
-        for i in 0..data.len() {
-            let argb = data[i];
-            let a = ((argb >> 24) & 0xFF) as u8;
-            let r = ((argb >> 16) & 0xFF) as u8;
-            let g = ((argb >> 8) & 0xFF) as u8;
-            let b = (argb & 0xFF) as u8;
-            rgba[i * 4] = r;
-            rgba[i * 4 + 1] = g;
-            rgba[i * 4 + 2] = b;
-            rgba[i * 4 + 3] = a;
-        }
+        let w = width as usize;
+        let h = height as usize;
+        let bytes_per_row = w * 4;
 
-        let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bitmapFormat_bytesPerRow_bitsPerPixel(
-            NSBitmapImageRep::alloc(),
-            std::ptr::null_mut(),
-            width as isize,
-            height as isize,
+        // Create bitmap context: kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst
+        let bitmap_info = CGImageByteOrderInfo::Order32Little.0 | CGImageAlphaInfo::PremultipliedFirst.0;
+        let colorspace = match CGColorSpace::new_device_rgb() {
+            Some(cs) => cs,
+            None => return false,
+        };
+
+        // Allocate a mutable buffer and copy the ARGB data into it
+        let pixel_count = w * h;
+        let mut buffer = vec![0u32; pixel_count];
+        buffer[..data.len().min(pixel_count)].copy_from_slice(&data[..data.len().min(pixel_count)]);
+
+        let ctx = match CGBitmapContextCreate(
+            buffer.as_mut_ptr() as *mut std::ffi::c_void,
+            w,
+            h,
             8,
-            4,
-            true,
-            false,
-            objc2_app_kit::NSCalibratedRGBColorSpace,
-            NSBitmapFormat::AlphaNonpremultiplied,
-            (width * 4) as isize,
-            32,
+            bytes_per_row,
+            Some(&colorspace),
+            bitmap_info,
+        ) {
+            Some(c) => c,
+            None => return false,
+        };
+
+        // Create CGImage from the bitmap context
+        let cg_image = match CGBitmapContextCreateImage(Some(&ctx)) {
+            Some(img) => img,
+            None => return false,
+        };
+
+        // Wrap in NSImage
+        let ns_image = NSImage::initWithCGImage_size(
+            NSImage::alloc(),
+            &cg_image,
+            CGSize { width: 0.0, height: 0.0 }, // NSZeroSize
         );
-        let rep = match rep {
-            Some(r) => r,
-            None => return false,
-        };
 
-        // Copy pixel data
-        let bmp_ptr = rep.bitmapData();
-        if bmp_ptr.is_null() { return false; }
-        std::ptr::copy_nonoverlapping(rgba.as_ptr(), bmp_ptr, rgba.len());
-
-        // Get TIFF representation
-        let tiff = match rep.TIFFRepresentation() {
-            Some(t) => t,
-            None => return false,
-        };
-
+        // Write to pasteboard
         let board = NSPasteboard::generalPasteboard();
         board.clearContents();
-        board.setData_forType(Some(&tiff), pasteboard_type_tiff())
+        let obj = ProtocolObject::from_retained(ns_image);
+        let objects = objc2_foundation::NSArray::from_retained_slice(&[obj]);
+        board.writeObjects(&objects)
     }
 }
 
@@ -248,7 +270,7 @@ use windows::Win32::System::DataExchange::*;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Memory::*;
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_UNICODETEXT};
+use windows::Win32::System::Ole::{CF_DIB, CF_UNICODETEXT};
 
 /// RAII guard that calls CloseClipboard on drop.
 #[cfg(target_os = "windows")]
@@ -349,7 +371,6 @@ fn platform_set_text(text: &str) -> bool {
 fn platform_has_image() -> bool {
     unsafe {
         IsClipboardFormatAvailable(CF_DIB.0 as u32).is_ok()
-            || IsClipboardFormatAvailable(CF_BITMAP.0 as u32).is_ok()
     }
 }
 

@@ -413,7 +413,7 @@ pub fn screen_grab_screen(
 pub fn screen_grab_screen(
     env: Env,
     x: i32, y: i32, w: i32, h: i32,
-    _window_handle: Option<f64>,
+    window_handle: Option<f64>,
 ) -> Result<Either<Uint32Array, napi::JsNull>> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Foundation::*;
@@ -423,7 +423,11 @@ pub fn screen_grab_screen(
     }
 
     unsafe {
-        let hdc_screen = GetDC(HWND::default());
+        let hwnd = match window_handle {
+            Some(h) if h != 0.0 => HWND(h as *mut _),
+            _ => HWND::default(),
+        };
+        let hdc_screen = GetDC(hwnd);
         if hdc_screen.is_invalid() {
             return Ok(Either::B(env.get_null()?));
         }
@@ -460,19 +464,10 @@ pub fn screen_grab_screen(
             DIB_RGB_COLORS,
         );
 
-        // Convert BGRA to ARGB
-        for px in buf.iter_mut() {
-            let bgra = *px;
-            let b = (bgra >> 0) & 0xFF;
-            let g = (bgra >> 8) & 0xFF;
-            let r = (bgra >> 16) & 0xFF;
-            *px = 0xFF000000 | (r << 16) | (g << 8) | b;
-        }
-
         SelectObject(hdc_mem, old);
         let _ = DeleteObject(hbmp);
         let _ = DeleteDC(hdc_mem);
-        ReleaseDC(HWND::default(), hdc_screen);
+        ReleaseDC(hwnd, hdc_screen);
 
         Ok(Either::A(Uint32Array::new(buf)))
     }
@@ -483,10 +478,38 @@ pub fn screen_grab_screen(
 pub fn screen_grab_screen(
     env: Env,
     x: i32, y: i32, w: i32, h: i32,
-    _window_handle: Option<f64>,
+    window_handle: Option<f64>,
 ) -> Result<Either<Uint32Array, napi::JsNull>> {
     use core_graphics::display::*;
     use core_graphics::geometry::{CGPoint, CGSize, CGRect};
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGBitmapContextCreate(
+            data: *mut std::ffi::c_void,
+            width: usize,
+            height: usize,
+            bits_per_component: usize,
+            bytes_per_row: usize,
+            space: *mut std::ffi::c_void,
+            bitmap_info: u32,
+        ) -> *mut std::ffi::c_void;
+        fn CGContextDrawImage(
+            context: *mut std::ffi::c_void,
+            rect: CGRect,
+            image: *mut std::ffi::c_void,
+        );
+        fn CGContextFlush(context: *mut std::ffi::c_void);
+        fn CGContextRelease(context: *mut std::ffi::c_void);
+        fn CGColorSpaceCreateDeviceRGB() -> *mut std::ffi::c_void;
+        fn CGColorSpaceRelease(space: *mut std::ffi::c_void);
+    }
+
+    // kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst
+    #[cfg(target_endian = "little")]
+    const BITMAP_INFO: u32 = (2 << 12) | 2; // kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst
+    #[cfg(target_endian = "big")]
+    const BITMAP_INFO: u32 = (4 << 12) | 2; // kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedFirst
 
     if w <= 0 || h <= 0 {
         return Ok(Either::B(env.get_null()?));
@@ -497,11 +520,23 @@ pub fn screen_grab_screen(
         &CGSize::new(w as f64, h as f64),
     );
 
+    // Determine window ID and capture option
+    let window_id = window_handle
+        .filter(|&h| h != 0.0)
+        .map(|h| h as u32)
+        .unwrap_or(kCGNullWindowID);
+
+    let list_option = if window_id != kCGNullWindowID {
+        kCGWindowListOptionIncludingWindow
+    } else {
+        kCGWindowListOptionOnScreenOnly
+    };
+
     let image = CGDisplay::screenshot(
         rect,
-        kCGWindowListOptionOnScreenOnly,
-        kCGNullWindowID,
-        kCGWindowImageDefault,
+        list_option,
+        window_id,
+        kCGWindowImageBoundsIgnoreFraming,
     );
 
     let image = match image {
@@ -515,24 +550,40 @@ pub fn screen_grab_screen(
         return Ok(Either::B(env.get_null()?));
     }
 
-    let bpr = image.bytes_per_row();
-    let data = image.data();
-    let ptr = data.bytes().as_ptr();
-    let bpp = image.bits_per_pixel() / 8;
-
+    // Use CGBitmapContextCreate + CGContextDrawImage to extract pixels,
+    // matching the C++ implementation exactly.
     let len = iw * ih;
     let mut pixels = vec![0u32; len];
 
-    for row in 0..ih {
-        for col in 0..iw {
-            let offset = row * bpr + col * bpp;
-            // Core Graphics uses BGRA format
-            let b = unsafe { *ptr.add(offset) } as u32;
-            let g = unsafe { *ptr.add(offset + 1) } as u32;
-            let r = unsafe { *ptr.add(offset + 2) } as u32;
-            let a = unsafe { *ptr.add(offset + 3) } as u32;
-            pixels[row * iw + col] = (a << 24) | (r << 16) | (g << 8) | b;
+    unsafe {
+        let color_space = CGColorSpaceCreateDeviceRGB();
+        let context = CGBitmapContextCreate(
+            pixels.as_mut_ptr() as *mut std::ffi::c_void,
+            iw,
+            ih,
+            8,
+            iw * 4,
+            color_space,
+            BITMAP_INFO,
+        );
+        CGColorSpaceRelease(color_space);
+
+        if context.is_null() {
+            return Ok(Either::B(env.get_null()?));
         }
+
+        let draw_rect = CGRect::new(
+            &CGPoint::new(0.0, 0.0),
+            &CGSize::new(iw as f64, ih as f64),
+        );
+
+        // CGImage is stored as a CFType; get the raw pointer for FFI
+        use core_foundation::base::TCFType;
+        let img_ref = image.as_concrete_TypeRef() as *mut std::ffi::c_void;
+
+        CGContextDrawImage(context, draw_rect, img_ref);
+        CGContextFlush(context);
+        CGContextRelease(context);
     }
 
     Ok(Either::A(Uint32Array::new(pixels)))
