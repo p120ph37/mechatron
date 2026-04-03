@@ -482,10 +482,60 @@ pub fn screen_grab_screen(
 #[napi(js_name = "screen_grabScreen")]
 pub fn screen_grab_screen(
     env: Env,
-    _x: i32, _y: i32, _w: i32, _h: i32,
+    x: i32, y: i32, w: i32, h: i32,
     _window_handle: Option<f64>,
 ) -> Result<Either<Uint32Array, napi::JsNull>> {
-    Ok(Either::B(env.get_null()?))
+    use core_graphics::display::*;
+    use core_graphics::geometry::{CGPoint, CGSize, CGRect};
+
+    if w <= 0 || h <= 0 {
+        return Ok(Either::B(env.get_null()?));
+    }
+
+    let rect = CGRect::new(
+        &CGPoint::new(x as f64, y as f64),
+        &CGSize::new(w as f64, h as f64),
+    );
+
+    let image = CGDisplay::screenshot(
+        rect,
+        kCGWindowListOptionOnScreenOnly,
+        kCGNullWindowID,
+        kCGWindowImageDefault,
+    );
+
+    let image = match image {
+        Some(img) => img,
+        None => return Ok(Either::B(env.get_null()?)),
+    };
+
+    let iw = image.width();
+    let ih = image.height();
+    if iw == 0 || ih == 0 {
+        return Ok(Either::B(env.get_null()?));
+    }
+
+    let bpr = image.bytes_per_row();
+    let data = image.data();
+    let ptr = data.bytes().as_ptr();
+    let bpp = image.bits_per_pixel() / 8;
+
+    let len = iw * ih;
+    let mut pixels = vec![0u32; len];
+
+    for row in 0..ih {
+        for col in 0..iw {
+            let offset = row * bpr + col * bpp;
+            // Core Graphics uses BGRA format
+            let b = unsafe { *ptr.add(offset) } as u32;
+            let g = unsafe { *ptr.add(offset + 1) } as u32;
+            let r = unsafe { *ptr.add(offset + 2) } as u32;
+            let a = unsafe { *ptr.add(offset + 3) } as u32;
+            pixels[row * iw + col] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+    }
+
+    Ok(Either::A(Uint32Array::new(pixels)))
 }
 
 // =============================================================================
