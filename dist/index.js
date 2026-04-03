@@ -799,6 +799,13 @@ class Process {
   getPID() {
     return this._pid;
   }
+  getHandle() {
+    const native = getNative3();
+    if (typeof native.process_getHandle === "function") {
+      return native.process_getHandle(this._pid);
+    }
+    return 0;
+  }
   getName() {
     return getNative3().process_getName(this._pid);
   }
@@ -2038,10 +2045,10 @@ var Clipboard = {
     return getNative().clipboard_hasImage();
   },
   getImage(image) {
-    image.destroy();
     const result = getNative().clipboard_getImage();
     if (!result)
       return false;
+    image.destroy();
     image.create(result.width, result.height);
     const data = image.getData();
     if (data)

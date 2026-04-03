@@ -71,6 +71,7 @@ export interface NativeBackend {
   process_is64Bit(pid: number): boolean;
   process_isDebugged(pid: number): boolean;
   process_getPID(pid: number): number;
+  process_getHandle(pid: number): number;
   process_getName(pid: number): string;
   process_getPath(pid: number): string;
   process_exit(pid: number): void;

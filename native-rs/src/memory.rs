@@ -493,11 +493,53 @@ pub fn memory_set_access_flags(_pid: i32, _region_start: f64, _flags: u32) -> bo
 
 #[cfg(target_os = "windows")]
 #[napi(js_name = "memory_setAccess")]
-pub fn memory_set_access(_pid: i32, _region_start: f64, _readable: bool, _writable: bool, _executable: bool) -> bool { false }
+pub fn memory_set_access(pid: i32, region_start: f64, readable: bool, writable: bool, executable: bool) -> bool {
+    // Convert bool flags to PAGE_* constants matching C++
+    let access: u32 = if executable {
+        if writable {
+            PAGE_EXECUTE_READWRITE.0
+        } else if readable {
+            PAGE_EXECUTE_READ.0
+        } else {
+            PAGE_EXECUTE.0
+        }
+    } else if writable {
+        PAGE_READWRITE.0
+    } else if readable {
+        PAGE_READONLY.0
+    } else {
+        PAGE_NOACCESS.0
+    };
+    memory_set_access_flags(pid, region_start, access)
+}
 
 #[cfg(target_os = "windows")]
 #[napi(js_name = "memory_setAccessFlags")]
-pub fn memory_set_access_flags(_pid: i32, _region_start: f64, _flags: u32) -> bool { false }
+pub fn memory_set_access_flags(pid: i32, region_start: f64, flags: u32) -> bool {
+    let h = match win_open_proc(pid, PROCESS_VM_OPERATION) {
+        Some(h) => h,
+        None => return false,
+    };
+    // Get region info to know the size
+    unsafe {
+        let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+        let ret = VirtualQueryEx(h, Some(region_start as u64 as usize as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
+        if ret == 0 || mbi.State != MEM_COMMIT {
+            let _ = CloseHandle(h);
+            return false;
+        }
+        let mut old_protect: PAGE_PROTECTION_FLAGS = PAGE_PROTECTION_FLAGS(0);
+        let result = VirtualProtectEx(
+            h,
+            mbi.BaseAddress as *const _,
+            mbi.RegionSize,
+            PAGE_PROTECTION_FLAGS(flags),
+            &mut old_protect,
+        );
+        let _ = CloseHandle(h);
+        result.is_ok()
+    }
+}
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "memory_setAccess")]

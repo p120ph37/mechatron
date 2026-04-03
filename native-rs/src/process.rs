@@ -482,6 +482,33 @@ pub fn process_get_pid(pid: i32) -> f64 {
     pid as f64
 }
 
+// ── process_getHandle ───────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "process_getHandle")]
+pub fn process_get_handle(_pid: i32) -> f64 {
+    0.0
+}
+
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_getHandle")]
+pub fn process_get_handle(pid: i32) -> f64 {
+    // Return process handle; caller should note this is a snapshot
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
+        let val = h.0 as u64 as f64;
+        unsafe { let _ = CloseHandle(h); }
+        val
+    } else {
+        0.0
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "process_getHandle")]
+pub fn process_get_handle(pid: i32) -> f64 {
+    mac_get_task(pid) as f64
+}
+
 // ── process_getName ─────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]

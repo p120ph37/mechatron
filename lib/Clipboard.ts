@@ -29,9 +29,9 @@ export const Clipboard = {
   },
 
   getImage(image: Image): boolean {
-    image.destroy();
     const result = getNative().clipboard_getImage();
     if (!result) return false;
+    image.destroy();
     image.create(result.width, result.height);
     const data = image.getData();
     if (data) data.set(result.data);
