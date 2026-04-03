@@ -183,6 +183,7 @@ fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
 // ==================== macOS ====================
 
 #[cfg(target_os = "macos")]
+#[allow(non_upper_case_globals)]
 mod mac {
     use std::ffi::c_void;
     pub type CGEventSourceRef = *mut c_void;

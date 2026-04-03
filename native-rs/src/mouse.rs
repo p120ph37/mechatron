@@ -12,7 +12,9 @@ use crate::timer::timer_sleep_range;
 const BUTTON_LEFT: i32 = 0;
 const BUTTON_MID: i32 = 1;
 const BUTTON_RIGHT: i32 = 2;
+#[cfg(not(target_os = "macos"))]
 const BUTTON_X1: i32 = 3;
+#[cfg(not(target_os = "macos"))]
 const BUTTON_X2: i32 = 4;
 
 // ==================== Linux ====================
@@ -197,6 +199,7 @@ fn platform_get_button_state(button: i32) -> bool {
 // ==================== macOS ====================
 
 #[cfg(target_os = "macos")]
+#[allow(non_upper_case_globals)]
 mod mac {
     use std::ffi::c_void;
     pub type CGEventSourceRef = *mut c_void;
