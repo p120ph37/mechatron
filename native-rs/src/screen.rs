@@ -278,18 +278,20 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
     use objc2_app_kit::NSScreen;
-    use objc2_foundation::NSArray;
+    use objc2::MainThreadMarker;
 
     unsafe {
-        let screens: objc2::rc::Retained<NSArray<NSScreen>> = NSScreen::screens();
-        if screens.count() == 0 {
+        let mtm = MainThreadMarker::new_unchecked();
+        let screens = NSScreen::screens(mtm);
+        let count = screens.count();
+        if count == 0 {
             return Ok(Either::B(env.get_null()?));
         }
 
-        let mut arr = env.create_array(screens.count() as u32)?;
+        let mut arr = env.create_array(count as u32)?;
 
-        for i in 0..screens.count() {
-            let screen = &screens[i];
+        for i in 0..count {
+            let screen = screens.objectAtIndex(i);
             let frame = screen.frame();
             let visible = screen.visibleFrame();
 

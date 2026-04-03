@@ -60,6 +60,8 @@ fn platform_get_sequence() -> f64 {
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSPasteboard;
 #[cfg(target_os = "macos")]
+use objc2::AnyThread;
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSCopying, NSString};
 
 #[cfg(target_os = "macos")]
@@ -221,7 +223,7 @@ fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
 
         let board = NSPasteboard::generalPasteboard();
         board.clearContents();
-        board.setData_forType(&tiff, pasteboard_type_tiff())
+        board.setData_forType(Some(&tiff), pasteboard_type_tiff())
     }
 }
 
