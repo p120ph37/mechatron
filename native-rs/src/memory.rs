@@ -818,54 +818,348 @@ pub fn memory_find(
     Ok(arr.coerce_to_object()?)
 }
 
+// ── Flags constants ────────────────────────────────────────────────────
+
+const FLAG_DEFAULT: i32 = 0;
+#[allow(dead_code)]
+const FLAG_SKIP_ERRORS: i32 = 1;
+const FLAG_AUTO_ACCESS: i32 = 2;
+
 // ── memory_readData ─────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
 #[napi(js_name = "memory_readData")]
-pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, _flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
-    let mut buf = vec![0u8; length as usize];
-    let read = read_process_memory(pid, address as u64, &mut buf);
-    if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
+    let addr = address as u64;
+    let len = length as usize;
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+
+    if f == FLAG_DEFAULT {
+        let mut buf = vec![0u8; len];
+        let read = read_process_memory(pid, addr, &mut buf);
+        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+    }
+
+    // SkipErrors or AutoAccess: iterate region by region
+    let mut buf = vec![0u8; len];
+    let stop = addr + len as u64;
+    let regions = parse_maps(pid);
+    let mut bytes: usize = 0;
+    let mut region_idx = 0;
+    let mut a = addr;
+
+    while a < stop && region_idx < regions.len() {
+        // Find region containing address a
+        while region_idx < regions.len() && regions[region_idx].stop <= a { region_idx += 1; }
+        if region_idx >= regions.len() { break; }
+        let region = &regions[region_idx];
+        if region.start > a {
+            // Gap: fill with zeros (already zeroed), advance to region start
+            let gap_end = region.start.min(stop);
+            bytes += (gap_end - a) as usize;
+            a = gap_end;
+            continue;
+        }
+
+        let region_len = (region.stop.min(stop) - a) as usize;
+        let offset = (a - addr) as usize;
+        let readable = region.readable;
+
+        // AutoAccess: no protection change available on Linux
+        if readable {
+            let _ = read_process_memory(pid, a, &mut buf[offset..offset + region_len]);
+        }
+        // else: already zeroed
+
+        bytes += region_len;
+        a = region.stop.min(stop);
+        region_idx += 1;
+    }
+    // Fill remaining gap
+    bytes += (stop.saturating_sub(a)) as usize;
+
+    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 #[cfg(target_os = "windows")]
 #[napi(js_name = "memory_readData")]
-pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, _flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
-    let mut buf = vec![0u8; length as usize];
-    let read = win_read_memory(pid, address as u64, &mut buf);
-    if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
+    let addr = address as u64;
+    let len = length as usize;
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+
+    if f == FLAG_DEFAULT {
+        let mut buf = vec![0u8; len];
+        let read = win_read_memory(pid, addr, &mut buf);
+        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+    }
+
+    // SkipErrors or AutoAccess: iterate region by region
+    let mut buf = vec![0u8; len];
+    let stop = addr + len as u64;
+    let regions = win_query_regions(pid, addr, stop);
+    let mut bytes: usize = 0;
+    let mut a = addr;
+
+    for region in &regions {
+        if a >= stop { break; }
+        // Fill gap before this region
+        if region.start > a {
+            let gap_end = region.start.min(stop);
+            bytes += (gap_end - a) as usize;
+            a = gap_end;
+        }
+        if a >= stop { break; }
+
+        let region_len = (region.stop.min(stop) - a) as usize;
+        let offset = (a - addr) as usize;
+        let mut readable = region.readable;
+
+        // AutoAccess: temporarily make readable
+        if !readable && f == FLAG_AUTO_ACCESS {
+            let h = win_open_proc(pid, PROCESS_VM_OPERATION);
+            if let Some(h) = h {
+                unsafe {
+                    let mut old = PAGE_PROTECTION_FLAGS(0);
+                    if VirtualProtectEx(h, a as usize as *const _, region_len, PAGE_READONLY, &mut old).is_ok() {
+                        readable = true;
+                        let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+                        let _ = VirtualProtectEx(h, a as usize as *const _, region_len, old, &mut old);
+                    }
+                    let _ = CloseHandle(h);
+                }
+            }
+        }
+
+        if readable && f != FLAG_AUTO_ACCESS {
+            let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+        }
+        // For AutoAccess with readable regions, just read normally
+        if readable && f == FLAG_AUTO_ACCESS && region.readable {
+            let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+        }
+        // else: already zeroed for SkipErrors
+
+        bytes += region_len;
+        a = region.stop.min(stop);
+    }
+    bytes += (stop.saturating_sub(a)) as usize;
+
+    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "memory_readData")]
-pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, _flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
+pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
     let task = mac_get_task(pid);
     if task == 0 { return Ok(Either::B(env.get_null()?)); }
-    let mut buf = vec![0u8; length as usize];
-    let read = mac_read_memory(task, address as u64, &mut buf);
-    if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+
+    let addr = address as u64;
+    let len = length as usize;
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+
+    if f == FLAG_DEFAULT {
+        let mut buf = vec![0u8; len];
+        let read = mac_read_memory(task, addr, &mut buf);
+        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+    }
+
+    // SkipErrors or AutoAccess: iterate region by region
+    let mut buf = vec![0u8; len];
+    let stop = addr + len as u64;
+    let mut bytes: usize = 0;
+    let mut a = addr;
+
+    loop {
+        if a >= stop { break; }
+        let region = mac_get_region(task, a);
+        if !region.valid { break; }
+
+        if !region.bound {
+            // Gap: fill with zeros, advance
+            let gap_end = region.stop.min(stop);
+            bytes += (gap_end - a) as usize;
+            a = gap_end;
+            continue;
+        }
+
+        let region_len = (region.stop.min(stop) - a) as usize;
+        let offset = (a - addr) as usize;
+        let mut readable = region.readable;
+
+        // AutoAccess: temporarily make readable via mach_vm_protect
+        if !readable && f == FLAG_AUTO_ACCESS {
+            unsafe {
+                if mach_vm_protect(task, region.start, region.size, 0, VM_PROT_READ) == 0 {
+                    readable = true;
+                    let _ = mac_read_memory(task, a, &mut buf[offset..offset + region_len]);
+                    // Restore original access
+                    let _ = mach_vm_protect(task, region.start, region.size, 0, region.access as i32);
+                }
+            }
+        }
+
+        if readable && !(f == FLAG_AUTO_ACCESS && !region.readable) {
+            let _ = mac_read_memory(task, a, &mut buf[offset..offset + region_len]);
+        }
+        // else: already zeroed for SkipErrors
+
+        bytes += region_len;
+        a = region.stop.min(stop);
+        if a == 0 { break; }
+    }
+    bytes += (stop.saturating_sub(a)) as usize;
+
+    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 // ── memory_writeData ────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
 #[napi(js_name = "memory_writeData")]
-pub fn memory_write_data(pid: i32, address: f64, data: Buffer, _flags: Option<i32>) -> f64 {
-    write_process_memory(pid, address as u64, &data) as f64
+pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32>) -> f64 {
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+    if f == FLAG_DEFAULT {
+        return write_process_memory(pid, address as u64, &data) as f64;
+    }
+
+    // SkipErrors or AutoAccess: iterate region by region
+    let addr = address as u64;
+    let len = data.len();
+    let stop = addr + len as u64;
+    let regions = parse_maps(pid);
+    let mut bytes: usize = 0;
+    let mut a = addr;
+
+    for region in &regions {
+        if a >= stop { break; }
+        if region.stop <= a { continue; }
+        if region.start > a {
+            let gap_end = region.start.min(stop);
+            bytes += (gap_end - a) as usize;
+            a = gap_end;
+        }
+        if a >= stop { break; }
+        let region_len = (region.stop.min(stop) - a) as usize;
+        let offset = (a - addr) as usize;
+        // Linux: no SetAccess available, just write if writable
+        if region.writable {
+            let _ = write_process_memory(pid, a, &data[offset..offset + region_len]);
+        }
+        bytes += region_len;
+        a = region.stop.min(stop);
+    }
+    bytes += (stop.saturating_sub(a)) as usize;
+    bytes as f64
 }
 
 #[cfg(target_os = "windows")]
 #[napi(js_name = "memory_writeData")]
-pub fn memory_write_data(pid: i32, address: f64, data: Buffer, _flags: Option<i32>) -> f64 {
-    win_write_memory(pid, address as u64, &data) as f64
+pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32>) -> f64 {
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+    if f == FLAG_DEFAULT {
+        return win_write_memory(pid, address as u64, &data) as f64;
+    }
+
+    let addr = address as u64;
+    let len = data.len();
+    let stop = addr + len as u64;
+    let regions = win_query_regions(pid, addr, stop);
+    let mut bytes: usize = 0;
+    let mut a = addr;
+
+    for region in &regions {
+        if a >= stop { break; }
+        if region.start > a {
+            let gap_end = region.start.min(stop);
+            bytes += (gap_end - a) as usize;
+            a = gap_end;
+        }
+        if a >= stop { break; }
+        let region_len = (region.stop.min(stop) - a) as usize;
+        let offset = (a - addr) as usize;
+        let mut writable = region.writable;
+
+        if !writable && f == FLAG_AUTO_ACCESS {
+            let h = win_open_proc(pid, PROCESS_VM_OPERATION);
+            if let Some(h) = h {
+                unsafe {
+                    let mut old = PAGE_PROTECTION_FLAGS(0);
+                    if VirtualProtectEx(h, a as usize as *const _, region_len, PAGE_READWRITE, &mut old).is_ok() {
+                        writable = true;
+                        let _ = win_write_memory(pid, a, &data[offset..offset + region_len]);
+                        let _ = VirtualProtectEx(h, a as usize as *const _, region_len, old, &mut old);
+                    }
+                    let _ = CloseHandle(h);
+                }
+            }
+        }
+
+        if writable && !(f == FLAG_AUTO_ACCESS && !region.writable) {
+            let _ = win_write_memory(pid, a, &data[offset..offset + region_len]);
+        }
+
+        bytes += region_len;
+        a = region.stop.min(stop);
+    }
+    bytes += (stop.saturating_sub(a)) as usize;
+    bytes as f64
 }
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "memory_writeData")]
-pub fn memory_write_data(pid: i32, address: f64, data: Buffer, _flags: Option<i32>) -> f64 {
+pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32>) -> f64 {
     let task = mac_get_task(pid);
     if task == 0 { return 0.0; }
-    mac_write_memory(task, address as u64, &data) as f64
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+
+    if f == FLAG_DEFAULT {
+        return mac_write_memory(task, address as u64, &data) as f64;
+    }
+
+    let addr = address as u64;
+    let len = data.len();
+    let stop = addr + len as u64;
+    let mut bytes: usize = 0;
+    let mut a = addr;
+
+    loop {
+        if a >= stop { break; }
+        let region = mac_get_region(task, a);
+        if !region.valid { break; }
+
+        if !region.bound {
+            let gap_end = region.stop.min(stop);
+            bytes += (gap_end - a) as usize;
+            a = gap_end;
+            continue;
+        }
+
+        let region_len = (region.stop.min(stop) - a) as usize;
+        let offset = (a - addr) as usize;
+        let mut writable = region.writable;
+
+        if !writable && f == FLAG_AUTO_ACCESS {
+            unsafe {
+                let new_prot = VM_PROT_READ | VM_PROT_WRITE | if region.executable { VM_PROT_EXECUTE } else { 0 };
+                if mach_vm_protect(task, region.start, region.size, 0, new_prot) == 0 {
+                    writable = true;
+                    let _ = mac_write_memory(task, a, &data[offset..offset + region_len]);
+                    let _ = mach_vm_protect(task, region.start, region.size, 0, region.access as i32);
+                }
+            }
+        }
+
+        if writable && !(f == FLAG_AUTO_ACCESS && !region.writable) {
+            let _ = mac_write_memory(task, a, &data[offset..offset + region_len]);
+        }
+
+        bytes += region_len;
+        a = region.stop.min(stop);
+        if a == 0 { break; }
+    }
+    bytes += (stop.saturating_sub(a)) as usize;
+    bytes as f64
 }
 
 // ── Cache operations (stubs on all platforms) ───────────────────────────
