@@ -52,15 +52,21 @@ export class Screen {
 
   // --- Static state ---
   private static _screens: Screen[] = [];
+  private static _totalBounds: Bounds = new Bounds();
+  private static _totalUsable: Bounds = new Bounds();
 
   static synchronize(): boolean {
     const result = getNative().screen_synchronize();
     if (!result) return false;
-    Screen._screens = result.map((s) => {
+    Screen._screens = result.screens.map((s) => {
       const bounds = new Bounds(s.bounds.x, s.bounds.y, s.bounds.w, s.bounds.h);
       const usable = new Bounds(s.usable.x, s.usable.y, s.usable.w, s.usable.h);
       return new Screen(bounds, usable);
     });
+    const tb = result.totalBounds;
+    Screen._totalBounds = new Bounds(tb.x, tb.y, tb.w, tb.h);
+    const tu = result.totalUsable;
+    Screen._totalUsable = new Bounds(tu.x, tu.y, tu.w, tu.h);
     return true;
   }
 
@@ -131,13 +137,11 @@ export class Screen {
   }
 
   static getTotalBounds(): Bounds {
-    const b = getNative().screen_getTotalBounds();
-    return new Bounds(b.x, b.y, b.w, b.h);
+    return Screen._totalBounds.clone();
   }
 
   static getTotalUsable(): Bounds {
-    const u = getNative().screen_getTotalUsable();
-    return new Bounds(u.x, u.y, u.w, u.h);
+    return Screen._totalUsable.clone();
   }
 
   static isCompositing(): boolean {

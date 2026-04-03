@@ -2105,15 +2105,21 @@ class Screen {
     return new Screen(this._bounds.clone(), this._usable.clone());
   }
   static _screens = [];
+  static _totalBounds = new Bounds;
+  static _totalUsable = new Bounds;
   static synchronize() {
     const result = getNative2().screen_synchronize();
     if (!result)
       return false;
-    Screen._screens = result.map((s) => {
+    Screen._screens = result.screens.map((s) => {
       const bounds = new Bounds(s.bounds.x, s.bounds.y, s.bounds.w, s.bounds.h);
       const usable = new Bounds(s.usable.x, s.usable.y, s.usable.w, s.usable.h);
       return new Screen(bounds, usable);
     });
+    const tb = result.totalBounds;
+    Screen._totalBounds = new Bounds(tb.x, tb.y, tb.w, tb.h);
+    const tu = result.totalUsable;
+    Screen._totalUsable = new Bounds(tu.x, tu.y, tu.w, tu.h);
     return true;
   }
   static getMain() {
@@ -2180,12 +2186,10 @@ class Screen {
     return;
   }
   static getTotalBounds() {
-    const b = getNative2().screen_getTotalBounds();
-    return new Bounds(b.x, b.y, b.w, b.h);
+    return Screen._totalBounds.clone();
   }
   static getTotalUsable() {
-    const u = getNative2().screen_getTotalUsable();
-    return new Bounds(u.x, u.y, u.w, u.h);
+    return Screen._totalUsable.clone();
   }
   static isCompositing() {
     return getNative2().screen_isCompositing();
