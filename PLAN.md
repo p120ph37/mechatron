@@ -58,34 +58,58 @@ The core platform abstraction layer is unchanged:
 
 ---
 
-## Phase 2: Rust NAPI Rewrite (PLANNED)
+## Phase 2: Rust NAPI Rewrite (COMPLETE)
 
-Replace the C++ native layer with Rust using `napi-rs`.
+Replaced the C++ native layer with Rust using `napi-rs`, maintaining full
+behavioral parity with the original robot-js documented APIs.
 
-### Motivation
-- Memory safety without manual `new`/`delete` or prevent-copy patterns
-- `napi-rs` provides ergonomic N-API bindings with automatic type marshalling
-- Cargo/crate ecosystem for platform APIs (e.g. `windows`, `core-graphics`,
-  `x11rb`) replaces hand-rolled platform `#ifdef` blocks
-- `napi-rs` has first-class `prebuildify`-compatible cross-compilation and
-  GitHub Actions integration (`napi-rs/napi-rs` build matrix)
-- Easier to add new platform support and maintain existing code
+### Implementation
+- `native-rs/` — Cargo workspace with napi-rs v2 `#[napi]` attribute macros
+- `native-rs/src/` — Rust source modules: `keyboard.rs`, `mouse.rs`,
+  `clipboard.rs`, `screen.rs`, `window.rs`, `process.rs`, `memory.rs`
+- Platform-specific code via `#[cfg(target_os = "...")]` guards
+- Windows: `windows` crate v0.58
+- macOS: `objc2`, `objc2-app-kit`, `objc2-core-graphics`, `objc2-core-foundation`,
+  Mach VM APIs via raw `extern "C"` FFI
+- Linux: X11/Xinerama via raw FFI, `/proc` filesystem
 
-### Approach
-1. Create `src-rs/` (or a Cargo workspace) alongside existing `src/`
-2. Port `src/robot/` platform abstraction to Rust crate(s)
-3. Port `src/native/` NAPI bindings to `napi-rs` `#[napi]` exports
-4. Update build scripts: `@napi-rs/cli` replaces cmake-js/node-gyp
-5. Verify identical behaviour via existing `test/test-ci.js` (no test changes)
-6. Remove C++ source (`src/robot/`, `src/native/`, old adapters)
-7. Remove cmake-js, node-gyp, node-addon-api dependencies
+### Backend Selection
+Rust is the default backend.  `lib/native.ts` loads the Rust `.node` binary
+first, falling back to the C++ addon (via `node-gyp-build`) if the Rust binary
+is not available.
 
-### Build Tooling Changes
-- `Cargo.toml` + `@napi-rs/cli` replace `CMakeLists.txt` + `binding.gyp`
-- `npm run build` invokes `napi build --platform` instead of `prebuildify`
-- Prebuilt `.node` binaries generated per-platform via `napi-rs` CI template
-- The TypeScript wrapper layer (`lib/`) and bundled output (`dist/`) remain
-  unchanged — only the `.node` binary interface is reimplemented
+### What Was Ported
+All subsystems with full parity to the robot-js documented API:
+- **Keyboard**: click, press, release, compile, getState, getKeyState
+- **Mouse**: click, press, release, scrollH/V, getPos, setPos, getState
+- **Clipboard**: clear, hasText, getText, setText, hasImage, getImage, setImage,
+  getSequence
+- **Screen**: synchronize, grabScreen, isCompositing, setCompositing,
+  getTotalBounds, getTotalUsable (with window-relative capture support)
+- **Window**: full CRUD — isValid, close, topMost/borderless/minimized/maximized,
+  getProcess, getTitle/setTitle, getBounds/setBounds, getClient/setClient,
+  mapToClient/mapToScreen, getList, getActive/setActive, isAxEnabled
+- **Process**: open, close, isValid, is64Bit, isDebugged, getName, getPath,
+  getHandle, exit, kill, hasExited, getModules, getWindows, getList,
+  getCurrent, isSys64Bit, getSegments
+- **Memory**: isValid, getRegion, getRegions, setAccess (bool and flags),
+  getPtrSize, getMinAddress, getMaxAddress, getPageSize, find, readData,
+  writeData (with SKIP_ERRORS and AUTO_ACCESS flag support)
+
+### Intentionally Not Implemented
+- **Memory caching** (`createCache`/`clearCache`/`deleteCache`/`isCaching`/
+  `getCacheSize`): Per original documentation — "Caching should not be enabled
+  as it will result in a large memory overhead."  High complexity, limited
+  utility.  The TS layer stubs these to no-op/defaults.
+- **Memory stats** (`getStats`): The C++ adapter creates a new `Robot::Memory`
+  object per native call, making stats always zero.  The TS layer returns an
+  empty `Stats` object, matching effective C++ behavior.
+- **getHandleAx**: Not implemented in the original robot-js Node layer.
+
+### C++ Backend Retained
+The C++ backend (`src/native/`, `src/robot/`) is retained in this revision for
+comparison and cross-analysis.  Future revisions will remove it as the project
+moves toward a napi-rs and bun-FFI-centric design.
 
 ---
 
@@ -153,6 +177,6 @@ what they need:
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1 | **Complete** | C++ NAPI port, flat backend, CI on 6 platforms |
-| 2 | Planned | Rust NAPI rewrite via napi-rs |
+| 2 | **Complete** | Rust NAPI rewrite via napi-rs, full robot-js API parity |
 | 3 | Planned | mechatron-robot-js compatibility shim |
 | 4 | Planned | API modernization + modular package split |

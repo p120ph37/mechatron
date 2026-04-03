@@ -53,6 +53,14 @@ export class Process {
     return this._pid;
   }
 
+  getHandle(): number {
+    const native = getNative();
+    if (typeof native.process_getHandle === "function") {
+      return native.process_getHandle(this._pid);
+    }
+    return 0;
+  }
+
   getName(): string {
     return getNative().process_getName(this._pid);
   }

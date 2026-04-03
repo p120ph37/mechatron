@@ -7,12 +7,154 @@
 //  Uses the module itself as the counterpart (e.g. set clipboard, then       //
 //  read it back; press a key, then check getState).                          //
 //                                                                            //
+//  Usage:                                                                    //
+//    node test-ci.js [tests...] [--backend cpp|rust]                         //
+//                                                                            //
+//  When --backend is omitted, runs ALL available backends automatically      //
+//  as child processes and reports combined results.                           //
+//                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
 
 "use strict";
 
-var mRobot = require ("..");
+//----------------------------------------------------------------------------//
+// Backend selection & dual-backend runner                                     //
+//----------------------------------------------------------------------------//
+
+var _allArgs = process.argv.slice (2);
+var _backendIdx = _allArgs.indexOf ("--backend");
+var _backendArg = (_backendIdx >= 0) ? _allArgs[_backendIdx + 1] : null;
+// Remove --backend and its value from the test filter args
+var _testArgs = _allArgs.filter (function (_, i) {
+	return i !== _backendIdx && i !== _backendIdx + 1;
+});
+
+// When no --backend specified, run as dual-backend coordinator
+if (!_backendArg)
+{
+	var _child_process = require ("child_process");
+	var _path = require ("path");
+
+	// Discover which backends are available on this platform
+	var _backends = [];
+
+	// Probe C++ backend
+	try {
+		require ("node-gyp-build")(_path.resolve (__dirname, ".."));
+		_backends.push ("cpp");
+	} catch (_) {
+		process.stdout.write ("  [skip] C++ backend not available\n");
+	}
+
+	// Probe Rust backend — resolve the correct .node filename per platform
+	var _rustNodeFile = (function () {
+		var platform = process.platform;
+		var arch = process.arch;
+		var map = {
+			"linux-x64":    "mechatron-native.linux-x64-gnu.node",
+			"linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
+			"darwin-x64":   "mechatron-native.darwin-x64.node",
+			"darwin-arm64": "mechatron-native.darwin-arm64.node",
+			"win32-x64":    "mechatron-native.win32-x64-msvc.node",
+			"win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
+		};
+		return map[platform + "-" + arch] || ("mechatron-native." + platform + "-" + arch + ".node");
+	})();
+
+	try {
+		require (_path.resolve (__dirname, "..", "native-rs", _rustNodeFile));
+		_backends.push ("rust");
+	} catch (_) {
+		process.stdout.write ("  [skip] Rust backend not available (" + _rustNodeFile + ")\n");
+	}
+
+	if (_backends.length === 0)
+	{
+		process.stdout.write ("\nERROR: No backends available to test!\n");
+		process.exitCode = 2;
+	}
+	else
+	{
+		var _overallFailed = false;
+		process.stdout.write ("\n==============================\n");
+		process.stdout.write ("DUAL-BACKEND CI TEST RUNNER\n");
+		process.stdout.write ("Backends: " + _backends.join (", ") + "\n");
+		process.stdout.write ("==============================\n");
+
+		for (var _bi = 0; _bi < _backends.length; ++_bi)
+		{
+			var _be = _backends[_bi];
+			process.stdout.write ("\n>>> Running tests with " + _be.toUpperCase () + " backend...\n");
+
+			var _childArgs = [__filename].concat (_testArgs).concat (["--backend", _be]);
+			var _result = _child_process.spawnSync (process.execPath, _childArgs, {
+				stdio: "inherit",
+				env: process.env,
+				cwd: _path.resolve (__dirname, ".."),
+				timeout: 120000,
+			});
+
+			if (_result.status !== 0)
+			{
+				_overallFailed = true;
+				process.stdout.write (">>> " + _be.toUpperCase () + " backend: FAILED (exit " + _result.status + ")\n");
+			}
+			else
+			{
+				process.stdout.write (">>> " + _be.toUpperCase () + " backend: PASSED\n");
+			}
+		}
+
+		process.stdout.write ("\n==============================\n");
+		if (_overallFailed)
+		{
+			process.stdout.write ("DUAL-BACKEND RESULT: SOME BACKENDS FAILED\n");
+			process.exitCode = 2;
+		}
+		else
+		{
+			process.stdout.write ("DUAL-BACKEND RESULT: ALL BACKENDS PASSED\n");
+		}
+		process.stdout.write ("==============================\n\n");
+	}
+	// Do NOT fall through to the test code — we're the coordinator process
+	return;
+}
+
+// --backend was specified — force the requested backend before loading mRobot
+var _path = require ("path");
+if (_backendArg === "cpp")
+{
+	var _cppAddon = require ("node-gyp-build")(_path.resolve (__dirname, ".."));
+	var mRobot = require ("..");
+	mRobot.setNativeBackend (_cppAddon);
+}
+else if (_backendArg === "rust")
+{
+	var _rustFile = (function () {
+		var platform = process.platform;
+		var arch = process.arch;
+		var map = {
+			"linux-x64":    "mechatron-native.linux-x64-gnu.node",
+			"linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
+			"darwin-x64":   "mechatron-native.darwin-x64.node",
+			"darwin-arm64": "mechatron-native.darwin-arm64.node",
+			"win32-x64":    "mechatron-native.win32-x64-msvc.node",
+			"win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
+		};
+		return map[platform + "-" + arch] || ("mechatron-native." + platform + "-" + arch + ".node");
+	})();
+	var _rustAddon = require (_path.resolve (__dirname, "..", "native-rs", _rustFile));
+	var mRobot = require ("..");
+	mRobot.setNativeBackend (_rustAddon);
+}
+else
+{
+	process.stderr.write ("Unknown backend: " + _backendArg + "\n");
+	process.exitCode = 2;
+	return;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -777,11 +919,12 @@ function testTypes()
 
 function main()
 {
-	log ("\nMECHATRON CI TEST SUITE\n");
+	log ("\nMECHATRON CI TEST SUITE [" + _backendArg.toUpperCase() + " backend]\n");
 	log ("------------------------------\n");
 	log ("Platform: " + process.platform + " " + process.arch + "\n");
 	log ("Node: " + process.version + "\n");
 	log ("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
+	log ("Backend: " + _backendArg + "\n");
 	if (process.platform === "darwin")
 		log ("Mach VM: " + (gMachVMAvailable ? "available" : "unavailable") + "\n");
 	var expectKeys = Object.keys (gExpect);
@@ -808,7 +951,7 @@ function main()
 	];
 
 	// Parse command line for specific tests
-	var requested = process.argv.slice (2);
+	var requested = _testArgs;
 	if (requested.length > 0 && requested[0] !== "all")
 	{
 		tests = tests.filter (function (t) {
