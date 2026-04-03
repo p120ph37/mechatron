@@ -29,10 +29,12 @@ export interface NativeBackend {
   clipboard_getSequence(): number;
 
   // Screen
-  screen_synchronize(): { screens: Array<{ bounds: { x: number; y: number; w: number; h: number }; usable: { x: number; y: number; w: number; h: number } }>; totalBounds: { x: number; y: number; w: number; h: number }; totalUsable: { x: number; y: number; w: number; h: number } } | null;
+  screen_synchronize(): Array<{ bounds: { x: number; y: number; w: number; h: number }; usable: { x: number; y: number; w: number; h: number } }> | null;
   screen_grabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Uint32Array | null;
   screen_isCompositing(): boolean;
   screen_setCompositing(enabled: boolean): void;
+  screen_getTotalBounds(): { x: number; y: number; w: number; h: number };
+  screen_getTotalUsable(): { x: number; y: number; w: number; h: number };
 
   // Window
   window_isValid(handle: number): boolean;

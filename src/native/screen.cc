@@ -23,23 +23,7 @@ static Napi::Value screen_synchronize(const Napi::CallbackInfo& info) {
     o["usable"] = uo;
     arr[i] = o;
   }
-  auto tb = Robot::Screen::GetTotalBounds();
-  auto tbo = Napi::Object::New(env);
-  tbo["x"] = Napi::Number::New(env, tb.X);
-  tbo["y"] = Napi::Number::New(env, tb.Y);
-  tbo["w"] = Napi::Number::New(env, tb.W);
-  tbo["h"] = Napi::Number::New(env, tb.H);
-  auto tu = Robot::Screen::GetTotalUsable();
-  auto tuo = Napi::Object::New(env);
-  tuo["x"] = Napi::Number::New(env, tu.X);
-  tuo["y"] = Napi::Number::New(env, tu.Y);
-  tuo["w"] = Napi::Number::New(env, tu.W);
-  tuo["h"] = Napi::Number::New(env, tu.H);
-  auto result = Napi::Object::New(env);
-  result["screens"] = arr;
-  result["totalBounds"] = tbo;
-  result["totalUsable"] = tuo;
-  return result;
+  return arr;
 }
 
 static Napi::Value screen_grabScreen(const Napi::CallbackInfo& info) {
@@ -70,9 +54,33 @@ static void screen_setCompositing(const Napi::CallbackInfo& info) {
   Robot::Screen::SetCompositing(info[0].As<Napi::Boolean>());
 }
 
+static Napi::Value screen_getTotalBounds(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
+  auto b = Robot::Screen::GetTotalBounds();
+  auto o = Napi::Object::New(env);
+  o["x"] = Napi::Number::New(env, b.X);
+  o["y"] = Napi::Number::New(env, b.Y);
+  o["w"] = Napi::Number::New(env, b.W);
+  o["h"] = Napi::Number::New(env, b.H);
+  return o;
+}
+
+static Napi::Value screen_getTotalUsable(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
+  auto u = Robot::Screen::GetTotalUsable();
+  auto o = Napi::Object::New(env);
+  o["x"] = Napi::Number::New(env, u.X);
+  o["y"] = Napi::Number::New(env, u.Y);
+  o["w"] = Napi::Number::New(env, u.W);
+  o["h"] = Napi::Number::New(env, u.H);
+  return o;
+}
+
 void InitScreen(Napi::Env env, Napi::Object exports) {
   exports["screen_synchronize"] = Napi::Function::New(env, screen_synchronize);
   exports["screen_grabScreen"] = Napi::Function::New(env, screen_grabScreen);
   exports["screen_isCompositing"] = Napi::Function::New(env, screen_isCompositing);
   exports["screen_setCompositing"] = Napi::Function::New(env, screen_setCompositing);
+  exports["screen_getTotalBounds"] = Napi::Function::New(env, screen_getTotalBounds);
+  exports["screen_getTotalUsable"] = Napi::Function::New(env, screen_getTotalUsable);
 }

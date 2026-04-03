@@ -193,23 +193,7 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             obj.set("usable", uo)?;
             arr.set(i as u32, obj)?;
         }
-
-        let mut tb = env.create_object()?;
-        tb.set("x", TOTAL_BOUNDS.0)?;
-        tb.set("y", TOTAL_BOUNDS.1)?;
-        tb.set("w", TOTAL_BOUNDS.2)?;
-        tb.set("h", TOTAL_BOUNDS.3)?;
-        let mut tu = env.create_object()?;
-        tu.set("x", TOTAL_USABLE.0)?;
-        tu.set("y", TOTAL_USABLE.1)?;
-        tu.set("w", TOTAL_USABLE.2)?;
-        tu.set("h", TOTAL_USABLE.3)?;
-
-        let mut result = env.create_object()?;
-        result.set("screens", arr)?;
-        result.set("totalBounds", tb)?;
-        result.set("totalUsable", tu)?;
-        Ok(Either::A(result))
+        Ok(Either::A(arr.coerce_to_object()?))
     }
 }
 
@@ -291,23 +275,7 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             obj.set("usable", uo)?;
             arr.set(i as u32, obj)?;
         }
-
-        let mut tb = env.create_object()?;
-        tb.set("x", WIN_TOTAL_BOUNDS.0)?;
-        tb.set("y", WIN_TOTAL_BOUNDS.1)?;
-        tb.set("w", WIN_TOTAL_BOUNDS.2)?;
-        tb.set("h", WIN_TOTAL_BOUNDS.3)?;
-        let mut tu = env.create_object()?;
-        tu.set("x", WIN_TOTAL_USABLE.0)?;
-        tu.set("y", WIN_TOTAL_USABLE.1)?;
-        tu.set("w", WIN_TOTAL_USABLE.2)?;
-        tu.set("h", WIN_TOTAL_USABLE.3)?;
-
-        let mut result = env.create_object()?;
-        result.set("screens", arr)?;
-        result.set("totalBounds", tb)?;
-        result.set("totalUsable", tu)?;
-        Ok(Either::A(result))
+        Ok(Either::A(arr.coerce_to_object()?))
     }
 }
 
@@ -380,22 +348,7 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         MAC_TOTAL_BOUNDS = (b_min_x, b_min_y, b_max_x - b_min_x, b_max_y - b_min_y);
         MAC_TOTAL_USABLE = (u_min_x, u_min_y, u_max_x - u_min_x, u_max_y - u_min_y);
 
-        let mut tb = env.create_object()?;
-        tb.set("x", MAC_TOTAL_BOUNDS.0)?;
-        tb.set("y", MAC_TOTAL_BOUNDS.1)?;
-        tb.set("w", MAC_TOTAL_BOUNDS.2)?;
-        tb.set("h", MAC_TOTAL_BOUNDS.3)?;
-        let mut tu = env.create_object()?;
-        tu.set("x", MAC_TOTAL_USABLE.0)?;
-        tu.set("y", MAC_TOTAL_USABLE.1)?;
-        tu.set("w", MAC_TOTAL_USABLE.2)?;
-        tu.set("h", MAC_TOTAL_USABLE.3)?;
-
-        let mut result = env.create_object()?;
-        result.set("screens", arr)?;
-        result.set("totalBounds", tb)?;
-        result.set("totalUsable", tu)?;
-        Ok(Either::A(result))
+        Ok(Either::A(arr.coerce_to_object()?))
     }
 }
 
@@ -673,3 +626,88 @@ pub fn screen_set_compositing(_enabled: bool) {
     // No-op on all platforms
 }
 
+// =============================================================================
+// screen_getTotalBounds
+// =============================================================================
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "screen_getTotalBounds")]
+pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    unsafe {
+        obj.set("x", TOTAL_BOUNDS.0)?;
+        obj.set("y", TOTAL_BOUNDS.1)?;
+        obj.set("w", TOTAL_BOUNDS.2)?;
+        obj.set("h", TOTAL_BOUNDS.3)?;
+    }
+    Ok(obj)
+}
+
+#[cfg(target_os = "windows")]
+#[napi(js_name = "screen_getTotalBounds")]
+pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    unsafe {
+        obj.set("x", WIN_TOTAL_BOUNDS.0)?;
+        obj.set("y", WIN_TOTAL_BOUNDS.1)?;
+        obj.set("w", WIN_TOTAL_BOUNDS.2)?;
+        obj.set("h", WIN_TOTAL_BOUNDS.3)?;
+    }
+    Ok(obj)
+}
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "screen_getTotalBounds")]
+pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    unsafe {
+        obj.set("x", MAC_TOTAL_BOUNDS.0)?;
+        obj.set("y", MAC_TOTAL_BOUNDS.1)?;
+        obj.set("w", MAC_TOTAL_BOUNDS.2)?;
+        obj.set("h", MAC_TOTAL_BOUNDS.3)?;
+    }
+    Ok(obj)
+}
+
+// =============================================================================
+// screen_getTotalUsable
+// =============================================================================
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "screen_getTotalUsable")]
+pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    unsafe {
+        obj.set("x", TOTAL_USABLE.0)?;
+        obj.set("y", TOTAL_USABLE.1)?;
+        obj.set("w", TOTAL_USABLE.2)?;
+        obj.set("h", TOTAL_USABLE.3)?;
+    }
+    Ok(obj)
+}
+
+#[cfg(target_os = "windows")]
+#[napi(js_name = "screen_getTotalUsable")]
+pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    unsafe {
+        obj.set("x", WIN_TOTAL_USABLE.0)?;
+        obj.set("y", WIN_TOTAL_USABLE.1)?;
+        obj.set("w", WIN_TOTAL_USABLE.2)?;
+        obj.set("h", WIN_TOTAL_USABLE.3)?;
+    }
+    Ok(obj)
+}
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "screen_getTotalUsable")]
+pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    unsafe {
+        obj.set("x", MAC_TOTAL_USABLE.0)?;
+        obj.set("y", MAC_TOTAL_USABLE.1)?;
+        obj.set("w", MAC_TOTAL_USABLE.2)?;
+        obj.set("h", MAC_TOTAL_USABLE.3)?;
+    }
+    Ok(obj)
+}
