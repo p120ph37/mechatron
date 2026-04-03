@@ -237,7 +237,7 @@ fn platform_get_key_state(keycode: i32) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_get_state(env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     for &keyval in ALL_KEYS.iter() {
         let pressed = unsafe {
             mac::CGEventSourceKeyState(mac::kCGEventSourceStateHIDSystemState, keyval as mac::CGKeyCode)

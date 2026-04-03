@@ -70,43 +70,35 @@ fn pasteboard_type_string() -> &'static NSString {
 
 #[cfg(target_os = "macos")]
 fn platform_clear() -> bool {
-    unsafe {
-        let board = NSPasteboard::generalPasteboard();
-        board.clearContents();
-        true
-    }
+    let board = NSPasteboard::generalPasteboard();
+    board.clearContents();
+    true
 }
 
 #[cfg(target_os = "macos")]
 fn platform_has_text() -> bool {
-    unsafe {
-        let board = NSPasteboard::generalPasteboard();
-        let types = objc2_foundation::NSArray::from_retained_slice(&[
-            pasteboard_type_string().copy(),
-        ]);
-        board.availableTypeFromArray(&types).is_some()
-    }
+    let board = NSPasteboard::generalPasteboard();
+    let types = objc2_foundation::NSArray::from_retained_slice(&[
+        pasteboard_type_string().copy(),
+    ]);
+    board.availableTypeFromArray(&types).is_some()
 }
 
 #[cfg(target_os = "macos")]
 fn platform_get_text() -> String {
-    unsafe {
-        let board = NSPasteboard::generalPasteboard();
-        match board.stringForType(pasteboard_type_string()) {
-            Some(s) => s.to_string(),
-            None => String::new(),
-        }
+    let board = NSPasteboard::generalPasteboard();
+    match board.stringForType(pasteboard_type_string()) {
+        Some(s) => s.to_string(),
+        None => String::new(),
     }
 }
 
 #[cfg(target_os = "macos")]
 fn platform_set_text(text: &str) -> bool {
-    unsafe {
-        let board = NSPasteboard::generalPasteboard();
-        board.clearContents();
-        let ns_string = NSString::from_str(text);
-        board.setString_forType(&ns_string, pasteboard_type_string())
-    }
+    let board = NSPasteboard::generalPasteboard();
+    board.clearContents();
+    let ns_string = NSString::from_str(text);
+    board.setString_forType(&ns_string, pasteboard_type_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -124,10 +116,10 @@ fn platform_has_image() -> bool {
 
 #[cfg(target_os = "macos")]
 fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    use objc2::MainThreadMarker;
+    use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::NSImage;
     use objc2_core_graphics::{
-        CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetData,
+        CGBitmapContextCreate, CGBitmapContextGetData,
         CGColorSpace, CGContext, CGImage, CGImageByteOrderInfo, CGImageAlphaInfo,
     };
     use objc2_core_foundation::CGRect;
@@ -190,9 +182,9 @@ fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
 
 #[cfg(target_os = "macos")]
 fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
-    use objc2::MainThreadMarker;
+    use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2::runtime::ProtocolObject;
-    use objc2_app_kit::{NSImage, NSPasteboardWriting};
+    use objc2_app_kit::NSImage;
     use objc2_core_graphics::{
         CGBitmapContextCreate, CGBitmapContextCreateImage,
         CGColorSpace, CGImageByteOrderInfo, CGImageAlphaInfo,
@@ -254,10 +246,8 @@ fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
 
 #[cfg(target_os = "macos")]
 fn platform_get_sequence() -> f64 {
-    unsafe {
-        let board = NSPasteboard::generalPasteboard();
-        board.changeCount() as f64
-    }
+    let board = NSPasteboard::generalPasteboard();
+    board.changeCount() as f64
 }
 
 // =============================================================================
@@ -407,7 +397,7 @@ fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
             width as usize * 4
         } else {
             // 24-bit: rows are padded to 4-byte boundaries
-            ((width as usize * 3 + 3) & !3)
+            (width as usize * 3 + 3) & !3
         };
 
         let mut argb = vec![0u32; (width * height) as usize];

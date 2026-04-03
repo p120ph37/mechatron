@@ -285,8 +285,8 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     use objc2::MainThreadMarker;
 
     let mtm = unsafe { MainThreadMarker::new_unchecked() };
-    let ns_screens = unsafe { NSScreen::screens(mtm) };
-    let count = unsafe { ns_screens.count() };
+    let ns_screens = NSScreen::screens(mtm);
+    let count = ns_screens.count();
     if count == 0 {
         return Ok(Either::B(env.get_null()?));
     }
@@ -304,9 +304,9 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     let mut arr = env.create_array(count as u32)?;
 
     for i in 0..count {
-        let screen = unsafe { ns_screens.objectAtIndex(i) };
-        let frame = unsafe { screen.frame() };
-        let visible = unsafe { screen.visibleFrame() };
+        let screen = ns_screens.objectAtIndex(i);
+        let frame = screen.frame();
+        let visible = screen.visibleFrame();
 
         let fx = frame.origin.x as i32;
         let fy = frame.origin.y as i32;
@@ -584,6 +584,7 @@ pub fn screen_grab_screen(
         );
 
         // Get the raw CGImageRef pointer for FFI
+        use foreign_types::ForeignType;
         let img_ref = image.as_ptr() as *mut std::ffi::c_void;
 
         CGContextDrawImage(context, draw_rect, img_ref);

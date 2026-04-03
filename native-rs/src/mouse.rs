@@ -361,7 +361,7 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_get_pos(env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     let pt = mac_get_cursor_pos();
     obj.set("x", pt.x as i32)?;
     obj.set("y", pt.y as i32)?;
@@ -532,7 +532,7 @@ fn platform_scroll_v(amount: i32) {
 fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     unsafe {
         let mut point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
-        GetCursorPos(&mut point);
+        let _ = GetCursorPos(&mut point);
         obj.set("x", point.x)?;
         obj.set("y", point.y)?;
     }
@@ -542,7 +542,7 @@ fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
 #[cfg(target_os = "windows")]
 fn platform_set_pos(x: i32, y: i32) {
     unsafe {
-        SetCursorPos(x, y);
+        let _ = SetCursorPos(x, y);
     }
 }
 

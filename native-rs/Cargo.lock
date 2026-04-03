@@ -150,6 +150,7 @@ version = "0.0.0"
 dependencies = [
  "core-foundation",
  "core-graphics",
+ "foreign-types",
  "libc",
  "napi",
  "napi-build",
