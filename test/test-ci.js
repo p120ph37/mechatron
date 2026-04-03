@@ -39,14 +39,6 @@ if (!_backendArg)
 	// Discover which backends are available on this platform
 	var _backends = [];
 
-	// Probe C++ backend
-	try {
-		require ("node-gyp-build")(_path.resolve (__dirname, ".."));
-		_backends.push ("cpp");
-	} catch (_) {
-		process.stdout.write ("  [skip] C++ backend not available\n");
-	}
-
 	// Probe Rust backend — resolve the correct .node filename per platform
 	var _rustNodeFile = (function () {
 		var platform = process.platform;
@@ -124,13 +116,7 @@ if (!_backendArg)
 
 // --backend was specified — force the requested backend before loading mRobot
 var _path = require ("path");
-if (_backendArg === "cpp")
-{
-	var _cppAddon = require ("node-gyp-build")(_path.resolve (__dirname, ".."));
-	var mRobot = require ("..");
-	mRobot.setNativeBackend (_cppAddon);
-}
-else if (_backendArg === "rust")
+if (_backendArg === "rust")
 {
 	var _rustFile = (function () {
 		var platform = process.platform;

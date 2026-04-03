@@ -20,151 +20,13 @@ import { Module, Segment } from "./Module";
 import { Memory, Stats, Region } from "./Memory";
 
 // Native backend management
-import { getNativeBackend, setNativeBackend } from "./native";
+import { getNativeBackend, setNativeBackend, getNativeConstants } from "./native";
 
 // Version constants
 const ROBOT_VERSION = 0x020000;
 const ROBOT_VERSION_STR = "2.0.0 (0.0.0)";
 const ADDON_VERSION = 0x000000;
 const ADDON_VERSION_STR = "0.0.0";
-
-// Platform-specific key and button constants
-// Read from the native addon at runtime so they match the compiled platform
-function getConstants(): Record<string, number> {
-  try {
-    const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
-    const constants: Record<string, number> = {};
-    for (const key of Object.keys(addon)) {
-      if ((key.startsWith("KEY_") || key.startsWith("BUTTON_")) && typeof addon[key] === "number") {
-        constants[key] = addon[key];
-      }
-    }
-    return constants;
-  } catch {
-    return _fallbackKeys;
-  }
-}
-
-// Fallback key constants (X11 keysym values) - used only if native addon fails to load
-const _fallbackKeys: Record<string, number> = {
-  KEY_SPACE: 0x0020,
-  KEY_ESCAPE: 0xFF1B,
-  KEY_TAB: 0xFF09,
-  KEY_ALT: 0xFFE9,
-  KEY_LALT: 0xFFE9,
-  KEY_RALT: 0xFFEA,
-  KEY_CONTROL: 0xFFE3,
-  KEY_LCONTROL: 0xFFE3,
-  KEY_RCONTROL: 0xFFE4,
-  KEY_SHIFT: 0xFFE1,
-  KEY_LSHIFT: 0xFFE1,
-  KEY_RSHIFT: 0xFFE2,
-  KEY_SYSTEM: 0xFFEB,
-  KEY_LSYSTEM: 0xFFEB,
-  KEY_RSYSTEM: 0xFFEC,
-  KEY_F1: 0xFFBE,
-  KEY_F2: 0xFFBF,
-  KEY_F3: 0xFFC0,
-  KEY_F4: 0xFFC1,
-  KEY_F5: 0xFFC2,
-  KEY_F6: 0xFFC3,
-  KEY_F7: 0xFFC4,
-  KEY_F8: 0xFFC5,
-  KEY_F9: 0xFFC6,
-  KEY_F10: 0xFFC7,
-  KEY_F11: 0xFFC8,
-  KEY_F12: 0xFFC9,
-  KEY_0: 0x0030,
-  KEY_1: 0x0031,
-  KEY_2: 0x0032,
-  KEY_3: 0x0033,
-  KEY_4: 0x0034,
-  KEY_5: 0x0035,
-  KEY_6: 0x0036,
-  KEY_7: 0x0037,
-  KEY_8: 0x0038,
-  KEY_9: 0x0039,
-  KEY_A: 0x0061,
-  KEY_B: 0x0062,
-  KEY_C: 0x0063,
-  KEY_D: 0x0064,
-  KEY_E: 0x0065,
-  KEY_F: 0x0066,
-  KEY_G: 0x0067,
-  KEY_H: 0x0068,
-  KEY_I: 0x0069,
-  KEY_J: 0x006A,
-  KEY_K: 0x006B,
-  KEY_L: 0x006C,
-  KEY_M: 0x006D,
-  KEY_N: 0x006E,
-  KEY_O: 0x006F,
-  KEY_P: 0x0070,
-  KEY_Q: 0x0071,
-  KEY_R: 0x0072,
-  KEY_S: 0x0073,
-  KEY_T: 0x0074,
-  KEY_U: 0x0075,
-  KEY_V: 0x0076,
-  KEY_W: 0x0077,
-  KEY_X: 0x0078,
-  KEY_Y: 0x0079,
-  KEY_Z: 0x007A,
-  KEY_GRAVE: 0x0060,
-  KEY_MINUS: 0x002D,
-  KEY_EQUAL: 0x003D,
-  KEY_BACKSPACE: 0xFF08,
-  KEY_LBRACKET: 0x005B,
-  KEY_RBRACKET: 0x005D,
-  KEY_BACKSLASH: 0x005C,
-  KEY_SEMICOLON: 0x003B,
-  KEY_QUOTE: 0x0027,
-  KEY_RETURN: 0xFF0D,
-  KEY_COMMA: 0x002C,
-  KEY_PERIOD: 0x002E,
-  KEY_SLASH: 0x002F,
-  KEY_LEFT: 0xFF51,
-  KEY_UP: 0xFF52,
-  KEY_RIGHT: 0xFF53,
-  KEY_DOWN: 0xFF54,
-  KEY_PRINT: 0xFF61,
-  KEY_PAUSE: 0xFF13,
-  KEY_INSERT: 0xFF63,
-  KEY_DELETE: 0xFFFF,
-  KEY_HOME: 0xFF50,
-  KEY_END: 0xFF57,
-  KEY_PAGE_UP: 0xFF55,
-  KEY_PAGE_DOWN: 0xFF56,
-  KEY_ADD: 0xFFAB,
-  KEY_SUBTRACT: 0xFFAD,
-  KEY_MULTIPLY: 0xFFAA,
-  KEY_DIVIDE: 0xFFAF,
-  KEY_DECIMAL: 0xFFAE,
-  KEY_ENTER: 0xFF8D,
-  KEY_NUM0: 0xFFB0,
-  KEY_NUM1: 0xFFB1,
-  KEY_NUM2: 0xFFB2,
-  KEY_NUM3: 0xFFB3,
-  KEY_NUM4: 0xFFB4,
-  KEY_NUM5: 0xFFB5,
-  KEY_NUM6: 0xFFB6,
-  KEY_NUM7: 0xFFB7,
-  KEY_NUM8: 0xFFB8,
-  KEY_NUM9: 0xFFB9,
-  KEY_CAPS_LOCK: 0xFFE5,
-  KEY_SCROLL_LOCK: 0xFF14,
-  KEY_NUM_LOCK: 0xFF7F,
-};
-
-// Button fallback constants (used only if native addon fails to load)
-const _fallbackButtons: Record<string, number> = {
-  BUTTON_LEFT: 0,
-  BUTTON_MID: 1,
-  BUTTON_MIDDLE: 1,
-  BUTTON_RIGHT: 2,
-  BUTTON_X1: 3,
-  BUTTON_X2: 4,
-};
 
 // Wrap ES6 classes so they can be called without `new` (matching C++ NAPI OnCalledAsFunction behavior)
 function callableClass<T extends new (...args: any[]) => any>(Cls: T): T {
@@ -208,8 +70,8 @@ Process.prototype.getModules = function(this: Process, regex?: string) {
   });
 } as any;
 
-// Export everything as a single module object (matching the original index.js pattern)
-const _nativeConstants = getConstants();
+// Platform-specific key/button constants from native addon
+const _nativeConstants = getNativeConstants();
 
 const mRobot = {
   // Version info
@@ -241,10 +103,9 @@ const mRobot = {
   Window: callableClass(Window),
 
   // Key and button constants from native addon (platform-specific)
-  ..._fallbackButtons,
   ..._nativeConstants,
 
-  // Backend management (new in TS layer)
+  // Backend management
   getNativeBackend,
   setNativeBackend,
 };

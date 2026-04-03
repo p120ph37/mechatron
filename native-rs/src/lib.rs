@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 mod x11;
 mod keys;
-mod timer;
+mod timer; // kept as module but no NAPI exports; sleep/clock moved to TS
 mod keyboard;
 mod mouse;
 mod clipboard;

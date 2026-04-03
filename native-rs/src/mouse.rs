@@ -6,7 +6,6 @@ use std::ffi::c_uint;
 
 #[cfg(target_os = "linux")]
 use crate::x11::*;
-use crate::timer::timer_sleep_range;
 
 // Button constants (matching C++ enum)
 const BUTTON_LEFT: i32 = 0;
@@ -583,38 +582,26 @@ fn platform_get_button_state(button: i32) -> bool {
     }
 }
 
-// --- NAPI exports ---
-
-#[napi(js_name = "mouse_click")]
-pub fn mouse_click(button: i32) {
-    do_press(button);
-    timer_sleep_range(40, 90);
-    do_release(button);
-    timer_sleep_range(40, 90);
-}
+// --- NAPI exports (minimal FFI — no delays) ---
 
 #[napi(js_name = "mouse_press")]
 pub fn mouse_press(button: i32) {
     do_press(button);
-    timer_sleep_range(40, 90);
 }
 
 #[napi(js_name = "mouse_release")]
 pub fn mouse_release(button: i32) {
     do_release(button);
-    timer_sleep_range(40, 90);
 }
 
 #[napi(js_name = "mouse_scrollH")]
 pub fn mouse_scroll_h(amount: i32) {
     platform_scroll_h(amount);
-    timer_sleep_range(40, 90);
 }
 
 #[napi(js_name = "mouse_scrollV")]
 pub fn mouse_scroll_v(amount: i32) {
     platform_scroll_v(amount);
-    timer_sleep_range(40, 90);
 }
 
 #[napi(js_name = "mouse_getPos")]

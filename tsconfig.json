@@ -11,7 +11,7 @@
     "declarationDir": "./dist/types",
     "outDir": "./dist",
     "rootDir": "./lib",
-    "types": ["bun-types"],
+    "types": ["node"],
     "lib": ["ES2022"]
   },
   "include": ["lib/**/*.ts"],

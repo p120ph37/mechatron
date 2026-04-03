@@ -1,14 +1,13 @@
+// Minimal FFI interface — only raw platform operations.
+// All logic (delays, compile, totals, compositing) lives in the TS layer.
 export interface NativeBackend {
-  // Keyboard
-  keyboard_click(keycode: number): void;
+  // Keyboard (raw — no delays)
   keyboard_press(keycode: number): void;
   keyboard_release(keycode: number): void;
-  keyboard_compile(keys: string): Array<{ down: boolean; key: number }>;
   keyboard_getState(): Record<number, boolean>;
   keyboard_getKeyState(keycode: number): boolean;
 
-  // Mouse
-  mouse_click(button: number): void;
+  // Mouse (raw — no delays)
   mouse_press(button: number): void;
   mouse_release(button: number): void;
   mouse_scrollH(amount: number): void;
@@ -28,13 +27,9 @@ export interface NativeBackend {
   clipboard_setImage(width: number, height: number, data: Uint32Array): boolean;
   clipboard_getSequence(): number;
 
-  // Screen
+  // Screen (synchronize + grabScreen only)
   screen_synchronize(): Array<{ bounds: { x: number; y: number; w: number; h: number }; usable: { x: number; y: number; w: number; h: number } }> | null;
   screen_grabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Uint32Array | null;
-  screen_isCompositing(): boolean;
-  screen_setCompositing(enabled: boolean): void;
-  screen_getTotalBounds(): { x: number; y: number; w: number; h: number };
-  screen_getTotalUsable(): { x: number; y: number; w: number; h: number };
 
   // Window
   window_isValid(handle: number): boolean;
@@ -47,7 +42,7 @@ export interface NativeBackend {
   window_setBorderless(handle: number, borderless: boolean): void;
   window_setMinimized(handle: number, minimized: boolean): void;
   window_setMaximized(handle: number, maximized: boolean): void;
-  window_getProcess(handle: number): number;  // returns PID
+  window_getProcess(handle: number): number;
   window_getPID(handle: number): number;
   window_getHandle(handle: number): number;
   window_setHandle(handle: number, newHandle: number): boolean;
@@ -59,7 +54,7 @@ export interface NativeBackend {
   window_setClient(handle: number, x: number, y: number, w: number, h: number): void;
   window_mapToClient(handle: number, x: number, y: number): { x: number; y: number };
   window_mapToScreen(handle: number, x: number, y: number): { x: number; y: number };
-  window_getList(regex?: string): number[];  // returns array of handles
+  window_getList(regex?: string): number[];
   window_getActive(): number;
   window_setActive(handle: number): void;
   window_isAxEnabled(prompt?: boolean): boolean;
@@ -78,9 +73,9 @@ export interface NativeBackend {
   process_kill(pid: number): void;
   process_hasExited(pid: number): boolean;
   process_getModules(pid: number, regex?: string): Array<{ valid: boolean; name: string; path: string; base: number; size: number; pid: number }>;
-  process_getWindows(pid: number, regex?: string): number[];  // returns window handles
-  process_getList(regex?: string): number[];  // returns PIDs
-  process_getCurrent(): number;  // returns PID
+  process_getWindows(pid: number, regex?: string): number[];
+  process_getList(regex?: string): number[];
+  process_getCurrent(): number;
   process_isSys64Bit(): boolean;
   process_getSegments(pid: number, base: number): Array<{ valid: boolean; base: number; size: number; name: string }>;
 
@@ -102,6 +97,9 @@ export interface NativeBackend {
   memory_deleteCache(pid: number): void;
   memory_isCaching(pid: number): boolean;
   memory_getCacheSize(pid: number): number;
+
+  // Constants (read as properties)
+  [key: string]: any;
 }
 
 let _backend: NativeBackend | null = null;
@@ -122,18 +120,24 @@ function getRustNodeFile(): string {
 
 export function getNativeBackend(): NativeBackend {
   if (_backend) return _backend;
-  // Try Rust napi module first, fall back to C++ node-gyp-build addon
-  try {
-    const path = require("path");
-    const rustAddon = require(path.resolve(__dirname, "..", "native-rs", getRustNodeFile()));
-    _backend = rustAddon as NativeBackend;
-  } catch (_e) {
-    const addon = require("node-gyp-build")(require("path").resolve(__dirname, ".."));
-    _backend = addon as NativeBackend;
-  }
+  const path = require("path");
+  const rustAddon = require(path.resolve(__dirname, "..", "native-rs", getRustNodeFile()));
+  _backend = rustAddon as NativeBackend;
   return _backend;
 }
 
 export function setNativeBackend(backend: NativeBackend): void {
   _backend = backend;
+}
+
+// Extract platform-specific key/button constants from the native addon
+export function getNativeConstants(): Record<string, number> {
+  const addon = getNativeBackend();
+  const constants: Record<string, number> = {};
+  for (const key of Object.keys(addon)) {
+    if ((key.startsWith("KEY_") || key.startsWith("BUTTON_") || key.startsWith("MEMORY_")) && typeof addon[key] === "number") {
+      constants[key] = addon[key];
+    }
+  }
+  return constants;
 }

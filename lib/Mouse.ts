@@ -1,5 +1,6 @@
 import { Range } from "./Range";
 import { Point } from "./Point";
+import { Timer } from "./Timer";
 import type { NativeBackend } from "./native";
 
 export class Mouse {
@@ -19,23 +20,30 @@ export class Mouse {
   }
 
   click(button: number): void {
-    this._native.mouse_click(button);
+    this._native.mouse_press(button);
+    Timer.sleep(this.autoDelay);
+    this._native.mouse_release(button);
+    Timer.sleep(this.autoDelay);
   }
 
   press(button: number): void {
     this._native.mouse_press(button);
+    Timer.sleep(this.autoDelay);
   }
 
   release(button: number): void {
     this._native.mouse_release(button);
+    Timer.sleep(this.autoDelay);
   }
 
   scrollH(amount: number): void {
     this._native.mouse_scrollH(amount);
+    Timer.sleep(this.autoDelay);
   }
 
   scrollV(amount: number): void {
     this._native.mouse_scrollV(amount);
+    Timer.sleep(this.autoDelay);
   }
 
   clone(): Mouse {
