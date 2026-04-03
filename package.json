@@ -1,6 +1,6 @@
 {
   "name": "mechatron",
-  "version": "0.0.2",
+  "version": "0.0.0",
   "description": "Node.js native addon for desktop automation (keyboard, mouse, screen, process, memory, window)",
   "main": "dist/index.js",
   "gypfile": true,
