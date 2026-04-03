@@ -27,7 +27,6 @@ struct ProcInfo {
 fn proc_open(pid: i32) -> Option<ProcInfo> {
     if pid <= 0 { return None; }
 
-    // Check if process exists via /proc/pid
     let proc_dir = format!("/proc/{}", pid);
     if !Path::new(&proc_dir).exists() { return None; }
 
@@ -36,18 +35,15 @@ fn proc_open(pid: i32) -> Option<ProcInfo> {
     let mut name = String::new();
     let mut is_64bit = cfg!(target_pointer_width = "64");
 
-    // Read the exe symlink
-    if let Ok(target) = fs::read_link(&exe_link) {
+    if let Ok(target) = std::fs::read_link(&exe_link) {
         path = target.to_string_lossy().to_string();
         if let Some(fname) = target.file_name() {
             name = fname.to_string_lossy().to_string();
         }
     }
 
-    // Determine architecture from ELF header
-    if let Ok(data) = fs::read(&exe_link) {
+    if let Ok(data) = std::fs::read(&exe_link) {
         if data.len() > 4 {
-            // ELF class: byte 4, 1=32bit, 2=64bit
             is_64bit = data[4] == 2;
         }
     }
@@ -58,8 +54,75 @@ fn proc_open(pid: i32) -> Option<ProcInfo> {
 #[cfg(target_os = "linux")]
 fn proc_has_exited(pid: i32) -> bool {
     if pid <= 0 { return true; }
-    // Check if /proc/pid exists
     !Path::new(&format!("/proc/{}", pid)).exists()
+}
+
+// ── Windows internals ───────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::*;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Threading::*;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::ProcessStatus::*;
+
+#[cfg(target_os = "windows")]
+fn win_open_process(pid: i32, access: PROCESS_ACCESS_RIGHTS) -> Option<HANDLE> {
+    if pid <= 0 { return None; }
+    unsafe {
+        OpenProcess(access, false, pid as u32).ok()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn win_is_valid(pid: i32) -> bool {
+    if pid <= 0 { return false; }
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
+        unsafe { let _ = CloseHandle(h); }
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn win_get_path(pid: i32) -> String {
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
+        unsafe {
+            let mut buf = [0u16; 1024];
+            let mut size = buf.len() as u32;
+            if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut size).is_ok() {
+                let _ = CloseHandle(h);
+                return String::from_utf16_lossy(&buf[..size as usize]);
+            }
+            let _ = CloseHandle(h);
+        }
+    }
+    String::new()
+}
+
+#[cfg(target_os = "windows")]
+fn win_get_name(pid: i32) -> String {
+    let path = win_get_path(pid);
+    if path.is_empty() { return String::new(); }
+    path.rsplit('\\').next().unwrap_or("").to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn win_has_exited(pid: i32) -> bool {
+    if pid <= 0 { return true; }
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
+        unsafe {
+            let mut exit_code: u32 = 0;
+            let result = GetExitCodeProcess(h, &mut exit_code);
+            let _ = CloseHandle(h);
+            if result.is_ok() {
+                // STILL_ACTIVE = 259
+                return exit_code != 259;
+            }
+        }
+    }
+    true
 }
 
 // ── process_open ────────────────────────────────────────────────────────
@@ -70,7 +133,13 @@ pub fn process_open(pid: i32) -> bool {
     proc_open(pid).is_some()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_open")]
+pub fn process_open(pid: i32) -> bool {
+    win_is_valid(pid)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_open")]
 pub fn process_open(_pid: i32) -> bool {
     false
@@ -80,15 +149,11 @@ pub fn process_open(_pid: i32) -> bool {
 
 #[cfg(target_os = "linux")]
 #[napi(js_name = "process_close")]
-pub fn process_close(_pid: i32) {
-    // No-op on Linux (no handle to close)
-}
+pub fn process_close(_pid: i32) {}
 
 #[cfg(not(target_os = "linux"))]
 #[napi(js_name = "process_close")]
-pub fn process_close(_pid: i32) {
-    // No-op stub
-}
+pub fn process_close(_pid: i32) {}
 
 // ── process_isValid ─────────────────────────────────────────────────────
 
@@ -98,7 +163,13 @@ pub fn process_is_valid(pid: i32) -> bool {
     proc_open(pid).is_some()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_isValid")]
+pub fn process_is_valid(pid: i32) -> bool {
+    win_is_valid(pid)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_isValid")]
 pub fn process_is_valid(_pid: i32) -> bool {
     false
@@ -112,7 +183,24 @@ pub fn process_is_64_bit(pid: i32) -> bool {
     proc_open(pid).map(|p| p.is_64bit).unwrap_or(false)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_is64Bit")]
+pub fn process_is_64_bit(pid: i32) -> bool {
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
+        unsafe {
+            let mut wow64: BOOL = BOOL(0);
+            let result = IsWow64Process(h, &mut wow64);
+            let _ = CloseHandle(h);
+            if result.is_ok() {
+                // If WOW64 is true, the process is 32-bit on a 64-bit system
+                return !wow64.as_bool();
+            }
+        }
+    }
+    cfg!(target_pointer_width = "64")
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_is64Bit")]
 pub fn process_is_64_bit(_pid: i32) -> bool {
     false
@@ -123,7 +211,6 @@ pub fn process_is_64_bit(_pid: i32) -> bool {
 #[cfg(target_os = "linux")]
 #[napi(js_name = "process_isDebugged")]
 pub fn process_is_debugged(pid: i32) -> bool {
-    // Check TracerPid in /proc/pid/status
     let status_path = format!("/proc/{}/status", pid);
     if let Ok(content) = fs::read_to_string(&status_path) {
         for line in content.lines() {
@@ -136,7 +223,23 @@ pub fn process_is_debugged(pid: i32) -> bool {
     false
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_isDebugged")]
+pub fn process_is_debugged(pid: i32) -> bool {
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_INFORMATION) {
+        unsafe {
+            let mut debugged: BOOL = BOOL(0);
+            let result = CheckRemoteDebuggerPresent(h, &mut debugged);
+            let _ = CloseHandle(h);
+            if result.is_ok() {
+                return debugged.as_bool();
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_isDebugged")]
 pub fn process_is_debugged(_pid: i32) -> bool {
     false
@@ -152,8 +255,8 @@ pub fn process_get_pid(pid: i32) -> f64 {
 
 #[cfg(not(target_os = "linux"))]
 #[napi(js_name = "process_getPID")]
-pub fn process_get_pid(_pid: i32) -> f64 {
-    0.0
+pub fn process_get_pid(pid: i32) -> f64 {
+    pid as f64
 }
 
 // ── process_getName ─────────────────────────────────────────────────────
@@ -164,7 +267,13 @@ pub fn process_get_name(pid: i32) -> String {
     proc_open(pid).map(|p| p.name).unwrap_or_default()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_getName")]
+pub fn process_get_name(pid: i32) -> String {
+    win_get_name(pid)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_getName")]
 pub fn process_get_name(_pid: i32) -> String {
     String::new()
@@ -178,7 +287,13 @@ pub fn process_get_path(pid: i32) -> String {
     proc_open(pid).map(|p| p.path).unwrap_or_default()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_getPath")]
+pub fn process_get_path(pid: i32) -> String {
+    win_get_path(pid)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_getPath")]
 pub fn process_get_path(_pid: i32) -> String {
     String::new()
@@ -194,11 +309,20 @@ pub fn process_exit(pid: i32) {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
 #[napi(js_name = "process_exit")]
-pub fn process_exit(_pid: i32) {
-    // No-op stub
+pub fn process_exit(pid: i32) {
+    if let Some(h) = win_open_process(pid, PROCESS_TERMINATE) {
+        unsafe {
+            let _ = TerminateProcess(h, 0);
+            let _ = CloseHandle(h);
+        }
+    }
 }
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "process_exit")]
+pub fn process_exit(_pid: i32) {}
 
 // ── process_kill ────────────────────────────────────────────────────────
 
@@ -210,11 +334,20 @@ pub fn process_kill(pid: i32) {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
 #[napi(js_name = "process_kill")]
-pub fn process_kill(_pid: i32) {
-    // No-op stub
+pub fn process_kill(pid: i32) {
+    if let Some(h) = win_open_process(pid, PROCESS_TERMINATE) {
+        unsafe {
+            let _ = TerminateProcess(h, 1);
+            let _ = CloseHandle(h);
+        }
+    }
 }
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "process_kill")]
+pub fn process_kill(_pid: i32) {}
 
 // ── process_hasExited ───────────────────────────────────────────────────
 
@@ -224,7 +357,13 @@ pub fn process_has_exited(pid: i32) -> bool {
     proc_has_exited(pid)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_hasExited")]
+pub fn process_has_exited(pid: i32) -> bool {
+    win_has_exited(pid)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_hasExited")]
 pub fn process_has_exited(_pid: i32) -> bool {
     true
@@ -243,7 +382,6 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
         let mut seen = std::collections::HashSet::new();
 
         for line in content.lines() {
-            // Format: addr-addr perms offset dev inode pathname
             let parts: Vec<&str> = line.splitn(6, char::is_whitespace).collect();
             if parts.len() < 6 { continue; }
             let path_str = parts[5].trim();
@@ -251,7 +389,7 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
             if seen.contains(path_str) { continue; }
             seen.insert(path_str.to_string());
 
-            let name = Path::new(path_str)
+            let name = std::path::Path::new(path_str)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
@@ -260,7 +398,6 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
                 if !re.is_match(&name) { continue; }
             }
 
-            // Parse address range
             let addr_parts: Vec<&str> = parts[0].split('-').collect();
             let base = u64::from_str_radix(addr_parts[0], 16).unwrap_or(0);
             let end = u64::from_str_radix(addr_parts.get(1).unwrap_or(&"0"), 16).unwrap_or(0);
@@ -283,7 +420,54 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
     Ok(arr.coerce_to_object()?)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_getModules")]
+pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Result<napi::JsObject> {
+    let mut modules = Vec::new();
+    let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
+
+    if let Some(h) = win_open_process(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ) {
+        unsafe {
+            let mut hmods = [HMODULE::default(); 1024];
+            let mut needed: u32 = 0;
+            if EnumProcessModulesEx(h, hmods.as_mut_ptr(), std::mem::size_of_val(&hmods) as u32, &mut needed, LIST_MODULES_ALL).is_ok() {
+                let count = (needed as usize / std::mem::size_of::<HMODULE>()).min(hmods.len());
+                for i in 0..count {
+                    let mut name_buf = [0u16; 512];
+                    let name_len = GetModuleFileNameExW(h, hmods[i], &mut name_buf);
+                    if name_len == 0 { continue; }
+                    let path = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+                    let name = path.rsplit('\\').next().unwrap_or("").to_string();
+
+                    if let Some(ref re) = pattern {
+                        if !re.is_match(&name) { continue; }
+                    }
+
+                    let mut mod_info: MODULEINFO = std::mem::zeroed();
+                    if GetModuleInformation(h, hmods[i], &mut mod_info, std::mem::size_of::<MODULEINFO>() as u32).is_ok() {
+                        modules.push((name, path, mod_info.lpBaseOfDll as u64, mod_info.SizeOfImage as u64));
+                    }
+                }
+            }
+            let _ = CloseHandle(h);
+        }
+    }
+
+    let mut arr = env.create_array(modules.len() as u32)?;
+    for (i, (name, path, base, size)) in modules.iter().enumerate() {
+        let mut obj = env.create_object()?;
+        obj.set("valid", true)?;
+        obj.set("name", name.as_str())?;
+        obj.set("path", path.as_str())?;
+        obj.set("base", *base as f64)?;
+        obj.set("size", *size as f64)?;
+        obj.set("pid", pid)?;
+        arr.set(i as u32, obj)?;
+    }
+    Ok(arr.coerce_to_object()?)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_getModules")]
 pub fn process_get_modules(env: Env, _pid: i32, _regex_str: Option<String>) -> Result<napi::JsObject> {
     Ok(env.create_array(0)?.coerce_to_object()?)
@@ -354,7 +538,37 @@ pub fn process_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsO
     Ok(arr.coerce_to_object()?)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_getList")]
+pub fn process_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsObject> {
+    let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
+    let mut pids = Vec::new();
+
+    unsafe {
+        let mut buf = [0u32; 4096];
+        let mut needed: u32 = 0;
+        if EnumProcesses(buf.as_mut_ptr(), std::mem::size_of_val(&buf) as u32, &mut needed).is_ok() {
+            let count = needed as usize / std::mem::size_of::<u32>();
+            for i in 0..count {
+                let pid = buf[i] as i32;
+                if pid <= 0 { continue; }
+                if let Some(ref re) = pattern {
+                    let name = win_get_name(pid);
+                    if name.is_empty() || !re.is_match(&name) { continue; }
+                }
+                pids.push(pid);
+            }
+        }
+    }
+
+    let mut arr = env.create_array(pids.len() as u32)?;
+    for (i, &pid) in pids.iter().enumerate() {
+        arr.set(i as u32, pid)?;
+    }
+    Ok(arr.coerce_to_object()?)
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_getList")]
 pub fn process_get_list(env: Env, _regex_str: Option<String>) -> Result<napi::JsObject> {
     Ok(env.create_array(0)?.coerce_to_object()?)
@@ -368,7 +582,13 @@ pub fn process_get_current() -> f64 {
     unsafe { libc::getpid() as f64 }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_getCurrent")]
+pub fn process_get_current() -> f64 {
+    unsafe { GetCurrentProcessId() as f64 }
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_getCurrent")]
 pub fn process_get_current() -> f64 {
     0.0
@@ -382,7 +602,19 @@ pub fn process_is_sys_64_bit() -> bool {
     cfg!(target_pointer_width = "64")
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "process_isSys64Bit")]
+pub fn process_is_sys_64_bit() -> bool {
+    unsafe {
+        let mut info: windows::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
+        windows::Win32::System::SystemInformation::GetNativeSystemInfo(&mut info);
+        // PROCESSOR_ARCHITECTURE_AMD64 = 9, PROCESSOR_ARCHITECTURE_ARM64 = 12
+        let arch = info.Anonymous.Anonymous.wProcessorArchitecture;
+        arch == 9 || arch == 12
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "process_isSys64Bit")]
 pub fn process_is_sys_64_bit() -> bool {
     false
@@ -393,13 +625,11 @@ pub fn process_is_sys_64_bit() -> bool {
 #[cfg(target_os = "linux")]
 #[napi(js_name = "process_getSegments")]
 pub fn process_get_segments(env: Env, pid: i32, base: f64) -> Result<napi::JsObject> {
-    // Read /proc/pid/maps and find segments for the module at base address
     let maps_path = format!("/proc/{}/maps", pid);
     let base_addr = base as u64;
     let mut segments = Vec::new();
 
     if let Ok(content) = fs::read_to_string(&maps_path) {
-        // First find the module path at the base address
         let mut module_path = String::new();
         for line in content.lines() {
             let parts: Vec<&str> = line.splitn(6, char::is_whitespace).collect();

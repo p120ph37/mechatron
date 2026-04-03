@@ -723,7 +723,7 @@ pub fn window_get_handle(handle: f64) -> f64 { handle }
 
 #[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setHandle")]
-pub fn window_set_handle(_handle: f64, _new_handle: f64) -> bool { false }
+pub fn window_set_handle(_handle: f64, new_handle: f64) -> bool { new_handle == 0.0 }
 
 #[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getTitle")]

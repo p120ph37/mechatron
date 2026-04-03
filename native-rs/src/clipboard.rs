@@ -1,5 +1,13 @@
 use napi::bindgen_prelude::*;
+use napi::Either;
 use napi_derive::napi;
+
+#[napi(object)]
+pub struct ClipboardImage {
+    pub width: u32,
+    pub height: u32,
+    pub data: Uint32Array,
+}
 
 // =============================================================================
 // Linux stubs — no clipboard manager on X11, all operations return false/empty.
@@ -31,7 +39,7 @@ fn platform_has_image() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_get_image() -> Option<Vec<u8>> {
+fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
     None
 }
 
@@ -52,7 +60,7 @@ fn platform_get_sequence() -> f64 {
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSPasteboard;
 #[cfg(target_os = "macos")]
-use objc2_foundation::NSString;
+use objc2_foundation::{NSCopying, NSString};
 
 #[cfg(target_os = "macos")]
 fn pasteboard_type_string() -> &'static NSString {
@@ -107,7 +115,7 @@ fn platform_has_image() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_get_image() -> Option<Vec<u8>> {
+fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
     None // Stub — image clipboard support to be added later
 }
 
@@ -131,11 +139,13 @@ fn platform_get_sequence() -> f64 {
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::*;
 #[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::BITMAPINFOHEADER;
+#[cfg(target_os = "windows")]
 use windows::Win32::System::DataExchange::*;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Memory::*;
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Ole::CF_UNICODETEXT;
+use windows::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_UNICODETEXT};
 
 /// RAII guard that calls CloseClipboard on drop.
 #[cfg(target_os = "windows")]
@@ -234,17 +244,137 @@ fn platform_set_text(text: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 fn platform_has_image() -> bool {
-    false // Stub — image clipboard support to be added later
+    unsafe {
+        IsClipboardFormatAvailable(CF_DIB.0 as u32).is_ok()
+            || IsClipboardFormatAvailable(CF_BITMAP.0 as u32).is_ok()
+    }
 }
 
 #[cfg(target_os = "windows")]
-fn platform_get_image() -> Option<Vec<u8>> {
-    None // Stub — image clipboard support to be added later
+fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
+    let _guard = ClipboardGuard::open()?;
+    unsafe {
+        let handle = GetClipboardData(CF_DIB.0 as u32).ok()?;
+        let ptr = GlobalLock(HGLOBAL(handle.0)) as *const u8;
+        if ptr.is_null() {
+            return None;
+        }
+
+        // Parse BITMAPINFOHEADER
+        let header = &*(ptr as *const BITMAPINFOHEADER);
+        let width = header.biWidth as u32;
+        let height_raw = header.biHeight;
+        let height = height_raw.unsigned_abs();
+        let bit_count = header.biBitCount;
+
+        if bit_count != 32 && bit_count != 24 {
+            let _ = GlobalUnlock(HGLOBAL(handle.0));
+            return None;
+        }
+
+        let top_down = height_raw < 0;
+        let header_size = header.biSize as usize;
+        let pixel_data = ptr.add(header_size);
+
+        let stride = if bit_count == 32 {
+            (width * 4) as usize
+        } else {
+            // 24-bit: rows are padded to 4-byte boundaries
+            ((width as usize * 3 + 3) & !3)
+        };
+
+        let mut argb = vec![0u32; (width * height) as usize];
+
+        for y in 0..height as usize {
+            let src_y = if top_down { y } else { (height as usize) - 1 - y };
+            let row_ptr = pixel_data.add(src_y * stride);
+
+            for x in 0..width as usize {
+                let (b, g, r, a) = if bit_count == 32 {
+                    let off = x * 4;
+                    (
+                        *row_ptr.add(off),
+                        *row_ptr.add(off + 1),
+                        *row_ptr.add(off + 2),
+                        *row_ptr.add(off + 3),
+                    )
+                } else {
+                    let off = x * 3;
+                    (
+                        *row_ptr.add(off),
+                        *row_ptr.add(off + 1),
+                        *row_ptr.add(off + 2),
+                        255u8,
+                    )
+                };
+                argb[y * width as usize + x] =
+                    (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | (b as u32);
+            }
+        }
+
+        let _ = GlobalUnlock(HGLOBAL(handle.0));
+        Some((width, height, argb))
+    }
 }
 
 #[cfg(target_os = "windows")]
-fn platform_set_image(_width: u32, _height: u32, _data: &[u32]) -> bool {
-    false // Stub — image clipboard support to be added later
+fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
+    let header_size = std::mem::size_of::<BITMAPINFOHEADER>();
+    let row_bytes = (width * 4) as usize;
+    let pixel_bytes = row_bytes * height as usize;
+    let total = header_size + pixel_bytes;
+
+    unsafe {
+        let hmem = match GlobalAlloc(GMEM_MOVEABLE, total) {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+        let ptr = GlobalLock(hmem) as *mut u8;
+        if ptr.is_null() {
+            let _ = GlobalFree(hmem);
+            return false;
+        }
+
+        // Write BITMAPINFOHEADER (bottom-up)
+        let header = &mut *(ptr as *mut BITMAPINFOHEADER);
+        *header = std::mem::zeroed();
+        header.biSize = header_size as u32;
+        header.biWidth = width as i32;
+        header.biHeight = height as i32; // positive = bottom-up
+        header.biPlanes = 1;
+        header.biBitCount = 32;
+        header.biSizeImage = pixel_bytes as u32;
+
+        // Convert ARGB to bottom-up BGRA
+        let pixel_ptr = ptr.add(header_size);
+        for y in 0..height as usize {
+            let dst_y = (height as usize) - 1 - y; // flip for bottom-up
+            for x in 0..width as usize {
+                let argb = data[y * width as usize + x];
+                let a = ((argb >> 24) & 0xFF) as u8;
+                let r = ((argb >> 16) & 0xFF) as u8;
+                let g = ((argb >> 8) & 0xFF) as u8;
+                let b = (argb & 0xFF) as u8;
+                let off = (dst_y * row_bytes + x * 4) as isize;
+                *pixel_ptr.offset(off) = b;
+                *pixel_ptr.offset(off + 1) = g;
+                *pixel_ptr.offset(off + 2) = r;
+                *pixel_ptr.offset(off + 3) = a;
+            }
+        }
+
+        let _ = GlobalUnlock(hmem);
+
+        let _guard = match ClipboardGuard::open() {
+            Some(g) => g,
+            None => {
+                let _ = GlobalFree(hmem);
+                return false;
+            }
+        };
+        let _ = EmptyClipboard();
+        SetClipboardData(CF_DIB.0 as u32, HANDLE(hmem.0)).is_ok()
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -282,15 +412,20 @@ pub fn clipboard_has_image() -> bool {
 }
 
 #[napi(js_name = "clipboard_getImage")]
-pub fn clipboard_get_image(env: Env) -> Result<napi::JsNull> {
-    let _ = platform_get_image(); // Always None for now (stubbed)
-    env.get_null()
+pub fn clipboard_get_image(env: Env) -> Result<Either<ClipboardImage, napi::JsNull>> {
+    match platform_get_image() {
+        Some((width, height, argb)) => Ok(Either::A(ClipboardImage {
+            width,
+            height,
+            data: Uint32Array::new(argb),
+        })),
+        None => Ok(Either::B(env.get_null()?)),
+    }
 }
 
 #[napi(js_name = "clipboard_setImage")]
-pub fn clipboard_set_image(_width: u32, _height: u32, _data: Uint32Array) -> bool {
-    // platform_set_image not called with _data since image is stubbed on all platforms
-    false
+pub fn clipboard_set_image(width: u32, height: u32, data: Uint32Array) -> bool {
+    platform_set_image(width, height, data.as_ref())
 }
 
 #[napi(js_name = "clipboard_getSequence")]

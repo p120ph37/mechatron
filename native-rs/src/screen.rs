@@ -23,6 +23,20 @@ static mut TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
 #[cfg(target_os = "linux")]
 static mut TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
 
+// Windows cached screen data
+#[cfg(target_os = "windows")]
+struct WinScreenInfo {
+    bounds: (i32, i32, i32, i32),
+    usable: (i32, i32, i32, i32),
+}
+
+#[cfg(target_os = "windows")]
+static mut WIN_SCREENS: Vec<WinScreenInfo> = Vec::new();
+#[cfg(target_os = "windows")]
+static mut WIN_TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
+#[cfg(target_os = "windows")]
+static mut WIN_TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
+
 // Union two bounds (x, y, w, h)
 #[allow(dead_code)]
 fn union_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
@@ -72,7 +86,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         let count = XScreenCount(display);
         let mut used_xinerama = false;
 
-        // Try Xinerama first (only when single logical X screen with Xinerama active)
         if count == 1 && is_xinerama_available() && XineramaIsActive(display) == True_ {
             let mut xine_count: c_int = 0;
             let info = XineramaQueryScreens(display, &mut xine_count);
@@ -81,7 +94,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
                     let si = &*info.add(i);
                     let bounds = (si.x_org as i32, si.y_org as i32, si.width as i32, si.height as i32);
 
-                    // Merge cloned/mirrored screens
                     if let Some(last) = SCREENS.last_mut() {
                         if intersects(last.bounds, bounds) {
                             let la = last.bounds.2 * last.bounds.3;
@@ -100,7 +112,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             }
         }
 
-        // Fallback: traditional multi-screen
         if SCREENS.is_empty() {
             let primary = XDefaultScreen(display);
             for i in 0..count {
@@ -117,7 +128,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             }
         }
 
-        // Try to get usable work area from _NET_WORKAREA
         if net_workarea != None_ {
             for i in 0..SCREENS.len() {
                 let root_screen = if used_xinerama { XDefaultScreen(display) } else { i as c_int };
@@ -156,13 +166,11 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             return Ok(Either::B(env.get_null()?));
         }
 
-        // Compute totals
         for s in SCREENS.iter() {
             TOTAL_BOUNDS = union_bounds(TOTAL_BOUNDS, s.bounds);
             TOTAL_USABLE = union_bounds(TOTAL_USABLE, s.usable);
         }
 
-        // Build JS result array
         let mut arr = env.create_array(SCREENS.len() as u32)?;
         for (i, s) in SCREENS.iter().enumerate() {
             let mut obj = env.create_object()?;
@@ -184,7 +192,89 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "screen_synchronize")]
+pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
+    use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::Foundation::*;
+
+    unsafe {
+        WIN_SCREENS.clear();
+        WIN_TOTAL_BOUNDS = (0, 0, 0, 0);
+        WIN_TOTAL_USABLE = (0, 0, 0, 0);
+
+        // Collect monitors via EnumDisplayMonitors with callback
+        unsafe extern "system" fn enum_proc(
+            hmon: HMONITOR,
+            _hdc: HDC,
+            _rect: *mut RECT,
+            lparam: LPARAM,
+        ) -> BOOL {
+            let monitors = &mut *(lparam.0 as *mut Vec<(i32, i32, i32, i32, i32, i32, i32, i32)>);
+            let mut mi = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+                let b = mi.rcMonitor;
+                let w = mi.rcWork;
+                monitors.push((
+                    b.left, b.top, b.right - b.left, b.bottom - b.top,
+                    w.left, w.top, w.right - w.left, w.bottom - w.top,
+                ));
+            }
+            TRUE
+        }
+
+        let mut raw: Vec<(i32, i32, i32, i32, i32, i32, i32, i32)> = Vec::new();
+        let _ = EnumDisplayMonitors(
+            HDC::default(),
+            None,
+            Some(enum_proc),
+            LPARAM(&mut raw as *mut _ as isize),
+        );
+
+        if raw.is_empty() {
+            return Ok(Either::B(env.get_null()?));
+        }
+
+        // Put primary monitor first (origin at 0,0)
+        raw.sort_by(|a, b| {
+            let a_primary = a.0 == 0 && a.1 == 0;
+            let b_primary = b.0 == 0 && b.1 == 0;
+            b_primary.cmp(&a_primary)
+        });
+
+        for &(bx, by, bw, bh, ux, uy, uw, uh) in &raw {
+            let bounds = (bx, by, bw, bh);
+            let usable = (ux, uy, uw, uh);
+            WIN_SCREENS.push(WinScreenInfo { bounds, usable });
+            WIN_TOTAL_BOUNDS = union_bounds(WIN_TOTAL_BOUNDS, bounds);
+            WIN_TOTAL_USABLE = union_bounds(WIN_TOTAL_USABLE, usable);
+        }
+
+        let mut arr = env.create_array(WIN_SCREENS.len() as u32)?;
+        for (i, s) in WIN_SCREENS.iter().enumerate() {
+            let mut obj = env.create_object()?;
+            let mut bo = env.create_object()?;
+            bo.set("x", s.bounds.0)?;
+            bo.set("y", s.bounds.1)?;
+            bo.set("w", s.bounds.2)?;
+            bo.set("h", s.bounds.3)?;
+            let mut uo = env.create_object()?;
+            uo.set("x", s.usable.0)?;
+            uo.set("y", s.usable.1)?;
+            uo.set("w", s.usable.2)?;
+            uo.set("h", s.usable.3)?;
+            obj.set("bounds", bo)?;
+            obj.set("usable", uo)?;
+            arr.set(i as u32, obj)?;
+        }
+        Ok(Either::A(arr.coerce_to_object()?))
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
     Ok(Either::B(env.get_null()?))
@@ -237,7 +327,6 @@ pub fn screen_grab_screen(
                 let r = ((pixel & red_mask) >> 16) as u8;
                 let g = ((pixel & green_mask) >> 8) as u8;
                 let b = (pixel & blue_mask) as u8;
-                // ARGB format matching C++ (Alpha=255, R, G, B)
                 pixels[(yy * iw + xx) as usize] = 0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
             }
         }
@@ -247,7 +336,77 @@ pub fn screen_grab_screen(
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+#[napi(js_name = "screen_grabScreen")]
+pub fn screen_grab_screen(
+    env: Env,
+    x: i32, y: i32, w: i32, h: i32,
+    _window_handle: Option<f64>,
+) -> Result<Either<Uint32Array, napi::JsNull>> {
+    use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::Foundation::*;
+
+    if w <= 0 || h <= 0 {
+        return Ok(Either::B(env.get_null()?));
+    }
+
+    unsafe {
+        let hdc_screen = GetDC(HWND::default());
+        if hdc_screen.is_invalid() {
+            return Ok(Either::B(env.get_null()?));
+        }
+
+        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        let hbmp = CreateCompatibleBitmap(hdc_screen, w, h);
+        let old = SelectObject(hdc_mem, hbmp);
+
+        let _ = BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, x, y, SRCCOPY);
+
+        // Read pixel data using GetDIBits
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: 0, // BI_RGB
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let len = (w * h) as usize;
+        let mut buf = vec![0u32; len];
+        GetDIBits(
+            hdc_mem,
+            hbmp,
+            0,
+            h as u32,
+            Some(buf.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        // Convert BGRA to ARGB
+        for px in buf.iter_mut() {
+            let bgra = *px;
+            let b = (bgra >> 0) & 0xFF;
+            let g = (bgra >> 8) & 0xFF;
+            let r = (bgra >> 16) & 0xFF;
+            *px = 0xFF000000 | (r << 16) | (g << 8) | b;
+        }
+
+        SelectObject(hdc_mem, old);
+        let _ = DeleteObject(hbmp);
+        let _ = DeleteDC(hdc_mem);
+        ReleaseDC(HWND::default(), hdc_screen);
+
+        Ok(Either::A(Uint32Array::new(buf)))
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[napi(js_name = "screen_grabScreen")]
 pub fn screen_grab_screen(
     env: Env,
@@ -264,29 +423,35 @@ pub fn screen_grab_screen(
 #[cfg(target_os = "linux")]
 #[napi(js_name = "screen_isCompositing")]
 pub fn screen_is_compositing() -> bool {
-    true // Always true on Linux (matching C++ behavior)
+    true
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
 #[napi(js_name = "screen_isCompositing")]
 pub fn screen_is_compositing() -> bool {
-    false // Not implemented on this platform
+    // DWM is always enabled on Windows 8+
+    unsafe {
+        let mut enabled: windows::Win32::Foundation::BOOL = windows::Win32::Foundation::BOOL(0);
+        if windows::Win32::Graphics::Dwm::DwmIsCompositionEnabled(&mut enabled).is_ok() {
+            return enabled.as_bool();
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "screen_isCompositing")]
+pub fn screen_is_compositing() -> bool {
+    false
 }
 
 // =============================================================================
 // screen_setCompositing
 // =============================================================================
 
-#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_setCompositing")]
 pub fn screen_set_compositing(_enabled: bool) {
-    // No-op on Linux (matching C++ behavior)
-}
-
-#[cfg(not(target_os = "linux"))]
-#[napi(js_name = "screen_setCompositing")]
-pub fn screen_set_compositing(_enabled: bool) {
-    // No-op: not implemented on this platform
+    // No-op on all platforms
 }
 
 // =============================================================================
@@ -306,14 +471,24 @@ pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
     Ok(obj)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
 #[napi(js_name = "screen_getTotalBounds")]
 pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
-    obj.set("x", 0)?;
-    obj.set("y", 0)?;
-    obj.set("w", 0)?;
-    obj.set("h", 0)?;
+    unsafe {
+        obj.set("x", WIN_TOTAL_BOUNDS.0)?;
+        obj.set("y", WIN_TOTAL_BOUNDS.1)?;
+        obj.set("w", WIN_TOTAL_BOUNDS.2)?;
+        obj.set("h", WIN_TOTAL_BOUNDS.3)?;
+    }
+    Ok(obj)
+}
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "screen_getTotalBounds")]
+pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
     Ok(obj)
 }
 
@@ -334,13 +509,23 @@ pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
     Ok(obj)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
 #[napi(js_name = "screen_getTotalUsable")]
 pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
     let mut obj = env.create_object()?;
-    obj.set("x", 0)?;
-    obj.set("y", 0)?;
-    obj.set("w", 0)?;
-    obj.set("h", 0)?;
+    unsafe {
+        obj.set("x", WIN_TOTAL_USABLE.0)?;
+        obj.set("y", WIN_TOTAL_USABLE.1)?;
+        obj.set("w", WIN_TOTAL_USABLE.2)?;
+        obj.set("h", WIN_TOTAL_USABLE.3)?;
+    }
+    Ok(obj)
+}
+
+#[cfg(target_os = "macos")]
+#[napi(js_name = "screen_getTotalUsable")]
+pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
+    let mut obj = env.create_object()?;
+    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
     Ok(obj)
 }
