@@ -20,8 +20,8 @@ regex = "1"
 core-foundation = "0.10"
 core-graphics = "0.24"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSObject", "NSObjCRuntime", "NSGeometry"] }
-objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSScreen", "NSImage", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSObject", "NSObjCRuntime", "NSGeometry", "NSData"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSScreen", "NSImage", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSApplication", "NSBitmapImageRep", "NSColorSpace"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 regex = "1"

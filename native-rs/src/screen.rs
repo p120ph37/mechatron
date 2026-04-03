@@ -277,7 +277,41 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
 #[cfg(target_os = "macos")]
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
-    Ok(Either::B(env.get_null()?))
+    use objc2_app_kit::NSScreen;
+    use objc2_foundation::NSArray;
+
+    unsafe {
+        let screens: objc2::rc::Retained<NSArray<NSScreen>> = NSScreen::screens();
+        if screens.count() == 0 {
+            return Ok(Either::B(env.get_null()?));
+        }
+
+        let mut arr = env.create_array(screens.count() as u32)?;
+
+        for i in 0..screens.count() {
+            let screen = &screens[i];
+            let frame = screen.frame();
+            let visible = screen.visibleFrame();
+
+            let mut bo = env.create_object()?;
+            bo.set("x", frame.origin.x as i32)?;
+            bo.set("y", frame.origin.y as i32)?;
+            bo.set("w", frame.size.width as i32)?;
+            bo.set("h", frame.size.height as i32)?;
+
+            let mut uo = env.create_object()?;
+            uo.set("x", visible.origin.x as i32)?;
+            uo.set("y", visible.origin.y as i32)?;
+            uo.set("w", visible.size.width as i32)?;
+            uo.set("h", visible.size.height as i32)?;
+
+            let mut obj = env.create_object()?;
+            obj.set("bounds", bo)?;
+            obj.set("usable", uo)?;
+            arr.set(i as u32, obj)?;
+        }
+        Ok(Either::A(arr.coerce_to_object()?))
+    }
 }
 
 // =============================================================================
@@ -431,12 +465,11 @@ pub fn screen_is_compositing() -> bool {
 pub fn screen_is_compositing() -> bool {
     // DWM is always enabled on Windows 8+
     unsafe {
-        let mut enabled: windows::Win32::Foundation::BOOL = windows::Win32::Foundation::BOOL(0);
-        if windows::Win32::Graphics::Dwm::DwmIsCompositionEnabled(&mut enabled).is_ok() {
-            return enabled.as_bool();
+        match windows::Win32::Graphics::Dwm::DwmIsCompositionEnabled() {
+            Ok(enabled) => enabled.as_bool(),
+            Err(_) => true,
         }
     }
-    true
 }
 
 #[cfg(target_os = "macos")]

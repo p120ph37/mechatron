@@ -110,18 +110,119 @@ fn platform_set_text(text: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
+fn pasteboard_type_tiff() -> &'static NSString {
+    unsafe { objc2_app_kit::NSPasteboardTypeTIFF }
+}
+
+#[cfg(target_os = "macos")]
 fn platform_has_image() -> bool {
-    false // Stub — image clipboard support to be added later
+    unsafe {
+        let board = NSPasteboard::generalPasteboard();
+        let types = objc2_foundation::NSArray::from_retained_slice(&[
+            pasteboard_type_tiff().copy(),
+        ]);
+        board.availableTypeFromArray(&types).is_some()
+    }
 }
 
 #[cfg(target_os = "macos")]
 fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    None // Stub — image clipboard support to be added later
+    use objc2_app_kit::NSBitmapImageRep;
+
+    unsafe {
+        let board = NSPasteboard::generalPasteboard();
+        let tiff_data = board.dataForType(pasteboard_type_tiff())?;
+
+        let rep = NSBitmapImageRep::imageRepWithData(&tiff_data)?;
+        let w = rep.pixelsWide() as u32;
+        let h = rep.pixelsHigh() as u32;
+        if w == 0 || h == 0 { return None; }
+
+        let ptr = rep.bitmapData();
+        if ptr.is_null() { return None; }
+
+        let bps = rep.bitsPerSample() as u32;
+        let spp = rep.samplesPerPixel() as u32;
+        let bpr = rep.bytesPerRow() as usize;
+        let has_alpha = rep.hasAlpha();
+
+        let mut argb = vec![0u32; (w * h) as usize];
+
+        for y in 0..h as usize {
+            let row = ptr.add(y * bpr);
+            for x in 0..w as usize {
+                let (r, g, b, a) = if bps == 8 && spp >= 3 {
+                    let off = x * spp as usize;
+                    (
+                        *row.add(off),
+                        *row.add(off + 1),
+                        *row.add(off + 2),
+                        if has_alpha && spp >= 4 { *row.add(off + 3) } else { 255u8 },
+                    )
+                } else {
+                    (0, 0, 0, 255)
+                };
+                argb[y * w as usize + x] =
+                    (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | (b as u32);
+            }
+        }
+        Some((w, h, argb))
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn platform_set_image(_width: u32, _height: u32, _data: &[u32]) -> bool {
-    false // Stub — image clipboard support to be added later
+fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
+    use objc2_app_kit::{NSBitmapImageRep, NSBitmapFormat};
+
+    unsafe {
+        // Create RGBA bitmap data
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        for i in 0..data.len() {
+            let argb = data[i];
+            let a = ((argb >> 24) & 0xFF) as u8;
+            let r = ((argb >> 16) & 0xFF) as u8;
+            let g = ((argb >> 8) & 0xFF) as u8;
+            let b = (argb & 0xFF) as u8;
+            rgba[i * 4] = r;
+            rgba[i * 4 + 1] = g;
+            rgba[i * 4 + 2] = b;
+            rgba[i * 4 + 3] = a;
+        }
+
+        let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bitmapFormat_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(),
+            std::ptr::null_mut(),
+            width as isize,
+            height as isize,
+            8,
+            4,
+            true,
+            false,
+            objc2_app_kit::NSCalibratedRGBColorSpace,
+            NSBitmapFormat::AlphaNonpremultiplied,
+            (width * 4) as isize,
+            32,
+        );
+        let rep = match rep {
+            Some(r) => r,
+            None => return false,
+        };
+
+        // Copy pixel data
+        let bmp_ptr = rep.bitmapData();
+        if bmp_ptr.is_null() { return false; }
+        std::ptr::copy_nonoverlapping(rgba.as_ptr(), bmp_ptr, rgba.len());
+
+        // Get TIFF representation
+        let tiff = match rep.TIFFRepresentation() {
+            Some(t) => t,
+            None => return false,
+        };
+
+        let board = NSPasteboard::generalPasteboard();
+        board.clearContents();
+        board.setData_forType(&tiff, pasteboard_type_tiff())
+    }
 }
 
 #[cfg(target_os = "macos")]

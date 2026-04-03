@@ -57,6 +57,28 @@ fn proc_has_exited(pid: i32) -> bool {
     !Path::new(&format!("/proc/{}", pid)).exists()
 }
 
+// ── macOS internals ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn proc_pidpath(pid: i32, buffer: *mut u8, buffersize: u32) -> i32;
+    fn proc_listallpids(buffer: *mut libc::c_void, buffersize: i32) -> i32;
+}
+
+#[cfg(target_os = "macos")]
+fn mac_get_path(pid: i32) -> String {
+    if pid <= 0 { return String::new(); }
+    let mut buf = vec![0u8; libc::PATH_MAX as usize];
+    unsafe {
+        let len = proc_pidpath(pid, buf.as_mut_ptr(), buf.len() as u32);
+        if len > 0 {
+            String::from_utf8_lossy(&buf[..len as usize]).to_string()
+        } else {
+            String::new()
+        }
+    }
+}
+
 // ── Windows internals ───────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
@@ -65,6 +87,8 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::Threading::*;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::ProcessStatus::*;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Diagnostics::Debug::CheckRemoteDebuggerPresent;
 
 #[cfg(target_os = "windows")]
 fn win_open_process(pid: i32, access: PROCESS_ACCESS_RIGHTS) -> Option<HANDLE> {
@@ -141,8 +165,9 @@ pub fn process_open(pid: i32) -> bool {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_open")]
-pub fn process_open(_pid: i32) -> bool {
-    false
+pub fn process_open(pid: i32) -> bool {
+    if pid <= 0 { return false; }
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 // ── process_close ───────────────────────────────────────────────────────
@@ -171,8 +196,9 @@ pub fn process_is_valid(pid: i32) -> bool {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_isValid")]
-pub fn process_is_valid(_pid: i32) -> bool {
-    false
+pub fn process_is_valid(pid: i32) -> bool {
+    if pid <= 0 { return false; }
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 // ── process_is64Bit ─────────────────────────────────────────────────────
@@ -203,7 +229,8 @@ pub fn process_is_64_bit(pid: i32) -> bool {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_is64Bit")]
 pub fn process_is_64_bit(_pid: i32) -> bool {
-    false
+    // macOS 10.15+ only supports 64-bit processes
+    true
 }
 
 // ── process_isDebugged ──────────────────────────────────────────────────
@@ -275,8 +302,10 @@ pub fn process_get_name(pid: i32) -> String {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_getName")]
-pub fn process_get_name(_pid: i32) -> String {
-    String::new()
+pub fn process_get_name(pid: i32) -> String {
+    let path = mac_get_path(pid);
+    if path.is_empty() { return String::new(); }
+    path.rsplit('/').next().unwrap_or("").to_string()
 }
 
 // ── process_getPath ─────────────────────────────────────────────────────
@@ -295,8 +324,8 @@ pub fn process_get_path(pid: i32) -> String {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_getPath")]
-pub fn process_get_path(_pid: i32) -> String {
-    String::new()
+pub fn process_get_path(pid: i32) -> String {
+    mac_get_path(pid)
 }
 
 // ── process_exit ────────────────────────────────────────────────────────
@@ -322,7 +351,11 @@ pub fn process_exit(pid: i32) {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_exit")]
-pub fn process_exit(_pid: i32) {}
+pub fn process_exit(pid: i32) {
+    if pid > 0 {
+        unsafe { libc::kill(pid, libc::SIGTERM); }
+    }
+}
 
 // ── process_kill ────────────────────────────────────────────────────────
 
@@ -347,7 +380,11 @@ pub fn process_kill(pid: i32) {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_kill")]
-pub fn process_kill(_pid: i32) {}
+pub fn process_kill(pid: i32) {
+    if pid > 0 {
+        unsafe { libc::kill(pid, libc::SIGKILL); }
+    }
+}
 
 // ── process_hasExited ───────────────────────────────────────────────────
 
@@ -365,8 +402,9 @@ pub fn process_has_exited(pid: i32) -> bool {
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_hasExited")]
-pub fn process_has_exited(_pid: i32) -> bool {
-    true
+pub fn process_has_exited(pid: i32) -> bool {
+    if pid <= 0 { return true; }
+    unsafe { libc::kill(pid, 0) != 0 }
 }
 
 // ── process_getModules ──────────────────────────────────────────────────
@@ -570,8 +608,42 @@ pub fn process_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsO
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_getList")]
-pub fn process_get_list(env: Env, _regex_str: Option<String>) -> Result<napi::JsObject> {
-    Ok(env.create_array(0)?.coerce_to_object()?)
+pub fn process_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsObject> {
+    let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
+
+    unsafe {
+        // First call to get count
+        let count = proc_listallpids(std::ptr::null_mut(), 0);
+        if count <= 0 {
+            return Ok(env.create_array(0)?.coerce_to_object()?);
+        }
+        // Allocate with some extra space
+        let buf_size = (count as usize + 64) * std::mem::size_of::<i32>();
+        let mut pids = vec![0i32; count as usize + 64];
+        let actual = proc_listallpids(pids.as_mut_ptr() as *mut libc::c_void, buf_size as i32);
+        if actual <= 0 {
+            return Ok(env.create_array(0)?.coerce_to_object()?);
+        }
+        let num_pids = actual as usize / std::mem::size_of::<i32>();
+
+        let mut results = Vec::new();
+        for i in 0..num_pids {
+            let pid = pids[i];
+            if pid <= 0 { continue; }
+            if let Some(ref pat) = pattern {
+                let name = mac_get_path(pid);
+                let basename = name.rsplit('/').next().unwrap_or("");
+                if !pat.is_match(basename) && !pat.is_match(&name) { continue; }
+            }
+            results.push(pid);
+        }
+
+        let mut arr = env.create_array(results.len() as u32)?;
+        for (i, &pid) in results.iter().enumerate() {
+            arr.set(i as u32, pid as f64)?;
+        }
+        Ok(arr.coerce_to_object()?)
+    }
 }
 
 // ── process_getCurrent ──────────────────────────────────────────────────
@@ -591,7 +663,7 @@ pub fn process_get_current() -> f64 {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_getCurrent")]
 pub fn process_get_current() -> f64 {
-    0.0
+    unsafe { libc::getpid() as f64 }
 }
 
 // ── process_isSys64Bit ──────────────────────────────────────────────────
@@ -608,16 +680,17 @@ pub fn process_is_sys_64_bit() -> bool {
     unsafe {
         let mut info: windows::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
         windows::Win32::System::SystemInformation::GetNativeSystemInfo(&mut info);
+        use windows::Win32::System::SystemInformation::PROCESSOR_ARCHITECTURE;
         // PROCESSOR_ARCHITECTURE_AMD64 = 9, PROCESSOR_ARCHITECTURE_ARM64 = 12
         let arch = info.Anonymous.Anonymous.wProcessorArchitecture;
-        arch == 9 || arch == 12
+        arch == PROCESSOR_ARCHITECTURE(9) || arch == PROCESSOR_ARCHITECTURE(12)
     }
 }
 
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_isSys64Bit")]
 pub fn process_is_sys_64_bit() -> bool {
-    false
+    cfg!(target_pointer_width = "64")
 }
 
 // ── process_getSegments ─────────────────────────────────────────────────
