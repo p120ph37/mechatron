@@ -162,7 +162,7 @@ fn platform_get_key_state(keycode: i32) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_get_state(env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     unsafe {
         if !is_xtest_available() {
             return Ok(());
@@ -302,7 +302,7 @@ fn platform_get_key_state(keycode: i32) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn platform_get_state(env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     for &keyval in ALL_KEYS.iter() {
         let pressed = unsafe {
             GetAsyncKeyState(keyval as i32) & (0x8000u16 as i16) != 0

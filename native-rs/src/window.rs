@@ -196,7 +196,7 @@ unsafe fn get_frame(win: Window) -> (i32, i32, i32, i32) {
 #[cfg(target_os = "linux")]
 unsafe fn get_title(win: Window) -> String {
     load_atoms();
-    let d = get_display();
+    let _ = get_display();
     let _xe = XDismissErrors::new();
 
     let result = get_window_property(win, WM_NAME, None);
@@ -475,7 +475,7 @@ pub fn window_get_handle(handle: f64) -> f64 {
 
 #[cfg(target_os = "linux")]
 #[napi(js_name = "window_setHandle")]
-pub fn window_set_handle(handle: f64, new_handle: f64) -> bool {
+pub fn window_set_handle(_handle: f64, new_handle: f64) -> bool {
     unsafe { validate_handle(new_handle as u64) != 0 || new_handle == 0.0 }
 }
 

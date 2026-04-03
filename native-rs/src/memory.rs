@@ -820,9 +820,11 @@ pub fn memory_find(
 
 // ── Flags constants ────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const FLAG_DEFAULT: i32 = 0;
 #[allow(dead_code)]
 const FLAG_SKIP_ERRORS: i32 = 1;
+#[allow(dead_code)]
 const FLAG_AUTO_ACCESS: i32 = 2;
 
 // ── memory_readData ─────────────────────────────────────────────────────

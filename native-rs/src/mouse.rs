@@ -82,7 +82,7 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_get_pos(env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     unsafe {
         if !is_xtest_available() {
             obj.set("x", 0i32)?;
@@ -127,7 +127,7 @@ fn platform_set_pos(x: i32, y: i32) {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_get_state(env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
     unsafe {
         if !is_xtest_available() {
             return Ok(());

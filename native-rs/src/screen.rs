@@ -9,38 +9,23 @@ use std::ptr;
 #[cfg(target_os = "linux")]
 use crate::x11::*;
 
-// Cached screen data from last synchronize
-#[cfg(target_os = "linux")]
-struct ScreenInfo {
-    bounds: (i32, i32, i32, i32),
-    usable: (i32, i32, i32, i32),
+use std::sync::Mutex;
+
+type Rect = (i32, i32, i32, i32);
+
+struct ScreenData {
+    screens: Vec<(Rect, Rect)>, // (bounds, usable) pairs
+    total_bounds: Rect,
+    total_usable: Rect,
 }
 
-#[cfg(target_os = "linux")]
-static mut SCREENS: Vec<ScreenInfo> = Vec::new();
-#[cfg(target_os = "linux")]
-static mut TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
-#[cfg(target_os = "linux")]
-static mut TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
-
-// Windows cached screen data
-#[cfg(target_os = "windows")]
-struct WinScreenInfo {
-    bounds: (i32, i32, i32, i32),
-    usable: (i32, i32, i32, i32),
+impl ScreenData {
+    const fn new() -> Self {
+        Self { screens: Vec::new(), total_bounds: (0,0,0,0), total_usable: (0,0,0,0) }
+    }
 }
 
-#[cfg(target_os = "windows")]
-static mut WIN_SCREENS: Vec<WinScreenInfo> = Vec::new();
-#[cfg(target_os = "windows")]
-static mut WIN_TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
-#[cfg(target_os = "windows")]
-static mut WIN_TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
-
-#[cfg(target_os = "macos")]
-static mut MAC_TOTAL_BOUNDS: (i32, i32, i32, i32) = (0, 0, 0, 0);
-#[cfg(target_os = "macos")]
-static mut MAC_TOTAL_USABLE: (i32, i32, i32, i32) = (0, 0, 0, 0);
+static SCREEN_DATA: Mutex<ScreenData> = Mutex::new(ScreenData::new());
 
 // Union two bounds (x, y, w, h)
 #[allow(dead_code)]
@@ -75,11 +60,11 @@ fn intersect_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i
 #[cfg(target_os = "linux")]
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
-    unsafe {
-        SCREENS.clear();
-        TOTAL_BOUNDS = (0, 0, 0, 0);
-        TOTAL_USABLE = (0, 0, 0, 0);
+    let mut screens: Vec<(Rect, Rect)> = Vec::new();
+    let mut total_bounds: Rect = (0, 0, 0, 0);
+    let mut total_usable: Rect = (0, 0, 0, 0);
 
+    unsafe {
         let display = get_display();
         if display.is_null() {
             return Ok(Either::B(env.get_null()?));
@@ -99,42 +84,41 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
                     let si = &*info.add(i);
                     let bounds = (si.x_org as i32, si.y_org as i32, si.width as i32, si.height as i32);
 
-                    if let Some(last) = SCREENS.last_mut() {
-                        if intersects(last.bounds, bounds) {
-                            let la = last.bounds.2 * last.bounds.3;
+                    if let Some(last) = screens.last_mut() {
+                        if intersects(last.0, bounds) {
+                            let la = last.0.2 * last.0.3;
                             let ba = bounds.2 * bounds.3;
                             if ba > la {
-                                last.bounds = bounds;
-                                last.usable = bounds;
+                                last.0 = bounds;
+                                last.1 = bounds;
                             }
                             continue;
                         }
                     }
-                    SCREENS.push(ScreenInfo { bounds, usable: bounds });
+                    screens.push((bounds, bounds));
                 }
                 XFree(info as *mut c_void);
                 used_xinerama = true;
             }
         }
 
-        if SCREENS.is_empty() {
+        if screens.is_empty() {
             let primary = XDefaultScreen(display);
             for i in 0..count {
                 let screen = XScreenOfDisplay(display, i);
                 let w = XWidthOfScreen(screen);
                 let h = XHeightOfScreen(screen);
                 let bounds = (0, 0, w, h);
-                let si = ScreenInfo { bounds, usable: bounds };
                 if i == primary {
-                    SCREENS.insert(0, si);
+                    screens.insert(0, (bounds, bounds));
                 } else {
-                    SCREENS.push(si);
+                    screens.push((bounds, bounds));
                 }
             }
         }
 
         if net_workarea != None_ {
-            for i in 0..SCREENS.len() {
+            for i in 0..screens.len() {
                 let root_screen = if used_xinerama { XDefaultScreen(display) } else { i as c_int };
                 let win = XRootWindow(display, root_screen);
 
@@ -157,8 +141,8 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
                         *usable.add(2) as i32,
                         *usable.add(3) as i32,
                     );
-                    SCREENS[i].usable = if used_xinerama {
-                        intersect_bounds(u, SCREENS[i].bounds)
+                    screens[i].1 = if used_xinerama {
+                        intersect_bounds(u, screens[i].0)
                     } else {
                         u
                     };
@@ -166,35 +150,43 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
                 if !result.is_null() { XFree(result as *mut c_void); }
             }
         }
-
-        if SCREENS.is_empty() {
-            return Ok(Either::B(env.get_null()?));
-        }
-
-        for s in SCREENS.iter() {
-            TOTAL_BOUNDS = union_bounds(TOTAL_BOUNDS, s.bounds);
-            TOTAL_USABLE = union_bounds(TOTAL_USABLE, s.usable);
-        }
-
-        let mut arr = env.create_array(SCREENS.len() as u32)?;
-        for (i, s) in SCREENS.iter().enumerate() {
-            let mut obj = env.create_object()?;
-            let mut bo = env.create_object()?;
-            bo.set("x", s.bounds.0)?;
-            bo.set("y", s.bounds.1)?;
-            bo.set("w", s.bounds.2)?;
-            bo.set("h", s.bounds.3)?;
-            let mut uo = env.create_object()?;
-            uo.set("x", s.usable.0)?;
-            uo.set("y", s.usable.1)?;
-            uo.set("w", s.usable.2)?;
-            uo.set("h", s.usable.3)?;
-            obj.set("bounds", bo)?;
-            obj.set("usable", uo)?;
-            arr.set(i as u32, obj)?;
-        }
-        Ok(Either::A(arr.coerce_to_object()?))
     }
+
+    if screens.is_empty() {
+        return Ok(Either::B(env.get_null()?));
+    }
+
+    for &(bounds, usable) in &screens {
+        total_bounds = union_bounds(total_bounds, bounds);
+        total_usable = union_bounds(total_usable, usable);
+    }
+
+    let mut arr = env.create_array(screens.len() as u32)?;
+    for (i, &(bounds, usable)) in screens.iter().enumerate() {
+        let mut obj = env.create_object()?;
+        let mut bo = env.create_object()?;
+        bo.set("x", bounds.0)?;
+        bo.set("y", bounds.1)?;
+        bo.set("w", bounds.2)?;
+        bo.set("h", bounds.3)?;
+        let mut uo = env.create_object()?;
+        uo.set("x", usable.0)?;
+        uo.set("y", usable.1)?;
+        uo.set("w", usable.2)?;
+        uo.set("h", usable.3)?;
+        obj.set("bounds", bo)?;
+        obj.set("usable", uo)?;
+        arr.set(i as u32, obj)?;
+    }
+
+    // Store for getTotalBounds / getTotalUsable
+    if let Ok(mut data) = SCREEN_DATA.lock() {
+        data.screens = screens;
+        data.total_bounds = total_bounds;
+        data.total_usable = total_usable;
+    }
+
+    Ok(Either::A(arr.coerce_to_object()?))
 }
 
 #[cfg(target_os = "windows")]
@@ -203,80 +195,87 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Foundation::*;
 
-    unsafe {
-        WIN_SCREENS.clear();
-        WIN_TOTAL_BOUNDS = (0, 0, 0, 0);
-        WIN_TOTAL_USABLE = (0, 0, 0, 0);
-
-        // Collect monitors via EnumDisplayMonitors with callback
-        unsafe extern "system" fn enum_proc(
-            hmon: HMONITOR,
-            _hdc: HDC,
-            _rect: *mut RECT,
-            lparam: LPARAM,
-        ) -> BOOL {
-            let monitors = &mut *(lparam.0 as *mut Vec<(i32, i32, i32, i32, i32, i32, i32, i32)>);
-            let mut mi = MONITORINFO {
-                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-                ..Default::default()
-            };
-            if GetMonitorInfoW(hmon, &mut mi).as_bool() {
-                let b = mi.rcMonitor;
-                let w = mi.rcWork;
-                monitors.push((
-                    b.left, b.top, b.right - b.left, b.bottom - b.top,
-                    w.left, w.top, w.right - w.left, w.bottom - w.top,
-                ));
-            }
-            TRUE
+    // Collect monitors via EnumDisplayMonitors with callback
+    unsafe extern "system" fn enum_proc(
+        hmon: HMONITOR,
+        _hdc: HDC,
+        _rect: *mut RECT,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let monitors = &mut *(lparam.0 as *mut Vec<(i32, i32, i32, i32, i32, i32, i32, i32)>);
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+            let b = mi.rcMonitor;
+            let w = mi.rcWork;
+            monitors.push((
+                b.left, b.top, b.right - b.left, b.bottom - b.top,
+                w.left, w.top, w.right - w.left, w.bottom - w.top,
+            ));
         }
+        TRUE
+    }
 
-        let mut raw: Vec<(i32, i32, i32, i32, i32, i32, i32, i32)> = Vec::new();
+    let mut raw: Vec<(i32, i32, i32, i32, i32, i32, i32, i32)> = Vec::new();
+    unsafe {
         let _ = EnumDisplayMonitors(
             HDC::default(),
             None,
             Some(enum_proc),
             LPARAM(&mut raw as *mut _ as isize),
         );
-
-        if raw.is_empty() {
-            return Ok(Either::B(env.get_null()?));
-        }
-
-        // Put primary monitor first (origin at 0,0)
-        raw.sort_by(|a, b| {
-            let a_primary = a.0 == 0 && a.1 == 0;
-            let b_primary = b.0 == 0 && b.1 == 0;
-            b_primary.cmp(&a_primary)
-        });
-
-        for &(bx, by, bw, bh, ux, uy, uw, uh) in &raw {
-            let bounds = (bx, by, bw, bh);
-            let usable = (ux, uy, uw, uh);
-            WIN_SCREENS.push(WinScreenInfo { bounds, usable });
-            WIN_TOTAL_BOUNDS = union_bounds(WIN_TOTAL_BOUNDS, bounds);
-            WIN_TOTAL_USABLE = union_bounds(WIN_TOTAL_USABLE, usable);
-        }
-
-        let mut arr = env.create_array(WIN_SCREENS.len() as u32)?;
-        for (i, s) in WIN_SCREENS.iter().enumerate() {
-            let mut obj = env.create_object()?;
-            let mut bo = env.create_object()?;
-            bo.set("x", s.bounds.0)?;
-            bo.set("y", s.bounds.1)?;
-            bo.set("w", s.bounds.2)?;
-            bo.set("h", s.bounds.3)?;
-            let mut uo = env.create_object()?;
-            uo.set("x", s.usable.0)?;
-            uo.set("y", s.usable.1)?;
-            uo.set("w", s.usable.2)?;
-            uo.set("h", s.usable.3)?;
-            obj.set("bounds", bo)?;
-            obj.set("usable", uo)?;
-            arr.set(i as u32, obj)?;
-        }
-        Ok(Either::A(arr.coerce_to_object()?))
     }
+
+    if raw.is_empty() {
+        return Ok(Either::B(env.get_null()?));
+    }
+
+    // Put primary monitor first (origin at 0,0)
+    raw.sort_by(|a, b| {
+        let a_primary = a.0 == 0 && a.1 == 0;
+        let b_primary = b.0 == 0 && b.1 == 0;
+        b_primary.cmp(&a_primary)
+    });
+
+    let mut screens: Vec<(Rect, Rect)> = Vec::new();
+    let mut total_bounds: Rect = (0, 0, 0, 0);
+    let mut total_usable: Rect = (0, 0, 0, 0);
+
+    for &(bx, by, bw, bh, ux, uy, uw, uh) in &raw {
+        let bounds = (bx, by, bw, bh);
+        let usable = (ux, uy, uw, uh);
+        screens.push((bounds, usable));
+        total_bounds = union_bounds(total_bounds, bounds);
+        total_usable = union_bounds(total_usable, usable);
+    }
+
+    let mut arr = env.create_array(screens.len() as u32)?;
+    for (i, &(bounds, usable)) in screens.iter().enumerate() {
+        let mut obj = env.create_object()?;
+        let mut bo = env.create_object()?;
+        bo.set("x", bounds.0)?;
+        bo.set("y", bounds.1)?;
+        bo.set("w", bounds.2)?;
+        bo.set("h", bounds.3)?;
+        let mut uo = env.create_object()?;
+        uo.set("x", usable.0)?;
+        uo.set("y", usable.1)?;
+        uo.set("w", usable.2)?;
+        uo.set("h", usable.3)?;
+        obj.set("bounds", bo)?;
+        obj.set("usable", uo)?;
+        arr.set(i as u32, obj)?;
+    }
+
+    if let Ok(mut data) = SCREEN_DATA.lock() {
+        data.screens = screens;
+        data.total_bounds = total_bounds;
+        data.total_usable = total_usable;
+    }
+
+    Ok(Either::A(arr.coerce_to_object()?))
 }
 
 #[cfg(target_os = "macos")]
@@ -285,71 +284,78 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     use objc2_app_kit::NSScreen;
     use objc2::MainThreadMarker;
 
-    unsafe {
-        let mtm = MainThreadMarker::new_unchecked();
-        let screens = NSScreen::screens(mtm);
-        let count = screens.count();
-        if count == 0 {
-            return Ok(Either::B(env.get_null()?));
-        }
-
-        let mut b_min_x = i32::MAX;
-        let mut b_min_y = i32::MAX;
-        let mut b_max_x = i32::MIN;
-        let mut b_max_y = i32::MIN;
-        let mut u_min_x = i32::MAX;
-        let mut u_min_y = i32::MAX;
-        let mut u_max_x = i32::MIN;
-        let mut u_max_y = i32::MIN;
-
-        let mut arr = env.create_array(count as u32)?;
-
-        for i in 0..count {
-            let screen = screens.objectAtIndex(i);
-            let frame = screen.frame();
-            let visible = screen.visibleFrame();
-
-            let fx = frame.origin.x as i32;
-            let fy = frame.origin.y as i32;
-            let fw = frame.size.width as i32;
-            let fh = frame.size.height as i32;
-            let vx = visible.origin.x as i32;
-            let vy = visible.origin.y as i32;
-            let vw = visible.size.width as i32;
-            let vh = visible.size.height as i32;
-
-            b_min_x = b_min_x.min(fx);
-            b_min_y = b_min_y.min(fy);
-            b_max_x = b_max_x.max(fx + fw);
-            b_max_y = b_max_y.max(fy + fh);
-            u_min_x = u_min_x.min(vx);
-            u_min_y = u_min_y.min(vy);
-            u_max_x = u_max_x.max(vx + vw);
-            u_max_y = u_max_y.max(vy + vh);
-
-            let mut bo = env.create_object()?;
-            bo.set("x", fx)?;
-            bo.set("y", fy)?;
-            bo.set("w", fw)?;
-            bo.set("h", fh)?;
-
-            let mut uo = env.create_object()?;
-            uo.set("x", vx)?;
-            uo.set("y", vy)?;
-            uo.set("w", vw)?;
-            uo.set("h", vh)?;
-
-            let mut obj = env.create_object()?;
-            obj.set("bounds", bo)?;
-            obj.set("usable", uo)?;
-            arr.set(i as u32, obj)?;
-        }
-
-        MAC_TOTAL_BOUNDS = (b_min_x, b_min_y, b_max_x - b_min_x, b_max_y - b_min_y);
-        MAC_TOTAL_USABLE = (u_min_x, u_min_y, u_max_x - u_min_x, u_max_y - u_min_y);
-
-        Ok(Either::A(arr.coerce_to_object()?))
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+    let ns_screens = unsafe { NSScreen::screens(mtm) };
+    let count = unsafe { ns_screens.count() };
+    if count == 0 {
+        return Ok(Either::B(env.get_null()?));
     }
+
+    let mut b_min_x = i32::MAX;
+    let mut b_min_y = i32::MAX;
+    let mut b_max_x = i32::MIN;
+    let mut b_max_y = i32::MIN;
+    let mut u_min_x = i32::MAX;
+    let mut u_min_y = i32::MAX;
+    let mut u_max_x = i32::MIN;
+    let mut u_max_y = i32::MIN;
+
+    let mut screens: Vec<(Rect, Rect)> = Vec::new();
+    let mut arr = env.create_array(count as u32)?;
+
+    for i in 0..count {
+        let screen = unsafe { ns_screens.objectAtIndex(i) };
+        let frame = unsafe { screen.frame() };
+        let visible = unsafe { screen.visibleFrame() };
+
+        let fx = frame.origin.x as i32;
+        let fy = frame.origin.y as i32;
+        let fw = frame.size.width as i32;
+        let fh = frame.size.height as i32;
+        let vx = visible.origin.x as i32;
+        let vy = visible.origin.y as i32;
+        let vw = visible.size.width as i32;
+        let vh = visible.size.height as i32;
+
+        b_min_x = b_min_x.min(fx);
+        b_min_y = b_min_y.min(fy);
+        b_max_x = b_max_x.max(fx + fw);
+        b_max_y = b_max_y.max(fy + fh);
+        u_min_x = u_min_x.min(vx);
+        u_min_y = u_min_y.min(vy);
+        u_max_x = u_max_x.max(vx + vw);
+        u_max_y = u_max_y.max(vy + vh);
+
+        screens.push(((fx, fy, fw, fh), (vx, vy, vw, vh)));
+
+        let mut bo = env.create_object()?;
+        bo.set("x", fx)?;
+        bo.set("y", fy)?;
+        bo.set("w", fw)?;
+        bo.set("h", fh)?;
+
+        let mut uo = env.create_object()?;
+        uo.set("x", vx)?;
+        uo.set("y", vy)?;
+        uo.set("w", vw)?;
+        uo.set("h", vh)?;
+
+        let mut obj = env.create_object()?;
+        obj.set("bounds", bo)?;
+        obj.set("usable", uo)?;
+        arr.set(i as u32, obj)?;
+    }
+
+    let total_bounds = (b_min_x, b_min_y, b_max_x - b_min_x, b_max_y - b_min_y);
+    let total_usable = (u_min_x, u_min_y, u_max_x - u_min_x, u_max_y - u_min_y);
+
+    if let Ok(mut data) = SCREEN_DATA.lock() {
+        data.screens = screens;
+        data.total_bounds = total_bounds;
+        data.total_usable = total_usable;
+    }
+
+    Ok(Either::A(arr.coerce_to_object()?))
 }
 
 // =============================================================================
@@ -424,7 +430,7 @@ pub fn screen_grab_screen(
 
     unsafe {
         let hwnd = match window_handle {
-            Some(h) if h != 0.0 => HWND(h as *mut _),
+            Some(h) if h != 0.0 => HWND(h as isize as *mut _),
             _ => HWND::default(),
         };
         let hdc_screen = GetDC(hwnd);
@@ -577,9 +583,8 @@ pub fn screen_grab_screen(
             &CGSize::new(iw as f64, ih as f64),
         );
 
-        // CGImage is stored as a CFType; get the raw pointer for FFI
-        use core_foundation::base::TCFType;
-        let img_ref = image.as_concrete_TypeRef() as *mut std::ffi::c_void;
+        // Get the raw CGImageRef pointer for FFI
+        let img_ref = image.as_ptr() as *mut std::ffi::c_void;
 
         CGContextDrawImage(context, draw_rect, img_ref);
         CGContextFlush(context);
@@ -630,42 +635,14 @@ pub fn screen_set_compositing(_enabled: bool) {
 // screen_getTotalBounds
 // =============================================================================
 
-#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_getTotalBounds")]
 pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
+    let tb = SCREEN_DATA.lock().map(|d| d.total_bounds).unwrap_or((0,0,0,0));
     let mut obj = env.create_object()?;
-    unsafe {
-        obj.set("x", TOTAL_BOUNDS.0)?;
-        obj.set("y", TOTAL_BOUNDS.1)?;
-        obj.set("w", TOTAL_BOUNDS.2)?;
-        obj.set("h", TOTAL_BOUNDS.3)?;
-    }
-    Ok(obj)
-}
-
-#[cfg(target_os = "windows")]
-#[napi(js_name = "screen_getTotalBounds")]
-pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    unsafe {
-        obj.set("x", WIN_TOTAL_BOUNDS.0)?;
-        obj.set("y", WIN_TOTAL_BOUNDS.1)?;
-        obj.set("w", WIN_TOTAL_BOUNDS.2)?;
-        obj.set("h", WIN_TOTAL_BOUNDS.3)?;
-    }
-    Ok(obj)
-}
-
-#[cfg(target_os = "macos")]
-#[napi(js_name = "screen_getTotalBounds")]
-pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    unsafe {
-        obj.set("x", MAC_TOTAL_BOUNDS.0)?;
-        obj.set("y", MAC_TOTAL_BOUNDS.1)?;
-        obj.set("w", MAC_TOTAL_BOUNDS.2)?;
-        obj.set("h", MAC_TOTAL_BOUNDS.3)?;
-    }
+    obj.set("x", tb.0)?;
+    obj.set("y", tb.1)?;
+    obj.set("w", tb.2)?;
+    obj.set("h", tb.3)?;
     Ok(obj)
 }
 
@@ -673,41 +650,13 @@ pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
 // screen_getTotalUsable
 // =============================================================================
 
-#[cfg(target_os = "linux")]
 #[napi(js_name = "screen_getTotalUsable")]
 pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
+    let tu = SCREEN_DATA.lock().map(|d| d.total_usable).unwrap_or((0,0,0,0));
     let mut obj = env.create_object()?;
-    unsafe {
-        obj.set("x", TOTAL_USABLE.0)?;
-        obj.set("y", TOTAL_USABLE.1)?;
-        obj.set("w", TOTAL_USABLE.2)?;
-        obj.set("h", TOTAL_USABLE.3)?;
-    }
-    Ok(obj)
-}
-
-#[cfg(target_os = "windows")]
-#[napi(js_name = "screen_getTotalUsable")]
-pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    unsafe {
-        obj.set("x", WIN_TOTAL_USABLE.0)?;
-        obj.set("y", WIN_TOTAL_USABLE.1)?;
-        obj.set("w", WIN_TOTAL_USABLE.2)?;
-        obj.set("h", WIN_TOTAL_USABLE.3)?;
-    }
-    Ok(obj)
-}
-
-#[cfg(target_os = "macos")]
-#[napi(js_name = "screen_getTotalUsable")]
-pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    unsafe {
-        obj.set("x", MAC_TOTAL_USABLE.0)?;
-        obj.set("y", MAC_TOTAL_USABLE.1)?;
-        obj.set("w", MAC_TOTAL_USABLE.2)?;
-        obj.set("h", MAC_TOTAL_USABLE.3)?;
-    }
+    obj.set("x", tu.0)?;
+    obj.set("y", tu.1)?;
+    obj.set("w", tu.2)?;
+    obj.set("h", tu.3)?;
     Ok(obj)
 }

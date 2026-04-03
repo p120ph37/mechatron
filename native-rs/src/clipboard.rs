@@ -124,7 +124,7 @@ fn platform_has_image() -> bool {
 
 #[cfg(target_os = "macos")]
 fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    use objc2::ClassType;
+    use objc2::MainThreadMarker;
     use objc2_app_kit::NSImage;
     use objc2_core_graphics::{
         CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetData,
@@ -133,10 +133,11 @@ fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
     use objc2_core_foundation::CGRect;
 
     unsafe {
+        let mtm = MainThreadMarker::new_unchecked();
         let board = NSPasteboard::generalPasteboard();
 
         // Create NSImage from pasteboard (handles all image formats)
-        let ns_image = NSImage::initWithPasteboard(NSImage::alloc(), &board)?;
+        let ns_image = NSImage::initWithPasteboard(NSImage::alloc(mtm), &board)?;
 
         // Extract CGImage from NSImage
         let cg_image = ns_image.CGImageForProposedRect_context_hints(
@@ -189,6 +190,7 @@ fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
 
 #[cfg(target_os = "macos")]
 fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
+    use objc2::MainThreadMarker;
     use objc2::runtime::ProtocolObject;
     use objc2_app_kit::{NSImage, NSPasteboardWriting};
     use objc2_core_graphics::{
@@ -198,6 +200,7 @@ fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
     use objc2_core_foundation::CGSize;
 
     unsafe {
+        let mtm = MainThreadMarker::new_unchecked();
         let w = width as usize;
         let h = height as usize;
         let bytes_per_row = w * 4;
@@ -235,7 +238,7 @@ fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
 
         // Wrap in NSImage
         let ns_image = NSImage::initWithCGImage_size(
-            NSImage::alloc(),
+            NSImage::alloc(mtm),
             &cg_image,
             CGSize { width: 0.0, height: 0.0 }, // NSZeroSize
         );
@@ -401,7 +404,7 @@ fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
         let pixel_data = ptr.add(header_size);
 
         let stride = if bit_count == 32 {
-            (width * 4) as usize
+            width as usize * 4
         } else {
             // 24-bit: rows are padded to 4-byte boundaries
             ((width as usize * 3 + 3) & !3)

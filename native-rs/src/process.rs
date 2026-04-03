@@ -2,22 +2,17 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 #[cfg(target_os = "linux")]
-use std::ffi::{CStr, CString};
-#[cfg(target_os = "linux")]
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::path::Path;
 
 #[cfg(target_os = "linux")]
 use crate::x11::*;
-#[cfg(target_os = "linux")]
-use crate::window;
 
 // ── Linux internals ─────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
 struct ProcInfo {
-    pid: i32,
     name: String,
     path: String,
     is_64bit: bool,
@@ -48,7 +43,7 @@ fn proc_open(pid: i32) -> Option<ProcInfo> {
         }
     }
 
-    Some(ProcInfo { pid, name, path, is_64bit })
+    Some(ProcInfo { name, path, is_64bit })
 }
 
 #[cfg(target_os = "linux")]
@@ -157,6 +152,7 @@ struct AllImageInfo {
 
 #[cfg(target_os = "macos")]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct ImageInfo64 {
     addr: u64,
     path: u64,
