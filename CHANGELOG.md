@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.0.2] - Unreleased
+## [v0.0.2] - 2026-04-03
 
 ### Added
 - Rust native backend (`native-rs/`) via napi-rs, replacing C++ as the default
