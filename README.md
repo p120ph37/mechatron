@@ -4,7 +4,8 @@ Node.js native addon for desktop automation — keyboard, mouse, screen capture,
 clipboard, process/memory inspection, and window management.
 
 Derived from [robot-js](https://github.com/Robot/robot-js) and the
-[Robot](https://github.com/Robot/robot) C++ library.
+[Robot](https://github.com/Robot/robot) C++ library, with the native layer
+rewritten in Rust via [napi-rs](https://napi.rs/).
 
 ## Platforms
 
@@ -61,7 +62,28 @@ var mem = mechatron.Memory(curr);
 var regions = mem.getRegions();
 ```
 
+## Architecture
+
+The native backend is implemented in Rust (`native-rs/`) using napi-rs.  The
+TypeScript wrapper layer (`lib/`) provides the public API with full argument
+validation, bundled to `dist/index.js`.
+
+A legacy C++ backend (`src/`) is retained for comparison.  The Rust backend is
+loaded by default; the C++ backend is used as a fallback if the Rust binary is
+not available for the current platform.
+
 ## Build from Source
+
+### Rust backend (default)
+
+Requires: Rust toolchain, Node.js 18+
+
+```sh
+cd native-rs
+npm run build   # or: cargo build --release
+```
+
+### C++ backend (fallback)
 
 Requires: C++ compiler, CMake, Node.js 18+
 
@@ -84,6 +106,6 @@ sudo node test/test-ci.js all
 
 ## License
 
-[MIT — Copyright (c) 2026 Aaron Meriwether, ](LICENSE)
+[MIT — Copyright (c) 2026 Aaron Meriwether](LICENSE)
 
 See LICENSE file for full Robot acknowledgement.
