@@ -61,11 +61,11 @@ extern "C" {
     fn proc_name(pid: i32, buffer: *mut u8, buffersize: u32) -> i32;
 }
 
-// Mach API declarations
+#[cfg(target_os = "macos")]
+use crate::mach;
+
 #[cfg(target_os = "macos")]
 extern "C" {
-    fn mach_task_self() -> u32;
-    fn task_for_pid(target_tport: u32, pid: i32, t: *mut u32) -> i32;
     fn task_info(
         target_task: u32, flavor: u32,
         task_info_out: *mut i32, task_info_count: *mut u32,
@@ -75,10 +75,6 @@ extern "C" {
         masks: *mut u32, masks_cnt: *mut u32,
         old_handlers: *mut u32, old_behaviors: *mut u32,
         old_flavors: *mut u32,
-    ) -> i32;
-    fn mach_vm_read_overwrite(
-        target_task: u32, address: u64, size: u64,
-        data: u64, outsize: *mut u64,
     ) -> i32;
 }
 
@@ -128,29 +124,6 @@ struct ImageInfo64 {
     date: u64,
 }
 
-#[cfg(target_os = "macos")]
-fn mac_get_task(pid: i32) -> u32 {
-    if pid <= 0 { return 0; }
-    unsafe {
-        let mut task: u32 = 0;
-        if task_for_pid(mach_task_self(), pid, &mut task) != 0 {
-            return 0;
-        }
-        task
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn mac_process_exists(pid: i32) -> bool {
-    if pid <= 0 { return false; }
-    unsafe {
-        // Match C++: kill(pid, 0) == 0 || errno != ESRCH
-        if libc::kill(pid, 0) == 0 {
-            return true;
-        }
-        *libc::__error() != libc::ESRCH
-    }
-}
 
 #[cfg(target_os = "macos")]
 fn mac_get_path(pid: i32) -> String {
@@ -194,7 +167,7 @@ fn mac_is_64_bit(_pid: i32) -> bool {
 
 #[cfg(target_os = "macos")]
 fn mac_is_debugged(pid: i32) -> bool {
-    let task = mac_get_task(pid);
+    let task = mach::get_task(pid);
     if task == 0 { return false; }
     unsafe {
         let mut masks = [0u32; EXC_TYPES_COUNT];
@@ -320,7 +293,7 @@ pub fn process_open(pid: i32) -> bool {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_open")]
 pub fn process_open(pid: i32) -> bool {
-    mac_process_exists(pid)
+    mach::process_exists(pid)
 }
 
 // ── process_close ───────────────────────────────────────────────────────
@@ -350,7 +323,7 @@ pub fn process_is_valid(pid: i32) -> bool {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_isValid")]
 pub fn process_is_valid(pid: i32) -> bool {
-    mac_process_exists(pid)
+    mach::process_exists(pid)
 }
 
 // ── process_is64Bit ─────────────────────────────────────────────────────
@@ -461,7 +434,7 @@ pub fn process_get_handle(pid: i32) -> f64 {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_getHandle")]
 pub fn process_get_handle(pid: i32) -> f64 {
-    mac_get_task(pid) as f64
+    mach::get_task(pid) as f64
 }
 
 // ── process_getName ─────────────────────────────────────────────────────
@@ -592,7 +565,7 @@ pub fn process_has_exited(pid: i32) -> bool {
 #[cfg(target_os = "macos")]
 #[napi(js_name = "process_hasExited")]
 pub fn process_has_exited(pid: i32) -> bool {
-    !mac_process_exists(pid)
+    !mach::process_exists(pid)
 }
 
 // ── process_getModules ──────────────────────────────────────────────────
@@ -699,7 +672,7 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
     let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
     let mut modules: Vec<(String, String, u64, u64)> = Vec::new();
 
-    let task = mac_get_task(pid);
+    let task = mach::get_task(pid);
     if task != 0 {
         let proc_path = mac_get_path(pid);
         let is_64bit = mac_is_64_bit(pid);
@@ -719,7 +692,7 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
                     .min(std::mem::size_of::<AllImageInfo>());
                 let mut bytes_read: u64 = 0;
 
-                if mach_vm_read_overwrite(
+                if mach::mach_vm_read_overwrite(
                     task,
                     dyld_info.all_image_info_addr,
                     read_size as u64,
@@ -733,7 +706,7 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
                         let mut infos = vec![ImageInfo64 { addr: 0, path: 0, date: 0 }; all_info.count as usize];
                         let mut info_bytes: u64 = 0;
 
-                        if mach_vm_read_overwrite(
+                        if mach::mach_vm_read_overwrite(
                             task,
                             array_addr,
                             info_size as u64,
@@ -749,7 +722,7 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
                                     // Read path from remote process memory
                                     let mut path_buf = vec![0u8; libc::PATH_MAX as usize];
                                     let mut path_bytes: u64 = 0;
-                                    if mach_vm_read_overwrite(
+                                    if mach::mach_vm_read_overwrite(
                                         task,
                                         infos[i].path,
                                         libc::PATH_MAX as u64,

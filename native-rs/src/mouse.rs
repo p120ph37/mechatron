@@ -518,8 +518,6 @@ fn platform_get_button_state(button: i32) -> bool {
     }
 }
 
-// --- NAPI exports (minimal FFI — no delays) ---
-
 #[napi(js_name = "mouse_press")]
 pub fn mouse_press(button: i32) {
     do_press(button);

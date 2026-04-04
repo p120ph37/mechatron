@@ -3,10 +3,6 @@ import { Timer } from "./Timer";
 import type { NativeBackend } from "./native";
 import { getKeyNames, getAllKeys } from "./constants";
 
-// --- keyboard_compile implementation (moved from Rust) ---
-// Parses key sequence strings like "^a" (ctrl+a), "{ENTER}", "+{TAB 3}"
-// into an array of {down, key} pairs using platform-specific key constants.
-
 function resolveKeyName(name: string): number | undefined {
   const names = getKeyNames();
   // Direct lookup (already uppercased by caller)
@@ -21,10 +17,10 @@ function resolveKeyName(name: string): number | undefined {
 
 function compileKeys(keys: string): Array<{ down: boolean; key: number }> | null {
   const result: Array<{ down: boolean; key: number }> = [];
-  const modkeys: number[] = [-1, -1, -1, -1]; // alt, control, shift, system
-  let group = 0;
-
+  const modChars: Record<string, number> = { '%': 0, '^': 1, '+': 2, '$': 3 };
   const modKeyNames = ["ALT", "CONTROL", "SHIFT", "SYSTEM"];
+  const modkeys: number[] = [-1, -1, -1, -1];
+  let group = 0;
 
   function cancelMods(g: number) {
     for (let i = 0; i < 4; i++) {
@@ -80,28 +76,11 @@ function compileKeys(keys: string): Array<{ down: boolean; key: number }> | null
         cancelMods(0);
         break;
       }
-      case '%': {
-        if (modkeys[0] !== -1) return null;
-        const altKey = resolveKeyName("ALT");
-        if (altKey !== undefined) { result.push({ down: true, key: altKey }); modkeys[0] = 0; }
-        break;
-      }
-      case '^': {
-        if (modkeys[1] !== -1) return null;
-        const ctrlKey = resolveKeyName("CONTROL");
-        if (ctrlKey !== undefined) { result.push({ down: true, key: ctrlKey }); modkeys[1] = 0; }
-        break;
-      }
-      case '+': {
-        if (modkeys[2] !== -1) return null;
-        const shiftKey = resolveKeyName("SHIFT");
-        if (shiftKey !== undefined) { result.push({ down: true, key: shiftKey }); modkeys[2] = 0; }
-        break;
-      }
-      case '$': {
-        if (modkeys[3] !== -1) return null;
-        const sysKey = resolveKeyName("SYSTEM");
-        if (sysKey !== undefined) { result.push({ down: true, key: sysKey }); modkeys[3] = 0; }
+      case '%': case '^': case '+': case '$': {
+        const mi = modChars[ch];
+        if (modkeys[mi] !== -1) return null;
+        const mk = resolveKeyName(modKeyNames[mi]);
+        if (mk !== undefined) { result.push({ down: true, key: mk }); modkeys[mi] = 0; }
         break;
       }
       case '(': {
@@ -135,8 +114,6 @@ function compileKeys(keys: string): Array<{ down: boolean; key: number }> | null
   if (group !== 0) return null;
   return result;
 }
-
-// --- Keyboard class ---
 
 export class Keyboard {
   autoDelay: Range;

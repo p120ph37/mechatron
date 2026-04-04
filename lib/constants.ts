@@ -1,11 +1,3 @@
-// Platform-specific key, button, and memory constants.
-// These were previously compiled into the Rust native module with #[cfg(target_os)].
-// Now defined purely in TS, selected at runtime via process.platform.
-
-// ---------------------------------------------------------------------------
-// Key constants — per-platform keycodes
-// ---------------------------------------------------------------------------
-
 interface KeyTable {
   KEY_SPACE: number; KEY_ESCAPE: number; KEY_TAB: number;
   KEY_ALT: number; KEY_LALT: number; KEY_RALT: number;
@@ -41,7 +33,6 @@ interface KeyTable {
   KEY_CAPS_LOCK: number; KEY_SCROLL_LOCK: number; KEY_NUM_LOCK: number;
 }
 
-// Linux — X11 keysym values
 const linuxKeys: KeyTable = {
   KEY_SPACE: 0x0020, KEY_ESCAPE: 0xFF1B, KEY_TAB: 0xFF09,
   KEY_ALT: 0xFFE9, KEY_LALT: 0xFFE9, KEY_RALT: 0xFFEA,
@@ -77,7 +68,6 @@ const linuxKeys: KeyTable = {
   KEY_CAPS_LOCK: 0xFFE5, KEY_SCROLL_LOCK: 0xFF14, KEY_NUM_LOCK: 0xFF7F,
 };
 
-// macOS — kVK_ virtual keycodes
 const darwinKeys: KeyTable = {
   KEY_SPACE: 0x31, KEY_ESCAPE: 0x35, KEY_TAB: 0x30,
   KEY_ALT: 0x3A, KEY_LALT: 0x3A, KEY_RALT: 0x3D,
@@ -113,7 +103,6 @@ const darwinKeys: KeyTable = {
   KEY_CAPS_LOCK: 0x39, KEY_SCROLL_LOCK: 0x6B, KEY_NUM_LOCK: 0x47,
 };
 
-// Windows — VK_ virtual key codes
 const win32Keys: KeyTable = {
   KEY_SPACE: 0x20, KEY_ESCAPE: 0x1B, KEY_TAB: 0x09,
   KEY_ALT: 0x12, KEY_LALT: 0xA4, KEY_RALT: 0xA5,
@@ -159,75 +148,12 @@ function getPlatformKeys(): KeyTable {
   return keyTableByPlatform[process.platform] || linuxKeys;
 }
 
-// ---------------------------------------------------------------------------
-// ALL_KEYS — unique keycodes to iterate for getState()
-// Per-platform because some platforms split L/R variants differently.
-// ---------------------------------------------------------------------------
-
-// Linux/macOS: KEY_ALT==KEY_LALT, KEY_CONTROL==KEY_LCONTROL, etc., so skip L variants
-function buildAllKeysLinuxMac(k: KeyTable): number[] {
-  return [
-    k.KEY_SPACE, k.KEY_ESCAPE, k.KEY_TAB,
-    k.KEY_ALT, k.KEY_RALT, k.KEY_CONTROL, k.KEY_RCONTROL,
-    k.KEY_SHIFT, k.KEY_RSHIFT, k.KEY_SYSTEM, k.KEY_RSYSTEM,
-    k.KEY_F1, k.KEY_F2, k.KEY_F3, k.KEY_F4, k.KEY_F5, k.KEY_F6,
-    k.KEY_F7, k.KEY_F8, k.KEY_F9, k.KEY_F10, k.KEY_F11, k.KEY_F12,
-    k.KEY_0, k.KEY_1, k.KEY_2, k.KEY_3, k.KEY_4, k.KEY_5, k.KEY_6, k.KEY_7, k.KEY_8, k.KEY_9,
-    k.KEY_A, k.KEY_B, k.KEY_C, k.KEY_D, k.KEY_E, k.KEY_F, k.KEY_G,
-    k.KEY_H, k.KEY_I, k.KEY_J, k.KEY_K, k.KEY_L, k.KEY_M, k.KEY_N,
-    k.KEY_O, k.KEY_P, k.KEY_Q, k.KEY_R, k.KEY_S, k.KEY_T, k.KEY_U,
-    k.KEY_V, k.KEY_W, k.KEY_X, k.KEY_Y, k.KEY_Z,
-    k.KEY_GRAVE, k.KEY_MINUS, k.KEY_EQUAL, k.KEY_BACKSPACE,
-    k.KEY_LBRACKET, k.KEY_RBRACKET, k.KEY_BACKSLASH,
-    k.KEY_SEMICOLON, k.KEY_QUOTE, k.KEY_RETURN,
-    k.KEY_COMMA, k.KEY_PERIOD, k.KEY_SLASH,
-    k.KEY_LEFT, k.KEY_UP, k.KEY_RIGHT, k.KEY_DOWN,
-    k.KEY_PRINT, k.KEY_PAUSE, k.KEY_INSERT, k.KEY_DELETE,
-    k.KEY_HOME, k.KEY_END, k.KEY_PAGE_UP, k.KEY_PAGE_DOWN,
-    k.KEY_ADD, k.KEY_SUBTRACT, k.KEY_MULTIPLY, k.KEY_DIVIDE, k.KEY_DECIMAL, k.KEY_ENTER,
-    k.KEY_NUM0, k.KEY_NUM1, k.KEY_NUM2, k.KEY_NUM3, k.KEY_NUM4,
-    k.KEY_NUM5, k.KEY_NUM6, k.KEY_NUM7, k.KEY_NUM8, k.KEY_NUM9,
-    k.KEY_CAPS_LOCK, k.KEY_SCROLL_LOCK, k.KEY_NUM_LOCK,
-  ];
-}
-
-// Windows: KEY_ALT!=KEY_LALT, KEY_SHIFT!=KEY_LSHIFT, so include both L and R
-function buildAllKeysWindows(k: KeyTable): number[] {
-  return [
-    k.KEY_SPACE, k.KEY_ESCAPE, k.KEY_TAB,
-    k.KEY_ALT, k.KEY_LALT, k.KEY_RALT, k.KEY_CONTROL, k.KEY_LCONTROL, k.KEY_RCONTROL,
-    k.KEY_SHIFT, k.KEY_LSHIFT, k.KEY_RSHIFT, k.KEY_SYSTEM, k.KEY_RSYSTEM,
-    k.KEY_F1, k.KEY_F2, k.KEY_F3, k.KEY_F4, k.KEY_F5, k.KEY_F6,
-    k.KEY_F7, k.KEY_F8, k.KEY_F9, k.KEY_F10, k.KEY_F11, k.KEY_F12,
-    k.KEY_0, k.KEY_1, k.KEY_2, k.KEY_3, k.KEY_4, k.KEY_5, k.KEY_6, k.KEY_7, k.KEY_8, k.KEY_9,
-    k.KEY_A, k.KEY_B, k.KEY_C, k.KEY_D, k.KEY_E, k.KEY_F, k.KEY_G,
-    k.KEY_H, k.KEY_I, k.KEY_J, k.KEY_K, k.KEY_L, k.KEY_M, k.KEY_N,
-    k.KEY_O, k.KEY_P, k.KEY_Q, k.KEY_R, k.KEY_S, k.KEY_T, k.KEY_U,
-    k.KEY_V, k.KEY_W, k.KEY_X, k.KEY_Y, k.KEY_Z,
-    k.KEY_GRAVE, k.KEY_MINUS, k.KEY_EQUAL, k.KEY_BACKSPACE,
-    k.KEY_LBRACKET, k.KEY_RBRACKET, k.KEY_BACKSLASH,
-    k.KEY_SEMICOLON, k.KEY_QUOTE, k.KEY_RETURN,
-    k.KEY_COMMA, k.KEY_PERIOD, k.KEY_SLASH,
-    k.KEY_LEFT, k.KEY_UP, k.KEY_RIGHT, k.KEY_DOWN,
-    k.KEY_PRINT, k.KEY_PAUSE, k.KEY_INSERT, k.KEY_DELETE,
-    k.KEY_HOME, k.KEY_END, k.KEY_PAGE_UP, k.KEY_PAGE_DOWN,
-    k.KEY_ADD, k.KEY_SUBTRACT, k.KEY_MULTIPLY, k.KEY_DIVIDE, k.KEY_DECIMAL, k.KEY_ENTER,
-    k.KEY_NUM0, k.KEY_NUM1, k.KEY_NUM2, k.KEY_NUM3, k.KEY_NUM4,
-    k.KEY_NUM5, k.KEY_NUM6, k.KEY_NUM7, k.KEY_NUM8, k.KEY_NUM9,
-    k.KEY_CAPS_LOCK, k.KEY_SCROLL_LOCK, k.KEY_NUM_LOCK,
-  ];
-}
-
+// Unique keycodes for getState() iteration.
+// Using Set deduplicates naturally: on Linux/Mac KEY_ALT==KEY_LALT so
+// duplicates collapse; on Windows they differ so both are kept.
 export function getAllKeys(): number[] {
-  const k = getPlatformKeys();
-  if (process.platform === "win32") return buildAllKeysWindows(k);
-  return buildAllKeysLinuxMac(k);
+  return [...new Set(Object.values(getPlatformKeys()))];
 }
-
-// ---------------------------------------------------------------------------
-// Key name -> keycode mapping (for keyboard compile)
-// The mapping structure is identical across platforms; only the values differ.
-// ---------------------------------------------------------------------------
 
 let _keyNames: Record<string, number> | null = null;
 
@@ -285,10 +211,6 @@ export function getKeyNames(): Record<string, number> {
   return _keyNames;
 }
 
-// ---------------------------------------------------------------------------
-// Button constants — platform-independent
-// ---------------------------------------------------------------------------
-
 export const BUTTON_LEFT   = 0;
 export const BUTTON_MID    = 1;
 export const BUTTON_MIDDLE = 1;
@@ -296,17 +218,9 @@ export const BUTTON_RIGHT  = 2;
 export const BUTTON_X1     = 3;
 export const BUTTON_X2     = 4;
 
-// ---------------------------------------------------------------------------
-// Memory flag constants — platform-independent
-// ---------------------------------------------------------------------------
-
 export const MEMORY_DEFAULT      = 0x0;
 export const MEMORY_SKIP_ERRORS  = 0x1;
 export const MEMORY_AUTO_ACCESS  = 0x2;
-
-// ---------------------------------------------------------------------------
-// Flat export of all constants (for spreading into the mRobot object)
-// ---------------------------------------------------------------------------
 
 export function getAllConstants(): Record<string, number> {
   const k = getPlatformKeys();

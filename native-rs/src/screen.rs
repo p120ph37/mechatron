@@ -11,12 +11,12 @@ use crate::x11::*;
 
 type Rect = (i32, i32, i32, i32);
 
-#[allow(dead_code)]
+#[cfg(target_os = "linux")]
 fn intersects(a: Rect, b: Rect) -> bool {
     a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.3 && a.1 + a.3 > b.1
 }
 
-#[allow(dead_code)]
+#[cfg(target_os = "linux")]
 fn intersect_bounds(a: Rect, b: Rect) -> Rect {
     let l = a.0.max(b.0);
     let t = a.1.max(b.1);

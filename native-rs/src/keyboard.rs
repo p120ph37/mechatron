@@ -1,4 +1,3 @@
-use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 #[cfg(target_os = "linux")]
@@ -150,8 +149,6 @@ fn platform_get_key_state(keycode: i32) -> bool {
         GetAsyncKeyState(keycode) & (0x8000u16 as i16) != 0
     }
 }
-
-// --- NAPI exports (minimal FFI — no delays, no compile logic) ---
 
 #[napi(js_name = "keyboard_press")]
 pub fn keyboard_press(keycode: i32) {
