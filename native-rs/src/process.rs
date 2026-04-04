@@ -120,7 +120,7 @@ struct ProcBsdShortInfo {
     pbsi_ppid: u32,
     pbsi_pgid: u32,
     pbsi_status: u32,
-    pbsi_comm: [u8; 16], // MAXCOMLEN
+    pbsi_comm: [u8; 17], // MAXCOMLEN + 1 (MAXCOMLEN is 16 on macOS)
     pbsi_flags: u32,
     pbsi_uid: u32,
     pbsi_gid: u32,
@@ -128,7 +128,7 @@ struct ProcBsdShortInfo {
     pbsi_rgid: u32,
     pbsi_svuid: u32,
     pbsi_svgid: u32,
-    _pad: [u8; 232 - 56], // pad to PROC_PIDT_SHORTBSDINFO_SIZE
+    _pad: [u8; 232 - 64], // pad to PROC_PIDT_SHORTBSDINFO_SIZE (64 = 4*4 + 17 + 3pad + 7*4)
 }
 
 // task_dyld_info struct
@@ -741,7 +741,6 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
     let mut modules: Vec<(String, String, u64, u64)> = Vec::new();
 
     let task = mac_get_task(pid);
-    eprintln!("[getModules] task={} sizeof(TaskDyldInfo)={} TASK_DYLD_INFO_COUNT={}", task, std::mem::size_of::<TaskDyldInfo>(), TASK_DYLD_INFO_COUNT);
     if task != 0 {
         let proc_path = mac_get_path(pid);
         let is_64bit = mac_is_64_bit(pid);
@@ -750,30 +749,24 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
             // Get TASK_DYLD_INFO
             let mut dyld_info: TaskDyldInfo = std::mem::zeroed();
             let mut count = TASK_DYLD_INFO_COUNT;
-            let ti_kr = task_info(
+            if task_info(
                 task, TASK_DYLD_INFO,
                 &mut dyld_info as *mut _ as *mut i32,
                 &mut count,
-            );
-            eprintln!("[getModules] task_info kr={} count_out={} addr=0x{:x} size=0x{:x} format={}",
-                ti_kr, count, dyld_info.all_image_info_addr, dyld_info.all_image_info_size, dyld_info.all_image_info_format);
-            if ti_kr == 0 {
+            ) == 0 {
                 // Read AllImageInfo
                 let mut all_info: AllImageInfo = std::mem::zeroed();
                 let read_size = (dyld_info.all_image_info_size as usize)
                     .min(std::mem::size_of::<AllImageInfo>());
                 let mut bytes_read: u64 = 0;
 
-                let read_kr = mach_vm_read_overwrite(
+                if mach_vm_read_overwrite(
                     task,
                     dyld_info.all_image_info_addr,
                     read_size as u64,
                     &mut all_info as *mut _ as u64,
                     &mut bytes_read,
-                );
-                eprintln!("[getModules] read_kr={} bytes_read={} read_size={} version={} count={} array=0x{:x} is_64bit={}",
-                    read_kr, bytes_read, read_size, all_info.version, all_info.count, all_info.array, is_64bit);
-                if read_kr == 0 && bytes_read == read_size as u64 && all_info.count > 0 && is_64bit {
+                ) == 0 && bytes_read == read_size as u64 && all_info.count > 0 && is_64bit {
                     // Read 64-bit image info array
                     let array_addr = all_info.array;
                     if array_addr != 0 {
