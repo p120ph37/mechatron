@@ -4,6 +4,7 @@
   "description": "Node.js native addon for desktop automation (keyboard, mouse, screen, process, memory, window)",
   "main": "dist/index.js",
   "scripts": {
+    "build": "cd native-rs && cargo build --release",
     "test": "node test/test.js types timer",
     "test:ci": "node test/test.js types"
   },
