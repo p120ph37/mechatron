@@ -158,10 +158,11 @@ jobs:
 
       - name: Run mechatron-robot-js conformance tests
         run: |
-          # Root package is named "mechatron" but can't be a workspace; link it manually
-          # so packages/mechatron-robot-js's `require("mechatron")` resolves to the workspace root.
-          # Use node for portability — `ln -sfn` won't overwrite a directory under Git Bash on Windows.
-          node -e "const fs=require('fs'),p=require('path');const t=p.join('node_modules','mechatron');if(fs.existsSync(t))fs.rmSync(t,{recursive:true,force:true});fs.symlinkSync(process.cwd(),t,'junction');"
+          # Root package is named "mechatron" but can't itself be a workspace, so
+          # mechatron-robot-js's `"mechatron": "*"` dep resolves from the registry.
+          # Use `npm link` to replace it with the working copy (uses junctions on Windows).
+          npm link
+          npm link mechatron -w mechatron-robot-js
           node packages/mechatron-robot-js/test/conformance.js
 
       - uses: actions/upload-artifact@v4
