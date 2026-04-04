@@ -1,0 +1,30 @@
+[package]
+name = "mechatron-clipboard"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi4"] }
+napi-derive = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSImage"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSObjCRuntime"] }
+objc2-core-graphics = { version = "0.3", features = ["CGColorSpace", "CGContext", "CGBitmapContext", "CGImage"] }
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+] }
+
+[build-dependencies]
+napi-build = "2"

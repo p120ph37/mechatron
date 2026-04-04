@@ -1,0 +1,14 @@
+{
+  "name": "mechatron-types",
+  "version": "0.0.0",
+  "description": "Shared data types for mechatron (Point, Size, Bounds, Color, Range, Hash, Image, Timer)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist/"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p120ph37/mechatron.git",
+    "directory": "packages/mechatron-types"
+  }
+}

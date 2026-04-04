@@ -145,13 +145,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "mechatron-native"
+name = "mechatron-clipboard"
 version = "0.0.0"
 dependencies = [
- "core-foundation",
- "core-graphics",
- "foreign-types",
- "libc",
  "napi",
  "napi-build",
  "napi-derive",
@@ -160,6 +156,86 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-keyboard"
+version = "0.0.0"
+dependencies = [
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-memory"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-mouse"
+version = "0.0.0"
+dependencies = [
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-process"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "regex",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-screen"
+version = "0.0.0"
+dependencies = [
+ "core-graphics",
+ "foreign-types",
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "objc2",
+ "objc2-app-kit",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-shared"
+version = "0.0.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mechatron-window"
+version = "0.0.0"
+dependencies = [
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
  "regex",
  "windows",
 ]

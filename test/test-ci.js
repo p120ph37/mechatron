@@ -39,23 +39,23 @@ if (!_backendArg)
 	// Discover which backends are available on this platform
 	var _backends = [];
 
-	// Probe Rust backend — resolve the correct .node filename per platform
+	// Probe Rust backend — each subsystem has its own .node; probe via the keyboard package
 	var _rustNodeFile = (function () {
 		var platform = process.platform;
 		var arch = process.arch;
 		var map = {
-			"linux-x64":    "mechatron-native.linux-x64-gnu.node",
-			"linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
-			"darwin-x64":   "mechatron-native.darwin-x64.node",
-			"darwin-arm64": "mechatron-native.darwin-arm64.node",
-			"win32-x64":    "mechatron-native.win32-x64-msvc.node",
-			"win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
+			"linux-x64":    "mechatron-keyboard.linux-x64-gnu.node",
+			"linux-arm64":  "mechatron-keyboard.linux-arm64-gnu.node",
+			"darwin-x64":   "mechatron-keyboard.darwin-x64.node",
+			"darwin-arm64": "mechatron-keyboard.darwin-arm64.node",
+			"win32-x64":    "mechatron-keyboard.win32-x64-msvc.node",
+			"win32-ia32":   "mechatron-keyboard.win32-ia32-msvc.node",
 		};
-		return map[platform + "-" + arch] || ("mechatron-native." + platform + "-" + arch + ".node");
+		return map[platform + "-" + arch] || ("mechatron-keyboard." + platform + "-" + arch + ".node");
 	})();
 
 	try {
-		require (_path.resolve (__dirname, "..", "native-rs", _rustNodeFile));
+		require (_path.resolve (__dirname, "..", "packages", "mechatron-keyboard", _rustNodeFile));
 		_backends.push ("rust");
 	} catch (_) {
 		process.stdout.write ("  [skip] Rust backend not available (" + _rustNodeFile + ")\n");
@@ -114,33 +114,16 @@ if (!_backendArg)
 	return;
 }
 
-// --backend was specified — force the requested backend before loading mRobot
+// --backend was specified — each subsystem package loads its own native module,
+// so we don't need to force-load anything. Just accept "rust" as the only option.
 var _path = require ("path");
-if (_backendArg === "rust")
-{
-	var _rustFile = (function () {
-		var platform = process.platform;
-		var arch = process.arch;
-		var map = {
-			"linux-x64":    "mechatron-native.linux-x64-gnu.node",
-			"linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
-			"darwin-x64":   "mechatron-native.darwin-x64.node",
-			"darwin-arm64": "mechatron-native.darwin-arm64.node",
-			"win32-x64":    "mechatron-native.win32-x64-msvc.node",
-			"win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
-		};
-		return map[platform + "-" + arch] || ("mechatron-native." + platform + "-" + arch + ".node");
-	})();
-	var _rustAddon = require (_path.resolve (__dirname, "..", "native-rs", _rustFile));
-	var mRobot = require ("..");
-	mRobot.setNativeBackend (_rustAddon);
-}
-else
+if (_backendArg !== "rust")
 {
 	process.stderr.write ("Unknown backend: " + _backendArg + "\n");
 	process.exitCode = 2;
 	return;
 }
+var mRobot = require ("..");
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -154,7 +137,7 @@ if (process.platform === "darwin")
 	var _probePath = require("path").resolve(__dirname, "..").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 	var _child = require ("child_process").spawnSync (process.execPath, ["-e",
 		"var m = require('" + _probePath + "');" +
-		"var p = m.Process.getCurrent(); var mem = m.Memory(p);" +
+		"var p = m.Process.getCurrent(); var mem = new m.Memory(p);" +
 		"if (!mem.isValid()) process.exit(1);" +
 		"var regions = mem.getRegions();" +
 		"if (regions.length === 0) process.exit(1);" +
@@ -264,15 +247,15 @@ function testKeyboard()
 	log ("  Keyboard... ");
 
 	var Keyboard = mRobot.Keyboard;
-	var k = Keyboard();
+	var k = new Keyboard();
 
 	// --- compile (purely computational, no display needed) ---
 	var list = Keyboard.compile ("{SPACE}");
 	assert (list.length === 2, "compile SPACE length");
 	assert (list[0].down === true,  "compile SPACE [0].down");
-	assert (list[0].key === mRobot.KEY_SPACE, "compile SPACE [0].key");
+	assert (list[0].key === mRobot.KEYS.KEY_SPACE, "compile SPACE [0].key");
 	assert (list[1].down === false, "compile SPACE [1].down");
-	assert (list[1].key === mRobot.KEY_SPACE, "compile SPACE [1].key");
+	assert (list[1].key === mRobot.KEYS.KEY_SPACE, "compile SPACE [1].key");
 
 	list = Keyboard.compile ("{TAB}{ESCAPE}");
 	assert (list.length === 4, "compile TAB+ESC length");
@@ -289,28 +272,28 @@ function testKeyboard()
 	// AND release must take effect. Windows Session 0 can queue press
 	// via SendInput but release may not process without a message pump.
 	// CGEventPost is async on macOS — HID state may lag, so use waitFor.
-	k.press (mRobot.KEY_SHIFT);
+	k.press (mRobot.KEYS.KEY_SHIFT);
 	var pressWorks = waitFor (function () {
-		return Keyboard.getState (mRobot.KEY_SHIFT) === true;
+		return Keyboard.getState (mRobot.KEYS.KEY_SHIFT) === true;
 	}, 200);
-	k.release (mRobot.KEY_SHIFT);
+	k.release (mRobot.KEYS.KEY_SHIFT);
 	var releaseWorks = pressWorks && waitFor (function () {
-		return Keyboard.getState (mRobot.KEY_SHIFT) === false;
+		return Keyboard.getState (mRobot.KEYS.KEY_SHIFT) === false;
 	}, 200);
 	if (releaseWorks)
 	{
-		k.click (mRobot.KEY_SHIFT);
+		k.click (mRobot.KEYS.KEY_SHIFT);
 		assert (waitFor (function () {
-			return Keyboard.getState (mRobot.KEY_SHIFT) === false;
+			return Keyboard.getState (mRobot.KEYS.KEY_SHIFT) === false;
 		}, 200), "shift released after click");
 
-		k.press (mRobot.KEY_SHIFT);
+		k.press (mRobot.KEYS.KEY_SHIFT);
 		assert (waitFor (function () {
-			return Keyboard.getState (mRobot.KEY_SHIFT) === true;
+			return Keyboard.getState (mRobot.KEYS.KEY_SHIFT) === true;
 		}, 200), "shift pressed");
-		k.release (mRobot.KEY_SHIFT);
+		k.release (mRobot.KEYS.KEY_SHIFT);
 		assert (waitFor (function () {
-			return Keyboard.getState (mRobot.KEY_SHIFT) === false;
+			return Keyboard.getState (mRobot.KEYS.KEY_SHIFT) === false;
 		}, 200), "shift released");
 	}
 	else
@@ -334,7 +317,7 @@ function testMouse()
 	log ("  Mouse... ");
 
 	var Mouse = mRobot.Mouse;
-	var m = Mouse();
+	var m = new Mouse();
 
 	// --- setPos / getPos round-trip ---
 	var old = Mouse.getPos();
@@ -428,7 +411,7 @@ function testClipboard()
 		assert (Clipboard.getText ().length === 0, "linux getText");
 		assert (Clipboard.setText ("Hello") === false, "linux setText");
 
-		var img = Image();
+		var img = new Image();
 		assert (Clipboard.hasImage () === false, "linux hasImage");
 		assert (Clipboard.getImage (img) === false, "linux getImage");
 		assert (Clipboard.setImage (img) === false, "linux setImage");
@@ -465,13 +448,13 @@ function testClipboard()
 	assert (Clipboard.getText () === big, "getText large round-trip");
 
 	// Image round-trip
-	var src = Image (4, 4);
+	var src = new Image(4, 4);
 	src.fill (128, 64, 32);
 	assert (Clipboard.setImage (src), "setImage");
 	assert (Clipboard.hasImage (), "hasImage after set");
 	assert (Clipboard.hasText () === false, "!hasText after setImage");
 
-	var dst = Image();
+	var dst = new Image();
 	assert (Clipboard.getImage (dst), "getImage");
 	assert (dst.isValid(), "dst valid");
 	assert (dst.getWidth () === 4, "dst width");
@@ -499,19 +482,19 @@ function testProcess()
 	var Process = mRobot.Process;
 
 	// --- Invalid process ---
-	var p = Process();
+	var p = new Process();
 	assert (!p.isValid(), "empty invalid");
 	assert (p.getPID() === 0, "empty pid=0");
 	assert (p.getName() === "", "empty name empty");
 	assert (p.getPath() === "", "empty path empty");
 	assert (p.hasExited(), "empty hasExited");
 
-	p = Process (8888);
+	p = new Process(8888);
 	assert (!p.isValid(), "bogus pid invalid");
 	assert (p.getPID() === 8888, "bogus pid stored");
 
 	// Equality on invalid
-	var p2 = Process();
+	var p2 = new Process();
 	assert (p2.eq (0), "empty eq 0");
 	assert (p2.ne (8888), "empty ne 8888");
 
@@ -524,7 +507,7 @@ function testProcess()
 	assert (!curr.hasExited(), "current not exited");
 
 	// Open by PID
-	var p3 = Process();
+	var p3 = new Process();
 	assert (p3.open (curr.getPID()), "open current pid");
 	assert (p3.isValid(), "opened valid");
 	assert (p3.eq (curr), "opened eq current");
@@ -569,7 +552,7 @@ function testProcess()
 	curr.close();
 
 	// --- Argument validation ---
-	var px = Process();
+	var px = new Process();
 	assertThrows (px.open, px, []);
 	assertThrows (px.eq, px, []);
 	assertThrows (px.ne, px, []);
@@ -589,8 +572,8 @@ function testWindow()
 	var Point  = mRobot.Point;
 
 	// --- Invalid window ---
-	var w1 = Window();
-	var w2 = Window();
+	var w1 = new Window();
+	var w2 = new Window();
 	assert (!w1.isValid(), "empty invalid");
 	assert (w1.getHandle() === 0, "empty handle=0");
 	assert (w1.getTitle() === "", "empty title empty");
@@ -697,7 +680,7 @@ function testScreen()
 	}
 
 	// --- grabScreen (needs kTCCServiceScreenCapture on macOS) ---
-	var img = Image();
+	var img = new Image();
 	var result = Screen.grabScreen (img, 0, 0, 100, 100);
 	if (result)
 	{
@@ -706,8 +689,8 @@ function testScreen()
 		assert (img.getHeight() === 100, "grabbed height 100");
 
 		// Grab with bounds
-		var img2 = Image();
-		var bounds = Bounds (0, 0, 50, 50);
+		var img2 = new Image();
+		var bounds = new Bounds(0, 0, 50, 50);
 		result = Screen.grabScreen (img2, bounds);
 		assert (result === true, "grabScreen with bounds");
 		assert (img2.isValid(), "grabbed2 valid");
@@ -731,7 +714,7 @@ function testMemory()
 	var Module  = mRobot.Module;
 
 	// --- Module (data type only, no native calls) ---
-	var mod = Module();
+	var mod = new Module();
 	assert (mod.valid === false, "empty module invalid");
 	assert (mod.name === "", "empty module name");
 	assert (mod.base === 0, "empty module base");
@@ -754,11 +737,11 @@ function testMemory()
 	}
 
 	// --- Invalid memory ---
-	var mem = Memory();
+	var mem = new Memory();
 	assert (!mem.isValid(), "empty invalid");
 
-	var proc = Process();
-	mem = Memory (proc);
+	var proc = new Process();
+	mem = new Memory(proc);
 	assert (!mem.isValid(), "invalid proc -> invalid mem");
 	assert (mem.getProcess().eq (proc), "getProcess eq");
 
@@ -776,7 +759,7 @@ function testMemory()
 
 	// --- Open current process ---
 	proc = Process.getCurrent();
-	mem = Memory (proc);
+	mem = new Memory(proc);
 	assert (mem.isValid(), "current mem valid");
 
 	// Ptr size
@@ -849,36 +832,36 @@ function testTypes()
 	var Timer  = mRobot.Timer;
 
 	// Range
-	var r = Range (10, 20);
+	var r = new Range(10, 20);
 	assert (r.min === 10 && r.max === 20, "Range ctor");
 	assert (r.getRange() === 10, "Range getRange");
 
 	// Point
-	var p = Point (5, 10);
+	var p = new Point(5, 10);
 	assert (p.x === 5 && p.y === 10, "Point ctor");
-	assert (p.eq (Point (5, 10)), "Point eq");
+	assert (p.eq (new Point (5, 10)), "Point eq");
 
 	// Size
-	var s = Size (100, 200);
+	var s = new Size(100, 200);
 	assert (s.w === 100 && s.h === 200, "Size ctor");
 
 	// Bounds
-	var b = Bounds (10, 20, 100, 200);
+	var b = new Bounds(10, 20, 100, 200);
 	assert (b.x === 10 && b.y === 20 && b.w === 100 && b.h === 200, "Bounds ctor");
 	assert (b.isValid(), "Bounds valid");
 
 	// Color
-	var c = Color (128, 64, 32, 255);
+	var c = new Color(128, 64, 32, 255);
 	assert (c.r === 128 && c.g === 64 && c.b === 32 && c.a === 255, "Color ctor");
 
 	// Image
-	var img = Image (10, 10);
+	var img = new Image(10, 10);
 	assert (img.isValid(), "Image valid");
 	assert (img.getWidth() === 10, "Image width");
 	assert (img.getHeight() === 10, "Image height");
 	assert (img.getLength() === 100, "Image length");
 
-	img.setPixel (0, 0, Color (255, 0, 0, 255));
+	img.setPixel (0, 0, new Color (255, 0, 0, 255));
 	var px = img.getPixel (0, 0);
 	assert (px.r === 255 && px.g === 0 && px.b === 0, "Image pixel");
 
@@ -887,7 +870,7 @@ function testTypes()
 	assert (px.r === 100 && px.g === 200 && px.b === 50, "Image fill");
 
 	// Timer
-	var t = Timer();
+	var t = new Timer();
 	assert (typeof t.getElapsed() === "number", "Timer elapsed");
 	Timer.sleep (10);
 

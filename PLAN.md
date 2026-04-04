@@ -101,9 +101,9 @@ All subsystems with full parity to the robot-js documented API:
 
 ---
 
-## Phase 3: robot-js Compatibility Shim (PLANNED)
+## Phase 3: robot-js Compatibility Shim (COMPLETE)
 
-Create a `mechatron-robot-js` package that provides a drop-in replacement for
+Created a `mechatron-robot-js` package that provides a drop-in replacement for
 the original `robot-js` API, backed by mechatron.
 
 ### Motivation
@@ -112,30 +112,104 @@ the original `robot-js` API, backed by mechatron.
 - Validate API completeness — any robot-js function not covered is a gap
 - Provide a stable compatibility layer before modernizing mechatron's own API
 
-### Approach
-1. Create `packages/mechatron-robot-js/` subproject (or separate repo)
-2. Export the exact robot-js public API surface, delegating to mechatron
-3. Match robot-js argument handling, return types, and error behaviour
-4. Add robot-js test suite as integration/conformance tests
-5. Publish as `mechatron-robot-js` on npm
+### Implementation
+Since mechatron already maintains full API parity with robot-js 2.2.0 (same
+classes, methods, constants, and calling conventions including constructor-
+without-`new`), the shim is a thin re-export package.
+
+Files:
+- `packages/mechatron-robot-js/package.json` — npm package metadata, depends
+  on `mechatron`
+- `packages/mechatron-robot-js/index.js` — single-line re-export of mechatron
+- `packages/mechatron-robot-js/index.d.ts` — TypeScript type re-export
+- `packages/mechatron-robot-js/README.md` — usage instructions and npm alias
+  tip (`npm install robot-js@npm:mechatron-robot-js`)
+- `packages/mechatron-robot-js/test/conformance.js` — comprehensive conformance
+  test suite validating the full robot-js 2.2.0 API surface: version constants,
+  top-level functions, all 17 classes (constructors, instance methods, static
+  methods, nested classes), platform constants, and behavioral smoke tests
+
+### What Was Validated
+The conformance test suite checks ~200 API surface points:
+- All classes callable with and without `new`
+- Every documented instance method and static method present
+- Nested classes (`Memory.Stats`, `Memory.Region`, `Module.Segment`) accessible
+- All platform constants (KEY_*, BUTTON_*) present and typed correctly
+- Memory flag constants (`DEFAULT`, `SKIP_ERRORS`, `AUTO_ACCESS`)
+- Behavioral correctness: clone independence, arithmetic, containment,
+  ARGB round-trip, hash determinism, image lifecycle, timer operation,
+  keyboard compilation
 
 ---
 
-## Phase 4: API Modernization & Modular Split (PLANNED)
+## Phase 4: Modular Split + API Modernization (COMPLETE)
 
-Once the compatibility shim exists as a stable bridge for legacy consumers,
-redesign the mechatron API and split the implementation into focused packages.
+Phase 4 is executed in two parts:
+- **4a. Modular Split** — COMPLETE.  The mechatron implementation is split
+  into nine independently-installable npm packages, plus a Cargo workspace of
+  per-subsystem native crates sharing a common source tree.
+- **4b. API Modernization** — COMPLETE.  The modern mechatron meta-package
+  exposes plain typed ES class constructors via named exports and drops the
+  `callableClass()` Proxy wrapper, flattened `KEY_*` globals, top-level
+  `sleep`/`clock`, `Module.Segment`/`Memory.Stats`/`Memory.Region` nesting,
+  and `get/setNativeBackend` stubs.  Async `*Async` variants are provided for
+  operations that may block (screen capture, process/window enumeration,
+  memory scanning, clipboard IO).  Legacy robot-js 2.2.0 consumers continue
+  to get the historical shape via `mechatron-robot-js`, which layers the old
+  surface on top of the modern API.
 
-### API Modernization
-- Async/Promise-based APIs where appropriate (e.g. screen grab, process list)
-- TypeScript-first public API with proper generics and discriminated unions
-- Modern event patterns (EventEmitter / AsyncIterator for key/mouse listeners)
-- Drop legacy `callableClass()` pattern — use standard constructors/statics
-- Proper ESM support alongside CJS
+### 4a. Modular Split (COMPLETE)
 
-### Modular Split
-Split mechatron into capability-specific packages so consumers only install
-what they need:
+#### npm Workspace Layout
+- `packages/mechatron-types` — pure data types (Point, Size, Bounds, Color,
+  Range, Hash, Image, Timer); no native dependency
+- `packages/mechatron-keyboard`, `-mouse`, `-clipboard`, `-screen`, `-window`,
+  `-process`, `-memory` — each wraps its own subsystem and ships its own
+  per-subsystem `.node` prebuilt
+- `packages/mechatron-robot-js` — thin compatibility shim (phase 3)
+- Root `mechatron` package — meta-package re-exporting all subsystems with
+  `callableClass()` wrappers preserved, so existing `require("mechatron")`
+  consumers continue to work unchanged
+
+#### Cargo Workspace Layout
+- `native-rs/Cargo.toml` — workspace root
+- `native-rs/shared/` — internal lib crate for `x11.rs` / `mach.rs` helpers
+- `native-rs/{keyboard,mouse,clipboard,screen,window,process,memory}/` —
+  one `cdylib` crate per subsystem, each including its source via
+  `#[path = "../../src/<module>.rs"]` from the shared `native-rs/src/` tree
+- CI builds all seven crates and distributes each `.node` into the matching
+  `packages/mechatron-<sub>/` directory
+
+#### Build System
+- `tsc --build` is the single canonical TypeScript build path; bun was dropped
+- TypeScript project references link all packages for incremental builds
+- `dist/` is no longer committed — generated on demand by `tsc --build`
+
+#### Release Flow
+- Root version bump via `npm version` is applied across all nine workspaces
+- Cross-package dependencies are rewritten to the exact release version at
+  publish time
+- Publish order: types → subsystems → meta-package → robot-js shim
+
+### 4b. API Modernization (COMPLETE)
+- `*Async` Promise-returning variants for potentially-blocking operations:
+  `Screen.grabScreenAsync`, `Screen.synchronizeAsync`, `Process.getListAsync`,
+  `Process.getModulesAsync`, `Window.getListAsync`, `Clipboard.getTextAsync`,
+  `Clipboard.setTextAsync`, `Clipboard.getImageAsync`, `Clipboard.setImageAsync`,
+  `Memory.getRegionsAsync`, `Memory.readDataAsync`, `Memory.writeDataAsync`,
+  `Memory.findAsync` (currently `queueMicrotask`-wrapped; can migrate to true
+  `napi::Task` worker threads without changing the public surface)
+- Named TypeScript exports throughout the meta-package; no `callableClass()`
+  Proxy wrapping, no flattened `KEY_*` globals (use `KEYS.KEY_A`), no
+  top-level `sleep`/`clock` (use `Timer.sleep`/`Timer.getCpuTime`), no
+  `Module.Segment`/`Memory.Stats`/`Memory.Region` nesting (import directly),
+  no `get/setNativeBackend` stubs
+- `mechatron-robot-js` shim reconstructs the historical robot-js 2.2.0 shape
+  (callableClass Proxies, version constants, top-level `sleep`/`clock`,
+  flattened `KEY_*` globals, nested subclasses, backend stubs) on top of the
+  modern API — drop-in replacement for existing robot-js consumers
+
+### Published Package Matrix
 
 | Package | Capabilities |
 |---------|-------------|
@@ -166,5 +240,6 @@ what they need:
 |-------|--------|-------------|
 | 1 | **Complete** | C++ NAPI port, flat backend, CI on 6 platforms |
 | 2 | **Complete** | Rust NAPI rewrite via napi-rs, full robot-js API parity |
-| 3 | Planned | mechatron-robot-js compatibility shim |
-| 4 | Planned | API modernization + modular package split |
+| 3 | **Complete** | mechatron-robot-js compatibility shim |
+| 4a | **Complete** | Modular package split (9 npm packages + 7 per-subsystem Rust crates) |
+| 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |

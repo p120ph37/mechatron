@@ -7,3 +7,8 @@ node_modules/
 .DS_STORE
 native-rs/target/
 native-rs/*.node
+dist/
+packages/*/dist/
+*.tsbuildinfo
+packages/mechatron-*/mechatron-*.node
+native-rs/*/mechatron-*.node
