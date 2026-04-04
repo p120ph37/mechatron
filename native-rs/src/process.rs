@@ -224,6 +224,10 @@ fn mac_is_64_bit(pid: i32) -> bool {
             &mut info as *mut _ as *mut libc::c_void,
             PROC_PIDT_SHORTBSDINFO_SIZE,
         );
+        eprintln!("[is_64bit] pid={} ret={} sizeof={} flags=0x{:x} LP64=0x{:x} comm_bytes={:?}",
+            pid, ret, std::mem::size_of::<ProcBsdShortInfo>(),
+            info.pbsi_flags, PROC_FLAG_LP64,
+            &info.pbsi_comm[..]);
         if ret > 0 {
             (info.pbsi_flags & PROC_FLAG_LP64) != 0
         } else {
