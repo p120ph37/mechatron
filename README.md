@@ -64,34 +64,19 @@ var regions = mem.getRegions();
 
 ## Architecture
 
-The native backend is implemented in Rust (`native-rs/`) using napi-rs.  The
-TypeScript wrapper layer (`lib/`) provides the public API with full argument
-validation, bundled to `dist/index.js`.
-
-A legacy C++ backend (`src/`) is retained for comparison.  The Rust backend is
-loaded by default; the C++ backend is used as a fallback if the Rust binary is
-not available for the current platform.
+The native backend is implemented in Rust (`native-rs/`) using napi-rs, exposing
+minimal FFI functions — platform syscall wrappers with no business logic.  The
+TypeScript layer (`lib/`) owns all API logic: argument validation, key constants,
+keyboard compile, and state iteration.  `tsc` compiles `lib/` to individual CJS
+modules in `dist/`.
 
 ## Build from Source
-
-### Rust backend (default)
 
 Requires: Rust toolchain, Node.js 18+
 
 ```sh
 cd native-rs
 npm run build   # or: cargo build --release
-```
-
-### C++ backend (fallback)
-
-Requires: C++ compiler, CMake, Node.js 18+
-
-```sh
-npm install
-npm run build:dev   # cmake-js
-# or
-npx node-gyp rebuild  # node-gyp fallback
 ```
 
 ## Test

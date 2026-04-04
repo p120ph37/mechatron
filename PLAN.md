@@ -22,38 +22,21 @@ Files:
 - `lib/index.ts` — Entry point with `callableClass()` proxy, constants, exports
 - `dist/index.js` — Bun-bundled CJS output (committed)
 
-### 1b. Flat Native Backend
-Replaced the 16-pair `*Adapter.cc/.h` class-based NAPI layer with a flat
-function backend in `src/native/`.
+### 1b. Flat Native Backend (removed in Phase 2b)
+The C++ flat native backend (`src/native/`) and Robot C++ library (`src/robot/`)
+were used as the initial native layer.  Removed after Rust reached full parity.
 
-Files:
-- `src/native/init.cc` — Module init, constant exports
-- `src/native/keyboard.cc`, `mouse.cc`, `clipboard.cc`, `screen.cc`,
-  `window.cc`, `process.cc`, `memory.cc` — Flat NAPI function exports
-- `src/native/native.h` — Shared declarations
-
-The old adapter layer (`src/*Adapter.cc/.h`, `src/ClassAdapter.h`,
-`src/RobotAdapter.cc/.h`) is still present but unused — to be removed in
-cleanup.
-
-### 1c. Robot C++ Library
-The core platform abstraction layer is unchanged:
-- `src/robot/*.cc` and `src/robot/*.h` — 16 implementation files covering
-  Keyboard, Mouse, Clipboard, Screen, Window, Process, Memory, Image, Timer,
-  plus data types (Bounds, Point, Size, Range, Color, Hash, Module)
-
-### 1d. Build System
-- **cmake-js** primary build via `prebuildify --backend cmake-js --napi`
-- **node-gyp** fallback via `prebuildify --napi` / `binding.gyp`
-- Prebuilt binaries for: Linux x64/arm64, macOS arm64/x64, Windows x64/ia32
+### 1c. Build System
+- Prebuilt Rust `.node` binaries for: Linux x64/arm64, macOS arm64/x64,
+  Windows x64/ia32
 - Cross-compilation: macOS arm64 runners build x64 via `--arch x64`
 
-### 1e. CI / Testing
+### 1d. CI / Testing
 - GitHub Actions workflow builds and tests all 6 platform/arch combinations
 - `test/test-ci.js` — comprehensive test suite exercising all subsystems
 - TCC grants for macOS (accessibility, post-event, screen capture)
 - Platform capability expectations table prevents silent test regressions
-- Mach VM probe guards against SIGABRT on macOS arm64 (entitlement limitation)
+- Mach VM tests enabled on both darwin-arm64 and darwin-x64
 - Graceful degradation with hard-fail if expected capability regresses
 
 ---
@@ -63,24 +46,34 @@ The core platform abstraction layer is unchanged:
 Replaced the C++ native layer with Rust using `napi-rs`, maintaining full
 behavioral parity with the original robot-js documented APIs.
 
-### Implementation
+### 2a. Rust Native Backend
 - `native-rs/` — Cargo workspace with napi-rs v2 `#[napi]` attribute macros
 - `native-rs/src/` — Rust source modules: `keyboard.rs`, `mouse.rs`,
-  `clipboard.rs`, `screen.rs`, `window.rs`, `process.rs`, `memory.rs`
+  `clipboard.rs`, `screen.rs`, `window.rs`, `process.rs`, `memory.rs`,
+  `mach.rs` (shared macOS helpers), `x11.rs` (shared Linux helpers)
 - Platform-specific code via `#[cfg(target_os = "...")]` guards
 - Windows: `windows` crate v0.58
 - macOS: `objc2`, `objc2-app-kit`, `objc2-core-graphics`, `objc2-core-foundation`,
   Mach VM APIs via raw `extern "C"` FFI
 - Linux: X11/Xinerama via raw FFI, `/proc` filesystem
 
-### Backend Selection
-Rust is the default backend.  `lib/native.ts` loads the Rust `.node` binary
-first, falling back to the C++ addon (via `node-gyp-build`) if the Rust binary
-is not available.
+### 2b. C++ Backend Removal
+The C++ backend (`src/`, `src/native/`, `src/robot/`) and the dual-backend test
+runner have been removed.  Rust is the sole native backend.
+
+### 2c. Logic Shift to TypeScript
+Reduced the Rust layer to minimal FFI (thin `#[napi]` wrappers over platform
+syscalls).  Business logic moved to TypeScript:
+- Platform key/button/memory constants — `lib/constants.ts`, selected at
+  runtime via `process.platform`
+- `Keyboard.compile()` — key sequence parsing is pure TS
+- `Keyboard.getState()` iteration — TS iterates the platform key list,
+  Rust only exports `keyboard_getKeyState(keycode)`
+- `dist/` output is individual CJS modules emitted by `tsc` (not a bundle)
 
 ### What Was Ported
 All subsystems with full parity to the robot-js documented API:
-- **Keyboard**: click, press, release, compile, getState, getKeyState
+- **Keyboard**: press, release, getKeyState
 - **Mouse**: click, press, release, scrollH/V, getPos, setPos, getState
 - **Clipboard**: clear, hasText, getText, setText, hasImage, getImage, setImage,
   getSequence
@@ -99,17 +92,12 @@ All subsystems with full parity to the robot-js documented API:
 ### Intentionally Not Implemented
 - **Memory caching** (`createCache`/`clearCache`/`deleteCache`/`isCaching`/
   `getCacheSize`): Per original documentation — "Caching should not be enabled
-  as it will result in a large memory overhead."  High complexity, limited
-  utility.  The TS layer stubs these to no-op/defaults.
-- **Memory stats** (`getStats`): The C++ adapter creates a new `Robot::Memory`
+  as it will result in a large memory overhead."  The TS layer stubs these to
+  no-op/defaults.
+- **Memory stats** (`getStats`): The original C++ adapter created a new Memory
   object per native call, making stats always zero.  The TS layer returns an
-  empty `Stats` object, matching effective C++ behavior.
+  empty `Stats` object, matching that effective behavior.
 - **getHandleAx**: Not implemented in the original robot-js Node layer.
-
-### C++ Backend Retained
-The C++ backend (`src/native/`, `src/robot/`) is retained in this revision for
-comparison and cross-analysis.  Future revisions will remove it as the project
-moves toward a napi-rs and bun-FFI-centric design.
 
 ---
 
