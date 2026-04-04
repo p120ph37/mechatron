@@ -193,6 +193,12 @@ jobs:
             node test/test-ci.js all
           fi
 
+      - name: Run mechatron-robot-js conformance tests
+        run: |
+          mkdir -p packages/mechatron-robot-js/node_modules
+          ln -sfn "$PWD" packages/mechatron-robot-js/node_modules/mechatron
+          node packages/mechatron-robot-js/test/conformance.js
+
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
@@ -253,11 +259,29 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Publish to npm
+      - name: Publish mechatron to npm
         run: |
           npm ci --ignore-scripts
           TAG="latest"
           if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
             TAG="next"
           fi
+          npm publish --access public --tag "$TAG"
+
+      - name: Publish mechatron-robot-js to npm
+        run: |
+          VERSION="${{ needs.detect-release.outputs.version }}"
+          SEMVER="${VERSION#v}"
+          TAG="latest"
+          if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
+            TAG="next"
+          fi
+          cd packages/mechatron-robot-js
+          npm version "$SEMVER" --no-git-tag-version
+          # Pin the mechatron dependency to the exact release version
+          node -e "
+            const pkg = require('./package.json');
+            pkg.dependencies.mechatron = '$SEMVER';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
           npm publish --access public --tag "$TAG"
