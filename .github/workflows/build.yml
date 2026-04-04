@@ -113,20 +113,27 @@ jobs:
       - name: Mach VM diagnostics
         if: runner.os == 'macOS'
         run: |
-          # Build the C diagnostic module (arm64 native)
+          # Build the C diagnostic module for native arch
           cd test/mach-diag && npx node-gyp rebuild && cd ../..
-          # Run diagnostics with native node (arm64)
           echo "=== Native node ($(node -p process.arch)) ==="
           sudo node test/mach-diag/run.js || true
-          # If cross-compiling for x64, also run with x64 node under Rosetta
-          # (C diag module won't load under Rosetta since it's arm64, but
-          #  the script still exercises the Rust .node module)
+
+          # For x64-on-arm64: download x64 node, rebuild C module with it, and run
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
             NODE_VERSION=$(node -v)
             if [ ! -d "./node-${NODE_VERSION}-darwin-x64" ]; then
               curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
             fi
-            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            X64_NODE="$(pwd)/node-${NODE_VERSION}-darwin-x64/bin/node"
+            X64_NPM="$(pwd)/node-${NODE_VERSION}-darwin-x64/bin/npm"
+
+            # Rebuild C diag module using x64 node-gyp (produces x64 .node)
+            echo ""
+            echo "=== Rebuilding C diag module for x64 ==="
+            cd test/mach-diag
+            "$X64_NPM" exec -- node-gyp rebuild 2>&1 || true
+            cd ../..
+
             echo ""
             echo "=== x64 node under Rosetta ==="
             sudo "$X64_NODE" test/mach-diag/run.js || true
