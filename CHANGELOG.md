@@ -7,7 +7,6 @@ All notable changes to this project will be documented in this file.
 ### Removed
 - C++ native backend (`src/`, `src/native/`, `src/robot/`) — Rust is now the
   sole native backend; the C++ fallback and dual-backend test runner are gone
-- Mach VM diagnostic module (`test/mach-diag/`) and CI diagnostic step
 - `ProcBsdShortInfo` / `proc_pidinfo` usage in Rust — no longer needed now that
   `mac_is_64_bit` unconditionally returns true
 
