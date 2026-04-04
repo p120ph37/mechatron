@@ -101,9 +101,9 @@ All subsystems with full parity to the robot-js documented API:
 
 ---
 
-## Phase 3: robot-js Compatibility Shim (PLANNED)
+## Phase 3: robot-js Compatibility Shim (COMPLETE)
 
-Create a `mechatron-robot-js` package that provides a drop-in replacement for
+Created a `mechatron-robot-js` package that provides a drop-in replacement for
 the original `robot-js` API, backed by mechatron.
 
 ### Motivation
@@ -112,12 +112,33 @@ the original `robot-js` API, backed by mechatron.
 - Validate API completeness — any robot-js function not covered is a gap
 - Provide a stable compatibility layer before modernizing mechatron's own API
 
-### Approach
-1. Create `packages/mechatron-robot-js/` subproject (or separate repo)
-2. Export the exact robot-js public API surface, delegating to mechatron
-3. Match robot-js argument handling, return types, and error behaviour
-4. Add robot-js test suite as integration/conformance tests
-5. Publish as `mechatron-robot-js` on npm
+### Implementation
+Since mechatron already maintains full API parity with robot-js 2.2.0 (same
+classes, methods, constants, and calling conventions including constructor-
+without-`new`), the shim is a thin re-export package.
+
+Files:
+- `packages/mechatron-robot-js/package.json` — npm package metadata, depends
+  on `mechatron`
+- `packages/mechatron-robot-js/index.js` — single-line re-export of mechatron
+- `packages/mechatron-robot-js/index.d.ts` — TypeScript type re-export
+- `packages/mechatron-robot-js/README.md` — usage instructions and npm alias
+  tip (`npm install robot-js@npm:mechatron-robot-js`)
+- `packages/mechatron-robot-js/test/conformance.js` — comprehensive conformance
+  test suite validating the full robot-js 2.2.0 API surface: version constants,
+  top-level functions, all 17 classes (constructors, instance methods, static
+  methods, nested classes), platform constants, and behavioral smoke tests
+
+### What Was Validated
+The conformance test suite checks ~200 API surface points:
+- All classes callable with and without `new`
+- Every documented instance method and static method present
+- Nested classes (`Memory.Stats`, `Memory.Region`, `Module.Segment`) accessible
+- All platform constants (KEY_*, BUTTON_*) present and typed correctly
+- Memory flag constants (`DEFAULT`, `SKIP_ERRORS`, `AUTO_ACCESS`)
+- Behavioral correctness: clone independence, arithmetic, containment,
+  ARGB round-trip, hash determinism, image lifecycle, timer operation,
+  keyboard compilation
 
 ---
 
@@ -166,5 +187,5 @@ what they need:
 |-------|--------|-------------|
 | 1 | **Complete** | C++ NAPI port, flat backend, CI on 6 platforms |
 | 2 | **Complete** | Rust NAPI rewrite via napi-rs, full robot-js API parity |
-| 3 | Planned | mechatron-robot-js compatibility shim |
+| 3 | **Complete** | mechatron-robot-js compatibility shim |
 | 4 | Planned | API modernization + modular package split |
