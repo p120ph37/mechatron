@@ -101,6 +101,11 @@ jobs:
               cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
             fi
           fi
+          # Re-sign macOS binaries (strip="symbols" in Cargo.toml invalidates the ad-hoc signature;
+          # task_for_pid requires a valid signature even when running as root)
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
+          fi
 
       - name: Bundle TypeScript
         run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path

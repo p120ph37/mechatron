@@ -159,6 +159,9 @@ jobs:
               cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
             fi
           fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
+          fi
 
       - name: Bundle TypeScript
         run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
