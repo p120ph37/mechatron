@@ -20,11 +20,12 @@ import { Module, Segment } from "./Module";
 import { Memory, Stats, Region } from "./Memory";
 
 // Native backend management
-import { getNativeBackend, setNativeBackend, getNativeConstants } from "./native";
+import { getNativeBackend, setNativeBackend } from "./native";
+import { getAllConstants } from "./constants";
 
 // Version constants
-const ROBOT_VERSION = 0x020000;
-const ROBOT_VERSION_STR = "2.0.0 (0.0.0)";
+const ROBOT_VERSION = 0x020200;
+const ROBOT_VERSION_STR = "2.2.0 (0.0.0)";
 const ADDON_VERSION = 0x000000;
 const ADDON_VERSION_STR = "0.0.0";
 
@@ -70,8 +71,8 @@ Process.prototype.getModules = function(this: Process, regex?: string) {
   });
 } as any;
 
-// Platform-specific key/button constants from native addon
-const _nativeConstants = getNativeConstants();
+// Platform-specific key/button constants (now from TS constants module)
+const _nativeConstants = getAllConstants();
 
 const mRobot = {
   // Version info

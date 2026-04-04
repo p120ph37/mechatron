@@ -128,40 +128,6 @@ fn platform_set_pos(x: i32, y: i32) {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    unsafe {
-        if !is_xtest_available() {
-            return Ok(());
-        }
-        let display = get_display();
-        let screens = XScreenCount(display);
-        let mut root: Window = 0;
-        let mut child: Window = 0;
-        let mut rx: i32 = 0;
-        let mut ry: i32 = 0;
-        let mut wx: i32 = 0;
-        let mut wy: i32 = 0;
-        let mut mask: c_uint = 0;
-
-        for i in 0..screens {
-            if XQueryPointer(
-                display, XRootWindow(display, i),
-                &mut root, &mut child,
-                &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
-            ) != 0 {
-                obj.set("0", ((mask & Button1Mask) >> 8) != 0)?; // Left
-                obj.set("1", ((mask & Button2Mask) >> 8) != 0)?; // Mid
-                obj.set("2", ((mask & Button3Mask) >> 8) != 0)?; // Right
-                obj.set("3", false)?; // X1
-                obj.set("4", false)?; // X2
-                return Ok(());
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
 fn platform_get_button_state(button: i32) -> bool {
     unsafe {
         if button == BUTTON_X1 || button == BUTTON_X2 || !is_xtest_available() {
@@ -380,18 +346,6 @@ fn platform_set_pos(x: i32, y: i32) {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    unsafe {
-        obj.set("0", mac::CGEventSourceButtonState(mac::kCGEventSourceStateHIDSystemState, mac::kCGMouseButtonLeft))?;
-        obj.set("1", mac::CGEventSourceButtonState(mac::kCGEventSourceStateHIDSystemState, mac::kCGMouseButtonCenter))?;
-        obj.set("2", mac::CGEventSourceButtonState(mac::kCGEventSourceStateHIDSystemState, mac::kCGMouseButtonRight))?;
-        obj.set("3", false)?; // X1
-        obj.set("4", false)?; // X2
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
 fn platform_get_button_state(button: i32) -> bool {
     let cg_button = match button {
         BUTTON_LEFT => mac::kCGMouseButtonLeft,
@@ -549,24 +503,6 @@ fn platform_set_pos(x: i32, y: i32) {
 }
 
 #[cfg(target_os = "windows")]
-fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    let swapped = win_buttons_swapped();
-    unsafe {
-        let (lbtn, rbtn) = if swapped {
-            (VK_RBUTTON, VK_LBUTTON)
-        } else {
-            (VK_LBUTTON, VK_RBUTTON)
-        };
-        obj.set("0", GetAsyncKeyState(lbtn.0 as i32) & (0x8000u16 as i16) != 0)?;
-        obj.set("1", GetAsyncKeyState(VK_MBUTTON.0 as i32) & (0x8000u16 as i16) != 0)?;
-        obj.set("2", GetAsyncKeyState(rbtn.0 as i32) & (0x8000u16 as i16) != 0)?;
-        obj.set("3", GetAsyncKeyState(VK_XBUTTON1.0 as i32) & (0x8000u16 as i16) != 0)?;
-        obj.set("4", GetAsyncKeyState(VK_XBUTTON2.0 as i32) & (0x8000u16 as i16) != 0)?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
 fn platform_get_button_state(button: i32) -> bool {
     let swapped = win_buttons_swapped();
     let vk = match button {
@@ -614,13 +550,6 @@ pub fn mouse_get_pos(env: Env) -> Result<napi::JsObject> {
 #[napi(js_name = "mouse_setPos")]
 pub fn mouse_set_pos(x: i32, y: i32) {
     platform_set_pos(x, y);
-}
-
-#[napi(js_name = "mouse_getState")]
-pub fn mouse_get_state(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    platform_get_state(&env, &mut obj)?;
-    Ok(obj)
 }
 
 #[napi(js_name = "mouse_getButtonState")]

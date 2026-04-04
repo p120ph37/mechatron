@@ -2,6 +2,9 @@ import { Range } from "./Range";
 import { Point } from "./Point";
 import { Timer } from "./Timer";
 import type { NativeBackend } from "./native";
+import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "./constants";
+
+const ALL_BUTTONS = [BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2];
 
 export class Mouse {
   autoDelay: Range;
@@ -70,6 +73,10 @@ export class Mouse {
     if (button !== undefined) {
       return native.mouse_getButtonState(button);
     }
-    return native.mouse_getState();
+    const state: Record<number, boolean> = {};
+    for (const btn of ALL_BUTTONS) {
+      state[btn] = native.mouse_getButtonState(btn);
+    }
+    return state;
   }
 }

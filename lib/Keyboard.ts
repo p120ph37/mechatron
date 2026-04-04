@@ -1,26 +1,11 @@
 import { Range } from "./Range";
 import { Timer } from "./Timer";
 import type { NativeBackend } from "./native";
+import { getKeyNames, getAllKeys } from "./constants";
 
 // --- keyboard_compile implementation (moved from Rust) ---
 // Parses key sequence strings like "^a" (ctrl+a), "{ENTER}", "+{TAB 3}"
 // into an array of {down, key} pairs using platform-specific key constants.
-
-let _keyNames: Record<string, number> | null = null;
-
-function getKeyNames(): Record<string, number> {
-  if (_keyNames) return _keyNames;
-  const { getNativeConstants } = require("./native");
-  const constants = getNativeConstants();
-  _keyNames = {};
-  for (const [name, value] of Object.entries(constants)) {
-    if (name.startsWith("KEY_")) {
-      // Map "KEY_SPACE" -> "SPACE", "KEY_LALT" -> "LALT", etc.
-      _keyNames[name.substring(4)] = value as number;
-    }
-  }
-  return _keyNames;
-}
 
 function resolveKeyName(name: string): number | undefined {
   const names = getKeyNames();
@@ -214,6 +199,10 @@ export class Keyboard {
     if (keycode !== undefined) {
       return native.keyboard_getKeyState(keycode);
     }
-    return native.keyboard_getState();
+    const state: Record<number, boolean> = {};
+    for (const key of getAllKeys()) {
+      state[key] = native.keyboard_getKeyState(key);
+    }
+    return state;
   }
 }

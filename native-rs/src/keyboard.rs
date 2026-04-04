@@ -3,7 +3,6 @@ use napi_derive::napi;
 
 #[cfg(target_os = "linux")]
 use crate::x11::*;
-use crate::keys::*;
 
 // ==================== Linux ====================
 
@@ -39,25 +38,6 @@ fn platform_get_key_state(keycode: i32) -> bool {
         let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
         (keys[(xkeycode / 8) as usize] & (1 << (xkeycode % 8))) != 0
     }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    unsafe {
-        if !is_xtest_available() {
-            return Ok(());
-        }
-        let display = get_display();
-        let mut keys = [0i8; 32];
-        XQueryKeymap(display, &mut keys as *mut [i8; 32] as *mut [std::ffi::c_char; 32]);
-
-        for &keyval in ALL_KEYS.iter() {
-            let xkeycode = XKeysymToKeycode(display, keyval as KeySym);
-            let pressed = (keys[(xkeycode / 8) as usize] & (1 << (xkeycode % 8))) != 0;
-            obj.set(keyval.to_string().as_str(), pressed)?;
-        }
-    }
-    Ok(())
 }
 
 // ==================== macOS ====================
@@ -117,17 +97,6 @@ fn platform_get_key_state(keycode: i32) -> bool {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    for &keyval in ALL_KEYS.iter() {
-        let pressed = unsafe {
-            mac::CGEventSourceKeyState(mac::kCGEventSourceStateHIDSystemState, keyval as mac::CGKeyCode)
-        };
-        obj.set(keyval.to_string().as_str(), pressed)?;
-    }
-    Ok(())
-}
-
 // ==================== Windows ====================
 
 #[cfg(target_os = "windows")]
@@ -182,17 +151,6 @@ fn platform_get_key_state(keycode: i32) -> bool {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn platform_get_state(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    for &keyval in ALL_KEYS.iter() {
-        let pressed = unsafe {
-            GetAsyncKeyState(keyval as i32) & (0x8000u16 as i16) != 0
-        };
-        obj.set(keyval.to_string().as_str(), pressed)?;
-    }
-    Ok(())
-}
-
 // --- NAPI exports (minimal FFI — no delays, no compile logic) ---
 
 #[napi(js_name = "keyboard_press")]
@@ -203,13 +161,6 @@ pub fn keyboard_press(keycode: i32) {
 #[napi(js_name = "keyboard_release")]
 pub fn keyboard_release(keycode: i32) {
     do_release(keycode as u32);
-}
-
-#[napi(js_name = "keyboard_getState")]
-pub fn keyboard_get_state(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    platform_get_state(&env, &mut obj)?;
-    Ok(obj)
 }
 
 #[napi(js_name = "keyboard_getKeyState")]

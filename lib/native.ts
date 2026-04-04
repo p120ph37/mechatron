@@ -4,7 +4,6 @@ export interface NativeBackend {
   // Keyboard (raw — no delays)
   keyboard_press(keycode: number): void;
   keyboard_release(keycode: number): void;
-  keyboard_getState(): Record<number, boolean>;
   keyboard_getKeyState(keycode: number): boolean;
 
   // Mouse (raw — no delays)
@@ -14,7 +13,6 @@ export interface NativeBackend {
   mouse_scrollV(amount: number): void;
   mouse_getPos(): { x: number; y: number };
   mouse_setPos(x: number, y: number): void;
-  mouse_getState(): Record<number, boolean>;
   mouse_getButtonState(button: number): boolean;
 
   // Clipboard
@@ -97,9 +95,6 @@ export interface NativeBackend {
   memory_deleteCache(pid: number): void;
   memory_isCaching(pid: number): boolean;
   memory_getCacheSize(pid: number): number;
-
-  // Constants (read as properties)
-  [key: string]: any;
 }
 
 let _backend: NativeBackend | null = null;
@@ -128,16 +123,4 @@ export function getNativeBackend(): NativeBackend {
 
 export function setNativeBackend(backend: NativeBackend): void {
   _backend = backend;
-}
-
-// Extract platform-specific key/button constants from the native addon
-export function getNativeConstants(): Record<string, number> {
-  const addon = getNativeBackend();
-  const constants: Record<string, number> = {};
-  for (const key of Object.keys(addon)) {
-    if ((key.startsWith("KEY_") || key.startsWith("BUTTON_") || key.startsWith("MEMORY_")) && typeof addon[key] === "number") {
-      constants[key] = addon[key];
-    }
-  }
-  return constants;
 }
