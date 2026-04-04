@@ -224,10 +224,17 @@ fn mac_is_64_bit(pid: i32) -> bool {
             &mut info as *mut _ as *mut libc::c_void,
             PROC_PIDT_SHORTBSDINFO_SIZE,
         );
-        eprintln!("[is_64bit] pid={} ret={} sizeof={} flags=0x{:x} LP64=0x{:x} comm_bytes={:?}",
+        // Dump raw bytes to find the actual layout
+        let raw = &info as *const _ as *const u8;
+        let raw_slice = std::slice::from_raw_parts(raw, 64.min(ret as usize));
+        let flags_offset = (&info.pbsi_flags as *const _ as usize) - (&info as *const _ as usize);
+        eprintln!("[is_64bit] pid={} ret={} sizeof={} flags=0x{:x} flags_offset={} LP64=0x{:x}",
             pid, ret, std::mem::size_of::<ProcBsdShortInfo>(),
-            info.pbsi_flags, PROC_FLAG_LP64,
-            &info.pbsi_comm[..]);
+            info.pbsi_flags, flags_offset, PROC_FLAG_LP64);
+        // Print bytes 28-44 (around where flags should be)
+        let start = 28.min(raw_slice.len());
+        let end = 44.min(raw_slice.len());
+        eprintln!("[is_64bit] raw[28..44]={:?}", &raw_slice[start..end]);
         if ret > 0 {
             (info.pbsi_flags & PROC_FLAG_LP64) != 0
         } else {
