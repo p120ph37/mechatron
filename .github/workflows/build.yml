@@ -160,8 +160,8 @@ jobs:
         run: |
           # Root package is named "mechatron" but can't be a workspace; link it manually
           # so packages/mechatron-robot-js's `require("mechatron")` resolves to the workspace root.
-          rm -rf node_modules/mechatron
-          ln -sfn "$PWD" node_modules/mechatron
+          # Use node for portability — `ln -sfn` won't overwrite a directory under Git Bash on Windows.
+          node -e "const fs=require('fs'),p=require('path');const t=p.join('node_modules','mechatron');if(fs.existsSync(t))fs.rmSync(t,{recursive:true,force:true});fs.symlinkSync(process.cwd(),t,'junction');"
           node packages/mechatron-robot-js/test/conformance.js
 
       - uses: actions/upload-artifact@v4

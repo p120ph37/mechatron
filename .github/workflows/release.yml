@@ -204,8 +204,7 @@ jobs:
 
       - name: Run mechatron-robot-js conformance tests
         run: |
-          rm -rf node_modules/mechatron
-          ln -sfn "$PWD" node_modules/mechatron
+          node -e "const fs=require('fs'),p=require('path');const t=p.join('node_modules','mechatron');if(fs.existsSync(t))fs.rmSync(t,{recursive:true,force:true});fs.symlinkSync(process.cwd(),t,'junction');"
           node packages/mechatron-robot-js/test/conformance.js
 
       - uses: actions/upload-artifact@v4
