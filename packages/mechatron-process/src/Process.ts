@@ -1,5 +1,6 @@
 import { Window } from "mechatron-window";
 import { getNative } from "./native";
+import type { Module } from "./Module";
 
 export interface ModuleData {
   valid: boolean;
@@ -76,13 +77,25 @@ export class Process {
     return getNative().process_hasExited(this._pid);
   }
 
-  getModules(regex?: string): ModuleData[] {
-    return getNative().process_getModules(this._pid, regex);
+  getModules(regex?: string): Module[] {
+    // Lazy require to avoid a cycle with Module (which imports Process).
+    const { Module: ModuleClass } = require("./Module") as typeof import("./Module");
+    const raw: ModuleData[] = getNative().process_getModules(this._pid, regex);
+    return raw.map((data) => {
+      const mod = new ModuleClass(data);
+      mod._segments = null;
+      mod._proc = this;
+      return mod;
+    });
+  }
+
+  async getModulesAsync(regex?: string): Promise<Module[]> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(this.getModules(regex))));
   }
 
   getWindows(regex?: string): Window[] {
-    const handles = getNative().process_getWindows(this._pid, regex);
-    return handles.map((h: any) => new Window(h));
+    const handles: number[] = getNative().process_getWindows(this._pid, regex);
+    return handles.map((h) => new Window(h));
   }
 
   eq(other: Process | number): boolean {
@@ -101,8 +114,12 @@ export class Process {
   }
 
   static getList(regex?: string): Process[] {
-    const pids = getNative().process_getList(regex);
-    return pids.map((pid: number) => new Process(pid));
+    const pids: number[] = getNative().process_getList(regex);
+    return pids.map((pid) => new Process(pid));
+  }
+
+  static async getListAsync(regex?: string): Promise<Process[]> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Process.getList(regex))));
   }
 
   static getCurrent(): Process {

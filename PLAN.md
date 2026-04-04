@@ -142,14 +142,21 @@ The conformance test suite checks ~200 API surface points:
 
 ---
 
-## Phase 4: Modular Split (COMPLETE) + API Modernization (PLANNED)
+## Phase 4: Modular Split + API Modernization (COMPLETE)
 
 Phase 4 is executed in two parts:
 - **4a. Modular Split** — COMPLETE.  The mechatron implementation is split
   into nine independently-installable npm packages, plus a Cargo workspace of
   per-subsystem native crates sharing a common source tree.
-- **4b. API Modernization** — PLANNED.  Once consumers have migrated to the
-  split packages, modernize the API surface (async, ESM, drop `callableClass`).
+- **4b. API Modernization** — COMPLETE.  The modern mechatron meta-package
+  exposes plain typed ES class constructors via named exports and drops the
+  `callableClass()` Proxy wrapper, flattened `KEY_*` globals, top-level
+  `sleep`/`clock`, `Module.Segment`/`Memory.Stats`/`Memory.Region` nesting,
+  and `get/setNativeBackend` stubs.  Async `*Async` variants are provided for
+  operations that may block (screen capture, process/window enumeration,
+  memory scanning, clipboard IO).  Legacy robot-js 2.2.0 consumers continue
+  to get the historical shape via `mechatron-robot-js`, which layers the old
+  surface on top of the modern API.
 
 ### 4a. Modular Split (COMPLETE)
 
@@ -184,12 +191,23 @@ Phase 4 is executed in two parts:
   publish time
 - Publish order: types → subsystems → meta-package → robot-js shim
 
-### 4b. API Modernization (PLANNED)
-- Async/Promise-based APIs where appropriate (e.g. screen grab, process list)
-- TypeScript-first public API with proper generics and discriminated unions
-- Modern event patterns (EventEmitter / AsyncIterator for key/mouse listeners)
-- Drop legacy `callableClass()` pattern — use standard constructors/statics
-- Proper ESM support alongside CJS
+### 4b. API Modernization (COMPLETE)
+- `*Async` Promise-returning variants for potentially-blocking operations:
+  `Screen.grabScreenAsync`, `Screen.synchronizeAsync`, `Process.getListAsync`,
+  `Process.getModulesAsync`, `Window.getListAsync`, `Clipboard.getTextAsync`,
+  `Clipboard.setTextAsync`, `Clipboard.getImageAsync`, `Clipboard.setImageAsync`,
+  `Memory.getRegionsAsync`, `Memory.readDataAsync`, `Memory.writeDataAsync`,
+  `Memory.findAsync` (currently `queueMicrotask`-wrapped; can migrate to true
+  `napi::Task` worker threads without changing the public surface)
+- Named TypeScript exports throughout the meta-package; no `callableClass()`
+  Proxy wrapping, no flattened `KEY_*` globals (use `KEYS.KEY_A`), no
+  top-level `sleep`/`clock` (use `Timer.sleep`/`Timer.getCpuTime`), no
+  `Module.Segment`/`Memory.Stats`/`Memory.Region` nesting (import directly),
+  no `get/setNativeBackend` stubs
+- `mechatron-robot-js` shim reconstructs the historical robot-js 2.2.0 shape
+  (callableClass Proxies, version constants, top-level `sleep`/`clock`,
+  flattened `KEY_*` globals, nested subclasses, backend stubs) on top of the
+  modern API — drop-in replacement for existing robot-js consumers
 
 ### Published Package Matrix
 
@@ -224,4 +242,4 @@ Phase 4 is executed in two parts:
 | 2 | **Complete** | Rust NAPI rewrite via napi-rs, full robot-js API parity |
 | 3 | **Complete** | mechatron-robot-js compatibility shim |
 | 4a | **Complete** | Modular package split (9 npm packages + 7 per-subsystem Rust crates) |
-| 4b | Planned | API modernization (async, ESM, drop `callableClass`) |
+| 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |

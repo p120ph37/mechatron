@@ -174,8 +174,13 @@ export class Memory {
   }
 
   getRegions(start?: number, stop?: number): Region[] {
-    const regions = getNative().memory_getRegions(this._pid, start, stop);
-    return regions.map((r: any) => {
+    interface RawRegion {
+      valid: boolean; bound: boolean; start: number; stop: number; size: number;
+      readable: boolean; writable: boolean; executable: boolean; access: number;
+      private: boolean; guarded: boolean;
+    }
+    const regions: RawRegion[] = getNative().memory_getRegions(this._pid, start, stop);
+    return regions.map((r) => {
       const region = new Region();
       region.valid = r.valid;
       region.bound = r.bound;
@@ -190,6 +195,10 @@ export class Memory {
       region.guarded = r.guarded;
       return region;
     });
+  }
+
+  async getRegionsAsync(start?: number, stop?: number): Promise<Region[]> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(this.getRegions(start, stop))));
   }
 
   setAccess(region: Region, readable: boolean, writable: boolean, executable: boolean): boolean;
@@ -215,6 +224,10 @@ export class Memory {
 
   getPageSize(): number {
     return getNative().memory_getPageSize(this._pid);
+  }
+
+  async findAsync(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): Promise<number[]> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(this.find(pattern, start, stop, limit, flags))));
   }
 
   find(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): number[] {
@@ -254,6 +267,14 @@ export class Memory {
     const len = length !== undefined ? length : buffer.length;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
     return getNative().memory_writeData(this._pid, address, buffer, flags);
+  }
+
+  async readDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(this.readData(address, buffer, length, flags))));
+  }
+
+  async writeDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(this.writeData(address, buffer, length, flags))));
   }
 
   readInt8(address: number, count?: number, stride?: number): number | number[] | null {
