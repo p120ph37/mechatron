@@ -59,10 +59,6 @@ extern "C" {
     fn proc_pidpath(pid: i32, buffer: *mut u8, buffersize: u32) -> i32;
     fn proc_listallpids(buffer: *mut libc::c_void, buffersize: i32) -> i32;
     fn proc_name(pid: i32, buffer: *mut u8, buffersize: u32) -> i32;
-    fn proc_pidinfo(
-        pid: i32, flavor: i32, arg: u64,
-        buffer: *mut libc::c_void, buffersize: i32,
-    ) -> i32;
 }
 
 // Mach API declarations
@@ -86,14 +82,6 @@ extern "C" {
     ) -> i32;
 }
 
-// proc_pidinfo constants
-#[cfg(target_os = "macos")]
-const PROC_PIDT_SHORTBSDINFO: i32 = 13;
-#[cfg(target_os = "macos")]
-const PROC_PIDT_SHORTBSDINFO_SIZE: i32 = 232; // sizeof(proc_bsdshortinfo)
-#[cfg(target_os = "macos")]
-const PROC_FLAG_LP64: u32 = 0x04;
-
 // Exception mask constants
 #[cfg(target_os = "macos")]
 const EXC_TYPES_COUNT: usize = 14;
@@ -111,25 +99,6 @@ const MACH_PORT_NULL: u32 = 0;
 const TASK_DYLD_INFO: u32 = 17;
 #[cfg(target_os = "macos")]
 const TASK_DYLD_INFO_COUNT: u32 = 6; // sizeof(task_dyld_info) / sizeof(natural_t) — 24/4 on 64-bit (u64 alignment padding)
-
-// proc_bsdshortinfo struct (simplified - we only need pbsi_flags)
-#[cfg(target_os = "macos")]
-#[repr(C)]
-struct ProcBsdShortInfo {
-    pbsi_pid: u32,
-    pbsi_ppid: u32,
-    pbsi_pgid: u32,
-    pbsi_status: u32,
-    pbsi_comm: [u8; 17], // MAXCOMLEN + 1 (MAXCOMLEN is 16 on macOS)
-    pbsi_flags: u32,
-    pbsi_uid: u32,
-    pbsi_gid: u32,
-    pbsi_ruid: u32,
-    pbsi_rgid: u32,
-    pbsi_svuid: u32,
-    pbsi_svgid: u32,
-    _pad: [u8; 232 - 64], // pad to PROC_PIDT_SHORTBSDINFO_SIZE (64 = 4*4 + 17 + 3pad + 7*4)
-}
 
 // task_dyld_info struct
 #[cfg(target_os = "macos")]
@@ -215,38 +184,12 @@ fn mac_get_name(pid: i32) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn mac_is_64_bit(pid: i32) -> bool {
-    if pid <= 0 { return true; }
-    unsafe {
-        let mut info: ProcBsdShortInfo = std::mem::zeroed();
-        let ret = proc_pidinfo(
-            pid, PROC_PIDT_SHORTBSDINFO, 0,
-            &mut info as *mut _ as *mut libc::c_void,
-            PROC_PIDT_SHORTBSDINFO_SIZE,
-        );
-        // Dump raw bytes to find the actual struct layout
-        let raw = &info as *const _ as *const u8;
-        let n = 64.min(ret as usize);
-        let raw_slice = std::slice::from_raw_parts(raw, n);
-        // Print in 16-byte chunks for readability
-        for chunk_start in (0..n).step_by(16) {
-            let chunk_end = (chunk_start + 16).min(n);
-            eprintln!("[is_64bit] raw[{}..{}]={:?}", chunk_start, chunk_end, &raw_slice[chunk_start..chunk_end]);
-        }
-        // Also scan for any u32 with LP64 bit set
-        for off in (0..n.saturating_sub(3)).step_by(4) {
-            let val = u32::from_le_bytes([raw_slice[off], raw_slice[off+1], raw_slice[off+2], raw_slice[off+3]]);
-            if val & PROC_FLAG_LP64 != 0 {
-                eprintln!("[is_64bit] LP64 found at offset {} val=0x{:x}", off, val);
-            }
-        }
-        if ret > 0 {
-            (info.pbsi_flags & PROC_FLAG_LP64) != 0
-        } else {
-            // Default to true on modern macOS
-            true
-        }
-    }
+fn mac_is_64_bit(_pid: i32) -> bool {
+    // macOS dropped 32-bit process support in Catalina (10.15).
+    // All processes on modern macOS are LP64.  The kernel no longer
+    // reliably sets P_LP64 in pbsi_flags on arm64, so checking
+    // proc_pidinfo is not useful.
+    true
 }
 
 #[cfg(target_os = "macos")]
