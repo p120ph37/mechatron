@@ -142,21 +142,56 @@ The conformance test suite checks ~200 API surface points:
 
 ---
 
-## Phase 4: API Modernization & Modular Split (PLANNED)
+## Phase 4: Modular Split (COMPLETE) + API Modernization (PLANNED)
 
-Once the compatibility shim exists as a stable bridge for legacy consumers,
-redesign the mechatron API and split the implementation into focused packages.
+Phase 4 is executed in two parts:
+- **4a. Modular Split** — COMPLETE.  The mechatron implementation is split
+  into nine independently-installable npm packages, plus a Cargo workspace of
+  per-subsystem native crates sharing a common source tree.
+- **4b. API Modernization** — PLANNED.  Once consumers have migrated to the
+  split packages, modernize the API surface (async, ESM, drop `callableClass`).
 
-### API Modernization
+### 4a. Modular Split (COMPLETE)
+
+#### npm Workspace Layout
+- `packages/mechatron-types` — pure data types (Point, Size, Bounds, Color,
+  Range, Hash, Image, Timer); no native dependency
+- `packages/mechatron-keyboard`, `-mouse`, `-clipboard`, `-screen`, `-window`,
+  `-process`, `-memory` — each wraps its own subsystem and ships its own
+  per-subsystem `.node` prebuilt
+- `packages/mechatron-robot-js` — thin compatibility shim (phase 3)
+- Root `mechatron` package — meta-package re-exporting all subsystems with
+  `callableClass()` wrappers preserved, so existing `require("mechatron")`
+  consumers continue to work unchanged
+
+#### Cargo Workspace Layout
+- `native-rs/Cargo.toml` — workspace root
+- `native-rs/shared/` — internal lib crate for `x11.rs` / `mach.rs` helpers
+- `native-rs/{keyboard,mouse,clipboard,screen,window,process,memory}/` —
+  one `cdylib` crate per subsystem, each including its source via
+  `#[path = "../../src/<module>.rs"]` from the shared `native-rs/src/` tree
+- CI builds all seven crates and distributes each `.node` into the matching
+  `packages/mechatron-<sub>/` directory
+
+#### Build System
+- `tsc --build` is the single canonical TypeScript build path; bun was dropped
+- TypeScript project references link all packages for incremental builds
+- `dist/` is no longer committed — generated on demand by `tsc --build`
+
+#### Release Flow
+- Root version bump via `npm version` is applied across all nine workspaces
+- Cross-package dependencies are rewritten to the exact release version at
+  publish time
+- Publish order: types → subsystems → meta-package → robot-js shim
+
+### 4b. API Modernization (PLANNED)
 - Async/Promise-based APIs where appropriate (e.g. screen grab, process list)
 - TypeScript-first public API with proper generics and discriminated unions
 - Modern event patterns (EventEmitter / AsyncIterator for key/mouse listeners)
 - Drop legacy `callableClass()` pattern — use standard constructors/statics
 - Proper ESM support alongside CJS
 
-### Modular Split
-Split mechatron into capability-specific packages so consumers only install
-what they need:
+### Published Package Matrix
 
 | Package | Capabilities |
 |---------|-------------|
@@ -188,4 +223,5 @@ what they need:
 | 1 | **Complete** | C++ NAPI port, flat backend, CI on 6 platforms |
 | 2 | **Complete** | Rust NAPI rewrite via napi-rs, full robot-js API parity |
 | 3 | **Complete** | mechatron-robot-js compatibility shim |
-| 4 | Planned | API modernization + modular package split |
+| 4a | **Complete** | Modular package split (9 npm packages + 7 per-subsystem Rust crates) |
+| 4b | Planned | API modernization (async, ESM, drop `callableClass`) |

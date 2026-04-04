@@ -1,52 +1,15 @@
-[package]
-name = "mechatron-native"
-version = "0.0.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-napi = { version = "2", features = ["napi4"] }
-napi-derive = "2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
-regex = "1"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-libc = "0.2"
-regex = "1"
-core-foundation = "0.10"
-core-graphics = "0.24"
-foreign-types = "0.5"
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSObject", "NSObjCRuntime", "NSGeometry", "NSData"] }
-objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
-objc2-core-graphics = { version = "0.3", features = ["CGColorSpace", "CGContext", "CGImage", "CGBitmapContext"] }
-objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSScreen", "NSImage", "NSRunningApplication", "NSWorkspace", "NSGraphics", "NSApplication", "NSBitmapImageRep", "NSColorSpace", "objc2-core-graphics", "NSGraphicsContext", "NSImageRep"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-regex = "1"
-windows = { version = "0.58", features = [
-    "Win32_Foundation",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_System_Threading",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_Memory",
-    "Win32_System_DataExchange",
-    "Win32_System_Ole",
-    "Win32_System_SystemInformation",
-    "Win32_System_Performance",
-    "Win32_Graphics_Gdi",
-    "Win32_Graphics_Dwm",
-    "Win32_Security",
-] }
-
-[build-dependencies]
-napi-build = "2"
+[workspace]
+members = [
+    "shared",
+    "keyboard",
+    "mouse",
+    "clipboard",
+    "screen",
+    "window",
+    "process",
+    "memory",
+]
+resolver = "2"
 
 [profile.release]
 lto = true

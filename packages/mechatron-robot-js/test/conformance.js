@@ -22,10 +22,11 @@ var passed = 0;
 var failed = 0;
 var skipped = 0;
 
-// Detect whether the native backend is available (prebuilt .node binary present)
+// Detect whether the native backend is available (prebuilt .node binaries present).
+// Each subsystem now has its own native loader — probe by constructing one.
 var hasNative = false;
 try {
-  robot.getNativeBackend();
+  new robot.Keyboard();
   hasNative = true;
 } catch (_) {}
 
