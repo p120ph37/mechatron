@@ -1,27 +1,17 @@
-// mechatron - TypeScript API layer
-// Pure data types (zero native dependency)
-import { Range } from "./Range";
-import { Point } from "./Point";
-import { Size } from "./Size";
-import { Bounds } from "./Bounds";
-import { Color } from "./Color";
-import { Hash } from "./Hash";
-import { Image } from "./Image";
-import { Timer } from "./Timer";
+// mechatron — meta-package re-exporting all subsystem packages
+// This preserves the original robot-js-compatible API surface.
 
-// Native-backed types
-import { Keyboard } from "./Keyboard";
-import { Mouse } from "./Mouse";
-import { Clipboard } from "./Clipboard";
-import { Screen } from "./Screen";
-import { Window } from "./Window";
-import { Process } from "./Process";
-import { Module, Segment } from "./Module";
-import { Memory, Stats, Region } from "./Memory";
+// Pure data types
+import { Range, Point, Size, Bounds, Color, Hash, Image, Timer } from "mechatron-types";
 
-// Native backend management
-import { getNativeBackend, setNativeBackend } from "./native";
-import { getAllConstants } from "./constants";
+// Subsystem classes
+import { Keyboard, getAllKeyConstants } from "mechatron-keyboard";
+import { Mouse, BUTTON_LEFT, BUTTON_MID, BUTTON_MIDDLE, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "mechatron-mouse";
+import { Clipboard } from "mechatron-clipboard";
+import { Screen } from "mechatron-screen";
+import { Window } from "mechatron-window";
+import { Process, Module, Segment } from "mechatron-process";
+import { Memory, Stats, Region, MEMORY_DEFAULT, MEMORY_SKIP_ERRORS, MEMORY_AUTO_ACCESS } from "mechatron-memory";
 
 // Version constants
 const ROBOT_VERSION = 0x020200;
@@ -71,8 +61,18 @@ Process.prototype.getModules = function(this: Process, regex?: string) {
   });
 } as any;
 
-// Platform-specific key/button constants (now from TS constants module)
-const _nativeConstants = getAllConstants();
+// Backend management — pass-through to subsystem native loaders
+// For backward compatibility, getNativeBackend/setNativeBackend are no-ops
+// since each subsystem now manages its own native backend.
+function getNativeBackend(): any {
+  return {};
+}
+function setNativeBackend(_backend: any): void {
+  // No-op — subsystems manage their own native loaders
+}
+
+// Platform-specific key/button constants
+const _keyConstants = getAllKeyConstants();
 
 const mRobot = {
   // Version info
@@ -103,10 +103,16 @@ const mRobot = {
   Timer: callableClass(Timer),
   Window: callableClass(Window),
 
-  // Key and button constants from native addon (platform-specific)
-  ..._nativeConstants,
+  // Key constants (platform-specific)
+  ..._keyConstants,
 
-  // Backend management
+  // Button constants
+  BUTTON_LEFT, BUTTON_MID, BUTTON_MIDDLE, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2,
+
+  // Memory constants
+  MEMORY_DEFAULT, MEMORY_SKIP_ERRORS, MEMORY_AUTO_ACCESS,
+
+  // Backend management (legacy)
   getNativeBackend,
   setNativeBackend,
 };

@@ -3,8 +3,21 @@
   "version": "0.0.0",
   "description": "Node.js native addon for desktop automation (keyboard, mouse, screen, process, memory, window)",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "workspaces": [
+    "packages/mechatron-types",
+    "packages/mechatron-keyboard",
+    "packages/mechatron-mouse",
+    "packages/mechatron-clipboard",
+    "packages/mechatron-screen",
+    "packages/mechatron-window",
+    "packages/mechatron-process",
+    "packages/mechatron-memory",
+    "packages/mechatron-robot-js"
+  ],
   "scripts": {
-    "build": "cd native-rs && cargo build --release",
+    "build:native": "cd native-rs && cargo build --release",
+    "build": "tsc --build",
     "test": "node test/test.js types timer",
     "test:ci": "node test/test.js types"
   },
@@ -20,13 +33,23 @@
     "win32"
   ],
   "files": [
-    "native-rs/*.node",
     "dist/"
   ],
+  "dependencies": {
+    "mechatron-types": "*",
+    "mechatron-keyboard": "*",
+    "mechatron-mouse": "*",
+    "mechatron-clipboard": "*",
+    "mechatron-screen": "*",
+    "mechatron-window": "*",
+    "mechatron-process": "*",
+    "mechatron-memory": "*"
+  },
   "devDependencies": {
     "@types/node": "^25.5.2",
     "pngjs": "^6.0.0",
     "readline-sync": "~1.4",
-    "sprintf-js": "~1.1"
+    "sprintf-js": "~1.1",
+    "typescript": "^5.7.0"
   }
 }

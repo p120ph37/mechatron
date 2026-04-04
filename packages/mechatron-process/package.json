@@ -1,0 +1,11 @@
+{
+  "name": "mechatron-process",
+  "version": "0.0.0",
+  "description": "Process enumeration and inspection for mechatron",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist/", "*.node"],
+  "license": "MIT",
+  "dependencies": { "mechatron-types": "*", "mechatron-window": "*" },
+  "repository": { "type": "git", "url": "https://github.com/p120ph37/mechatron.git", "directory": "packages/mechatron-process" }
+}

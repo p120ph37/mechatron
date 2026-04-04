@@ -61,10 +61,6 @@ jobs:
           # Diagnostic
           sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
 
@@ -82,33 +78,52 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      - name: Build Rust napi module
+      - name: Build Rust napi modules
         run: |
+          SUBS="keyboard mouse clipboard screen window process memory"
           cd native-rs
           if [ "${{ matrix.arch }}" = "ia32" ]; then
-            cargo build --release --target i686-pc-windows-msvc
-            cp target/i686-pc-windows-msvc/release/mechatron_native.dll mechatron-native.win32-ia32-msvc.node
+            CARGO_TARGET=i686-pc-windows-msvc
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
           elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            cargo build --release --target x86_64-apple-darwin
-            cp target/x86_64-apple-darwin/release/libmechatron_native.dylib mechatron-native.darwin-x64.node
+            CARGO_TARGET=x86_64-apple-darwin
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
           else
-            npm run build
-            if [ "${{ runner.os }}" = "Linux" ]; then
-              cp target/release/libmechatron_native.so mechatron-native.linux-${{ matrix.arch }}-gnu.node
-            elif [ "${{ runner.os }}" = "macOS" ]; then
-              cp target/release/libmechatron_native.dylib mechatron-native.darwin-${{ matrix.arch }}.node
-            elif [ "${{ runner.os }}" = "Windows" ]; then
-              cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
-            fi
-          fi
-          # Re-sign macOS binaries (strip="symbols" in Cargo.toml invalidates the ad-hoc signature;
-          # task_for_pid requires a valid signature even when running as root)
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
+            cargo build --release $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/release"
           fi
 
-      - name: Bundle TypeScript
-        run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
+          # Map matrix → napi triple for output naming
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            TRIPLE="linux-${{ matrix.arch }}-gnu"
+            SRC_EXT="so"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            TRIPLE="darwin-${{ matrix.arch }}"
+            SRC_EXT="dylib"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            TRIPLE="win32-${{ matrix.arch }}-msvc"
+            SRC_EXT="dll"; SRC_PREFIX=""
+          fi
+
+          for s in $SUBS; do
+            SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
+            DST_NAME="mechatron-${s}.${TRIPLE}.node"
+            # Copy into native-rs/<sub>/ (for dev layout & artifact upload)
+            cp "$SRC" "$s/$DST_NAME"
+            # Copy into packages/mechatron-<sub>/ (for published layout & tests)
+            cp "$SRC" "../packages/mechatron-${s}/$DST_NAME"
+            # Re-sign macOS binaries (strip="symbols" invalidates ad-hoc signature;
+            # task_for_pid requires a valid signature even when running as root)
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              codesign --force --sign - "$s/$DST_NAME"
+              codesign --force --sign - "../packages/mechatron-${s}/$DST_NAME"
+            fi
+          done
+
+      - name: Build TypeScript (all packages)
+        run: npx tsc --build
 
       - name: Run tests
         run: |
@@ -143,8 +158,10 @@ jobs:
 
       - name: Run mechatron-robot-js conformance tests
         run: |
-          mkdir -p packages/mechatron-robot-js/node_modules
-          ln -sfn "$PWD" packages/mechatron-robot-js/node_modules/mechatron
+          # Root package is named "mechatron" but can't be a workspace; link it manually
+          # so packages/mechatron-robot-js's `require("mechatron")` resolves to the workspace root.
+          rm -rf node_modules/mechatron
+          ln -sfn "$PWD" node_modules/mechatron
           node packages/mechatron-robot-js/test/conformance.js
 
       - uses: actions/upload-artifact@v4
@@ -157,5 +174,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: native-rs/mechatron-native.*.node
+          path: native-rs/*/mechatron-*.node
           if-no-files-found: error

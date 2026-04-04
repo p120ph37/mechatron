@@ -39,23 +39,23 @@ if (!_backendArg)
 	// Discover which backends are available on this platform
 	var _backends = [];
 
-	// Probe Rust backend — resolve the correct .node filename per platform
+	// Probe Rust backend — each subsystem has its own .node; probe via the keyboard package
 	var _rustNodeFile = (function () {
 		var platform = process.platform;
 		var arch = process.arch;
 		var map = {
-			"linux-x64":    "mechatron-native.linux-x64-gnu.node",
-			"linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
-			"darwin-x64":   "mechatron-native.darwin-x64.node",
-			"darwin-arm64": "mechatron-native.darwin-arm64.node",
-			"win32-x64":    "mechatron-native.win32-x64-msvc.node",
-			"win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
+			"linux-x64":    "mechatron-keyboard.linux-x64-gnu.node",
+			"linux-arm64":  "mechatron-keyboard.linux-arm64-gnu.node",
+			"darwin-x64":   "mechatron-keyboard.darwin-x64.node",
+			"darwin-arm64": "mechatron-keyboard.darwin-arm64.node",
+			"win32-x64":    "mechatron-keyboard.win32-x64-msvc.node",
+			"win32-ia32":   "mechatron-keyboard.win32-ia32-msvc.node",
 		};
-		return map[platform + "-" + arch] || ("mechatron-native." + platform + "-" + arch + ".node");
+		return map[platform + "-" + arch] || ("mechatron-keyboard." + platform + "-" + arch + ".node");
 	})();
 
 	try {
-		require (_path.resolve (__dirname, "..", "native-rs", _rustNodeFile));
+		require (_path.resolve (__dirname, "..", "packages", "mechatron-keyboard", _rustNodeFile));
 		_backends.push ("rust");
 	} catch (_) {
 		process.stdout.write ("  [skip] Rust backend not available (" + _rustNodeFile + ")\n");
@@ -114,33 +114,16 @@ if (!_backendArg)
 	return;
 }
 
-// --backend was specified — force the requested backend before loading mRobot
+// --backend was specified — each subsystem package loads its own native module,
+// so we don't need to force-load anything. Just accept "rust" as the only option.
 var _path = require ("path");
-if (_backendArg === "rust")
-{
-	var _rustFile = (function () {
-		var platform = process.platform;
-		var arch = process.arch;
-		var map = {
-			"linux-x64":    "mechatron-native.linux-x64-gnu.node",
-			"linux-arm64":  "mechatron-native.linux-arm64-gnu.node",
-			"darwin-x64":   "mechatron-native.darwin-x64.node",
-			"darwin-arm64": "mechatron-native.darwin-arm64.node",
-			"win32-x64":    "mechatron-native.win32-x64-msvc.node",
-			"win32-ia32":   "mechatron-native.win32-ia32-msvc.node",
-		};
-		return map[platform + "-" + arch] || ("mechatron-native." + platform + "-" + arch + ".node");
-	})();
-	var _rustAddon = require (_path.resolve (__dirname, "..", "native-rs", _rustFile));
-	var mRobot = require ("..");
-	mRobot.setNativeBackend (_rustAddon);
-}
-else
+if (_backendArg !== "rust")
 {
 	process.stderr.write ("Unknown backend: " + _backendArg + "\n");
 	process.exitCode = 2;
 	return;
 }
+var mRobot = require ("..");
 
 ////////////////////////////////////////////////////////////////////////////////
 
