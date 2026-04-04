@@ -110,6 +110,28 @@ jobs:
       - name: Bundle TypeScript
         run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
 
+      - name: Mach VM diagnostics
+        if: runner.os == 'macOS'
+        run: |
+          # Build the C diagnostic module
+          cd test/mach-diag && npx node-gyp rebuild && cd ../..
+          # Run diagnostics with native node (arm64)
+          echo "=== Native node ($(node -p process.arch)) ==="
+          sudo node test/mach-diag/run.js || true
+          # If cross-compiling for x64, also run with x64 node
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            NODE_VERSION=$(node -v)
+            if [ ! -d "./node-${NODE_VERSION}-darwin-x64" ]; then
+              curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+            fi
+            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            # Rebuild the C module for x64
+            CC="cc -arch x86_64" CXX="c++ -arch x86_64" npx node-gyp rebuild --directory test/mach-diag --arch x64 --target $(node -v | sed 's/^v//') || true
+            echo ""
+            echo "=== x64 node under Rosetta ==="
+            sudo "$X64_NODE" test/mach-diag/run.js || true
+          fi
+
       - name: Run tests
         run: |
           TEST_LOG="${RUNNER_TEMP}/test-output.txt"
