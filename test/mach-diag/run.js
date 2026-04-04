@@ -15,29 +15,29 @@ var path = require("path");
 var child_process = require("child_process");
 var fs = require("fs");
 
-// --- Build the C diagnostic module if needed ---
+// --- Load the C diagnostic module if available ---
 var buildDir = path.resolve(__dirname, "build", "Release");
 var diagNode = path.join(buildDir, "mach_diag.node");
 
 if (!fs.existsSync(diagNode)) {
-  console.log("Building C diagnostic module...");
+  // Try to build it (works when node-gyp is available)
+  console.log("C diagnostic module not found, attempting build...");
   try {
     child_process.execSync("npx node-gyp rebuild", {
       cwd: __dirname,
-      stdio: "inherit",
+      stdio: "pipe",
     });
   } catch (e) {
-    console.error("Failed to build diagnostic module:", e.message);
-    process.exit(1);
+    console.log("Auto-build failed (expected under Rosetta or without node-gyp)");
   }
 }
 
-var diag;
+var diag = null;
 try {
   diag = require(diagNode);
 } catch (e) {
-  console.error("Failed to load diagnostic module:", e.message);
-  process.exit(1);
+  console.log("C diagnostic module not available:", e.message);
+  console.log("(this is expected when running under Rosetta with an arm64-built module)");
 }
 
 console.log("\n========================================");
@@ -51,15 +51,20 @@ console.log("UID:", process.getuid(), "EUID:", process.geteuid());
 console.log("");
 
 // --- Part 1: C module diagnostics ---
-console.log("--- C module: diagnose(self) ---");
-var cResult = diag.diagnose(process.pid);
-console.log(JSON.stringify(cResult, null, 2));
-console.log("");
+var cResult = null;
+if (diag && diag.diagnose) {
+  console.log("--- C module: diagnose(self) ---");
+  cResult = diag.diagnose(process.pid);
+  console.log(JSON.stringify(cResult, null, 2));
+  console.log("");
+} else {
+  console.log("--- C module: not available (skipping C diagnostics) ---\n");
+}
 
 // --- Part 2: Check codesign on various binaries ---
 console.log("--- Binary codesign checks ---");
 
-function checkCodesign(label, filepath) {
+function checkCodesign(label, filepath, extraDiag) {
   console.log("\n" + label + ": " + filepath);
   if (!fs.existsSync(filepath)) {
     console.log("  (file does not exist)");
@@ -81,7 +86,7 @@ function checkCodesign(label, filepath) {
   }
 
   // dlopen test via C module
-  if (diag.diagnoseBinary) {
+  if (diag && diag.diagnoseBinary) {
     var binResult = diag.diagnoseBinary(filepath);
     console.log("  dlopen:", binResult.dlopen_ok ? "OK" : "FAILED");
     if (binResult.dlopen_error) {
@@ -191,15 +196,19 @@ console.log("");
 
 // --- Part 4: Compare C vs Rust mach_task_self / task_for_pid ---
 console.log("--- Comparison summary ---");
-console.log("C  task_for_pid result:", cResult.taskForPid.kern_return_name,
-  "(kr=" + cResult.taskForPid.kern_return + ", task=" + cResult.taskForPid.task + ")");
-console.log("C  mach_task_self():", cResult.machTaskSelf);
-console.log("C  mach_task_self_ var:", cResult.machTaskSelf_var);
-console.log("C  selfTask region:", cResult.selfTask.region_kr === 0 ? "OK" : "FAILED (kr=" + cResult.selfTask.region_kr + ")");
-console.log("C  dyld info:", cResult.dyldInfo.kern_return === 0 ? "OK" : "FAILED");
-if (cResult.dyldInfo.kern_return === 0) {
-  console.log("C  dyld addr:", cResult.dyldInfo.allImageInfoAddr, "size:", cResult.dyldInfo.allImageInfoSize);
+if (cResult) {
+  console.log("C  task_for_pid result:", cResult.taskForPid.kern_return_name,
+    "(kr=" + cResult.taskForPid.kern_return + ", task=" + cResult.taskForPid.task + ")");
+  console.log("C  mach_task_self():", cResult.machTaskSelf);
+  console.log("C  mach_task_self_ var:", cResult.machTaskSelf_var);
+  console.log("C  selfTask region:", cResult.selfTask.region_kr === 0 ? "OK" : "FAILED (kr=" + cResult.selfTask.region_kr + ")");
+  console.log("C  dyld info:", cResult.dyldInfo.kern_return === 0 ? "OK" : "FAILED");
+  if (cResult.dyldInfo.kern_return === 0) {
+    console.log("C  dyld addr:", cResult.dyldInfo.allImageInfoAddr, "size:", cResult.dyldInfo.allImageInfoSize);
+  }
+  console.log("C  regions found:", cResult.regions.length);
+} else {
+  console.log("C  module: not available");
 }
-console.log("C  regions found:", cResult.regions.length);
 
 console.log("\n========================================\n");

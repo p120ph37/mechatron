@@ -109,7 +109,6 @@ static napi_value js_diagnose(napi_env env, napi_callback_info info) {
     case KERN_NO_SPACE:           kr_name = "KERN_NO_SPACE"; break;
     case KERN_INVALID_CAPABILITY: kr_name = "KERN_INVALID_CAPABILITY"; break;
     case KERN_ABORTED:            kr_name = "KERN_ABORTED"; break;
-    case 5:                       kr_name = "KERN_INVALID_NAME (5)"; break;
     default: break;
   }
   NAPI_CALL(env, napi_create_string_utf8(env, kr_name, NAPI_AUTO_LENGTH, &val));
@@ -175,7 +174,7 @@ static napi_value js_diagnose(napi_env env, napi_callback_info info) {
         NAPI_CALL(env, napi_create_int32(env, (int32_t)read_kr, &val));
         NAPI_CALL(env, napi_set_named_property(env, self_task_obj, "read_kr", val));
 
-        NAPI_CALL(env, napi_create_int64(env, (int64_t)bytes_read, &val));
+        NAPI_CALL(env, napi_create_double(env, (double)bytes_read, &val));
         NAPI_CALL(env, napi_set_named_property(env, self_task_obj, "read_bytes", val));
       }
     }
@@ -221,7 +220,7 @@ static napi_value js_diagnose(napi_env env, napi_callback_info info) {
         NAPI_CALL(env, napi_create_int32(env, (int32_t)read_kr, &val));
         NAPI_CALL(env, napi_set_named_property(env, tfp_task_obj, "read_kr", val));
 
-        NAPI_CALL(env, napi_create_int64(env, (int64_t)bytes_read, &val));
+        NAPI_CALL(env, napi_create_double(env, (double)bytes_read, &val));
         NAPI_CALL(env, napi_set_named_property(env, tfp_task_obj, "read_bytes", val));
       }
     }
