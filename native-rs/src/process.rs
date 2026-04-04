@@ -110,7 +110,7 @@ const MACH_PORT_NULL: u32 = 0;
 #[cfg(target_os = "macos")]
 const TASK_DYLD_INFO: u32 = 17;
 #[cfg(target_os = "macos")]
-const TASK_DYLD_INFO_COUNT: u32 = 5; // sizeof(task_dyld_info) / sizeof(natural_t)
+const TASK_DYLD_INFO_COUNT: u32 = 6; // sizeof(task_dyld_info) / sizeof(natural_t) — 24/4 on 64-bit (u64 alignment padding)
 
 // proc_bsdshortinfo struct (simplified - we only need pbsi_flags)
 #[cfg(target_os = "macos")]

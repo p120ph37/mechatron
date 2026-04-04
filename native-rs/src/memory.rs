@@ -261,7 +261,11 @@ struct VmRegionBasicInfo64 {
     inheritance: u32,
     shared: u32,
     reserved: u32,
-    offset: u64,
+    // offset is u64 in the C struct, but sits at an unaligned position (byte 20).
+    // Using two u32s avoids Rust inserting alignment padding that would shift
+    // subsequent fields and make the struct 40 bytes instead of the expected 36.
+    offset_lo: u32,
+    offset_hi: u32,
     behavior: i32,
     user_wired_count: u16,
 }
