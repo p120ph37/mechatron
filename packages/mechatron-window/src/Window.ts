@@ -164,8 +164,12 @@ export class Window {
   }
 
   static getList(title?: string): Window[] {
-    const handles = getNative().window_getList(title);
-    return handles.map((h: any) => new Window(h));
+    const handles: number[] = getNative().window_getList(title);
+    return handles.map((h) => new Window(h));
+  }
+
+  static async getListAsync(title?: string): Promise<Window[]> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Window.getList(title))));
   }
 
   static getActive(): Window {

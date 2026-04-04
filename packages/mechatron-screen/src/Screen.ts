@@ -3,6 +3,17 @@ import { Image } from "mechatron-types";
 import { Point } from "mechatron-types";
 import { getNative } from "./native";
 
+/**
+ * Minimal structural type for a Window-like object accepted by
+ * Screen.getScreen() / Screen.grabScreen().  Uses duck typing so this package
+ * does not depend on mechatron-window.
+ */
+export interface WindowLike {
+  getHandle(): number;
+  getBounds(): { x: number; y: number; w: number; h: number };
+  isValid(): boolean;
+}
+
 // Union two bounds rectangles
 function unionBounds(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } {
   if (a.w === 0 && a.h === 0) return b;
@@ -62,11 +73,13 @@ export class Screen {
   private static _totalUsable: Bounds = new Bounds();
 
   static synchronize(): boolean {
-    const result = getNative().screen_synchronize();
+    interface RawRect { x: number; y: number; w: number; h: number; }
+    interface RawScreen { bounds: RawRect; usable: RawRect; }
+    const result: RawScreen[] | null = getNative().screen_synchronize();
     if (!result) return false;
-    let tb = { x: 0, y: 0, w: 0, h: 0 };
-    let tu = { x: 0, y: 0, w: 0, h: 0 };
-    Screen._screens = result.map((s: any) => {
+    let tb: RawRect = { x: 0, y: 0, w: 0, h: 0 };
+    let tu: RawRect = { x: 0, y: 0, w: 0, h: 0 };
+    Screen._screens = result.map((s) => {
       tb = unionBounds(tb, s.bounds);
       tu = unionBounds(tu, s.usable);
       const bounds = new Bounds(s.bounds.x, s.bounds.y, s.bounds.w, s.bounds.h);
@@ -76,6 +89,10 @@ export class Screen {
     Screen._totalBounds = new Bounds(tb.x, tb.y, tb.w, tb.h);
     Screen._totalUsable = new Bounds(tu.x, tu.y, tu.w, tu.h);
     return true;
+  }
+
+  static async synchronizeAsync(): Promise<boolean> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Screen.synchronize())));
   }
 
   static getMain(): Screen | null {
@@ -114,8 +131,15 @@ export class Screen {
     return Screen.getMain();
   }
 
-  static grabScreen(image: Image, x: number, y: number, w: number, h: number, window?: any): boolean;
-  static grabScreen(image: Image, bounds: Bounds, window?: any): boolean;
+  static async grabScreenAsync(image: Image, x: number, y: number, w: number, h: number, window?: WindowLike | number): Promise<boolean>;
+  static async grabScreenAsync(image: Image, bounds: Bounds, window?: WindowLike | number): Promise<boolean>;
+  static async grabScreenAsync(image: Image, a: number | Bounds, b?: WindowLike | number, c?: number, d?: number, e?: WindowLike | number): Promise<boolean> {
+    return new Promise((resolve) => queueMicrotask(() =>
+      resolve(Screen.grabScreen(image, a as any, b as any, c as any, d as any, e as any))));
+  }
+
+  static grabScreen(image: Image, x: number, y: number, w: number, h: number, window?: WindowLike | number): boolean;
+  static grabScreen(image: Image, bounds: Bounds, window?: WindowLike | number): boolean;
   static grabScreen(image: Image, a: number | Bounds, b?: any, c?: number, d?: number, e?: any): boolean {
     image.destroy();
     let x: number, y: number, w: number, h: number;

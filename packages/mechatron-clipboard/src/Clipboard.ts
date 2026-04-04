@@ -42,4 +42,18 @@ export const Clipboard = {
   getSequence(): number {
     return getNative().clipboard_getSequence();
   },
+
+  // --- Promise-based variants for modern async callers ---
+  async getTextAsync(): Promise<string> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.getText())));
+  },
+  async setTextAsync(text: string): Promise<boolean> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.setText(text))));
+  },
+  async getImageAsync(image: Image): Promise<boolean> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.getImage(image))));
+  },
+  async setImageAsync(image: Image): Promise<boolean> {
+    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.setImage(image))));
+  },
 };
