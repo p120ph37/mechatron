@@ -188,7 +188,7 @@ if (process.platform === "darwin")
 var gExpected = {
 	"linux-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
 	"linux-arm64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
-	"darwin-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+	"darwin-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: true  },
 	"darwin-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: true  },
 	"win32-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
 	"win32-ia32":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
