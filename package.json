@@ -3,12 +3,8 @@
   "version": "0.0.0",
   "description": "Node.js native addon for desktop automation (keyboard, mouse, screen, process, memory, window)",
   "main": "dist/index.js",
-  "gypfile": true,
   "scripts": {
-    "install": "node-gyp-build",
-    "build": "prebuildify --backend cmake-js --napi",
-    "build:gyp": "prebuildify --napi",
-    "build:dev": "cmake-js compile",
+    "build": "cd native-rs && cargo build --release",
     "test": "node test/test.js types timer",
     "test:ci": "node test/test.js types"
   },
@@ -25,22 +21,12 @@
   ],
   "files": [
     "native-rs/*.node",
-    "prebuilds/",
-    "src/",
-    "dist/",
-    "binding.gyp",
-    "CMakeLists.txt"
+    "dist/"
   ],
   "devDependencies": {
-    "cmake-js": "^7.3.0",
-    "node-gyp": "^10.3.1",
+    "@types/node": "^25.5.2",
     "pngjs": "^6.0.0",
-    "prebuildify": "^6.0.1",
     "readline-sync": "~1.4",
     "sprintf-js": "~1.1"
-  },
-  "dependencies": {
-    "node-addon-api": "^8.3.1",
-    "node-gyp-build": "^4.8.4"
   }
 }

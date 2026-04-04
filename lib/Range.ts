@@ -75,7 +75,7 @@ export class Range {
 
   ne(...args: any[]): boolean {
     if (args.length === 0) return true;
-    return !this.eq(...args);
+    return !(this.eq as (...a: any[]) => boolean)(...args);
   }
 
   clone(): Range {

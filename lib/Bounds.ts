@@ -123,7 +123,7 @@ export class Bounds {
 
   getPoint(): Point { return new Point(this.x, this.y); }
   setPoint(p?: Point | { x: number; y: number } | number, y?: number): void {
-    if (p !== undefined && typeof p !== "number" && !(typeof p === "object" && p !== null && "x" in p && "y" in p) && !(p instanceof Point)) {
+    if (p !== undefined && typeof p !== "number" && !(typeof p === "object" && p !== null && "x" in p && "y" in p)) {
       throw new TypeError("Invalid arguments");
     }
     const pt = Point._resolve(p, y);
@@ -132,7 +132,7 @@ export class Bounds {
 
   getSize(): Size { return new Size(this.w, this.h); }
   setSize(s?: Size | { w: number; h: number } | number, h?: number): void {
-    if (s !== undefined && typeof s !== "number" && !(typeof s === "object" && s !== null && "w" in s && "h" in s) && !(s instanceof Size)) {
+    if (s !== undefined && typeof s !== "number" && !(typeof s === "object" && s !== null && "w" in s && "h" in s)) {
       throw new TypeError("Invalid arguments");
     }
     const sz = Size._resolve(s, h);

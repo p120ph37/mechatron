@@ -9,43 +9,15 @@ use std::ptr;
 #[cfg(target_os = "linux")]
 use crate::x11::*;
 
-use std::sync::Mutex;
-
 type Rect = (i32, i32, i32, i32);
 
-struct ScreenData {
-    screens: Vec<(Rect, Rect)>, // (bounds, usable) pairs
-    total_bounds: Rect,
-    total_usable: Rect,
-}
-
-impl ScreenData {
-    const fn new() -> Self {
-        Self { screens: Vec::new(), total_bounds: (0,0,0,0), total_usable: (0,0,0,0) }
-    }
-}
-
-static SCREEN_DATA: Mutex<ScreenData> = Mutex::new(ScreenData::new());
-
-// Union two bounds (x, y, w, h)
-#[allow(dead_code)]
-fn union_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
-    if a.2 == 0 && a.3 == 0 { return b; }
-    if b.2 == 0 && b.3 == 0 { return a; }
-    let l = a.0.min(b.0);
-    let t = a.1.min(b.1);
-    let r = (a.0 + a.2).max(b.0 + b.2);
-    let bot = (a.1 + a.3).max(b.1 + b.3);
-    (l, t, r - l, bot - t)
-}
-
-#[allow(dead_code)]
-fn intersects(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
+#[cfg(target_os = "linux")]
+fn intersects(a: Rect, b: Rect) -> bool {
     a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.3 && a.1 + a.3 > b.1
 }
 
-#[allow(dead_code)]
-fn intersect_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+#[cfg(target_os = "linux")]
+fn intersect_bounds(a: Rect, b: Rect) -> Rect {
     let l = a.0.max(b.0);
     let t = a.1.max(b.1);
     let r = (a.0 + a.2).min(b.0 + b.2);
@@ -61,8 +33,6 @@ fn intersect_bounds(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
     let mut screens: Vec<(Rect, Rect)> = Vec::new();
-    let mut total_bounds: Rect = (0, 0, 0, 0);
-    let mut total_usable: Rect = (0, 0, 0, 0);
 
     unsafe {
         let display = get_display();
@@ -156,11 +126,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         return Ok(Either::B(env.get_null()?));
     }
 
-    for &(bounds, usable) in &screens {
-        total_bounds = union_bounds(total_bounds, bounds);
-        total_usable = union_bounds(total_usable, usable);
-    }
-
     let mut arr = env.create_array(screens.len() as u32)?;
     for (i, &(bounds, usable)) in screens.iter().enumerate() {
         let mut obj = env.create_object()?;
@@ -179,13 +144,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         arr.set(i as u32, obj)?;
     }
 
-    // Store for getTotalBounds / getTotalUsable
-    if let Ok(mut data) = SCREEN_DATA.lock() {
-        data.screens = screens;
-        data.total_bounds = total_bounds;
-        data.total_usable = total_usable;
-    }
-
     Ok(Either::A(arr.coerce_to_object()?))
 }
 
@@ -195,7 +153,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Foundation::*;
 
-    // Collect monitors via EnumDisplayMonitors with callback
     unsafe extern "system" fn enum_proc(
         hmon: HMONITOR,
         _hdc: HDC,
@@ -239,40 +196,22 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         b_primary.cmp(&a_primary)
     });
 
-    let mut screens: Vec<(Rect, Rect)> = Vec::new();
-    let mut total_bounds: Rect = (0, 0, 0, 0);
-    let mut total_usable: Rect = (0, 0, 0, 0);
-
-    for &(bx, by, bw, bh, ux, uy, uw, uh) in &raw {
-        let bounds = (bx, by, bw, bh);
-        let usable = (ux, uy, uw, uh);
-        screens.push((bounds, usable));
-        total_bounds = union_bounds(total_bounds, bounds);
-        total_usable = union_bounds(total_usable, usable);
-    }
-
-    let mut arr = env.create_array(screens.len() as u32)?;
-    for (i, &(bounds, usable)) in screens.iter().enumerate() {
+    let mut arr = env.create_array(raw.len() as u32)?;
+    for (i, &(bx, by, bw, bh, ux, uy, uw, uh)) in raw.iter().enumerate() {
         let mut obj = env.create_object()?;
         let mut bo = env.create_object()?;
-        bo.set("x", bounds.0)?;
-        bo.set("y", bounds.1)?;
-        bo.set("w", bounds.2)?;
-        bo.set("h", bounds.3)?;
+        bo.set("x", bx)?;
+        bo.set("y", by)?;
+        bo.set("w", bw)?;
+        bo.set("h", bh)?;
         let mut uo = env.create_object()?;
-        uo.set("x", usable.0)?;
-        uo.set("y", usable.1)?;
-        uo.set("w", usable.2)?;
-        uo.set("h", usable.3)?;
+        uo.set("x", ux)?;
+        uo.set("y", uy)?;
+        uo.set("w", uw)?;
+        uo.set("h", uh)?;
         obj.set("bounds", bo)?;
         obj.set("usable", uo)?;
         arr.set(i as u32, obj)?;
-    }
-
-    if let Ok(mut data) = SCREEN_DATA.lock() {
-        data.screens = screens;
-        data.total_bounds = total_bounds;
-        data.total_usable = total_usable;
     }
 
     Ok(Either::A(arr.coerce_to_object()?))
@@ -291,16 +230,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         return Ok(Either::B(env.get_null()?));
     }
 
-    let mut b_min_x = i32::MAX;
-    let mut b_min_y = i32::MAX;
-    let mut b_max_x = i32::MIN;
-    let mut b_max_y = i32::MIN;
-    let mut u_min_x = i32::MAX;
-    let mut u_min_y = i32::MAX;
-    let mut u_max_x = i32::MIN;
-    let mut u_max_y = i32::MIN;
-
-    let mut screens: Vec<(Rect, Rect)> = Vec::new();
     let mut arr = env.create_array(count as u32)?;
 
     for i in 0..count {
@@ -316,17 +245,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         let vy = visible.origin.y as i32;
         let vw = visible.size.width as i32;
         let vh = visible.size.height as i32;
-
-        b_min_x = b_min_x.min(fx);
-        b_min_y = b_min_y.min(fy);
-        b_max_x = b_max_x.max(fx + fw);
-        b_max_y = b_max_y.max(fy + fh);
-        u_min_x = u_min_x.min(vx);
-        u_min_y = u_min_y.min(vy);
-        u_max_x = u_max_x.max(vx + vw);
-        u_max_y = u_max_y.max(vy + vh);
-
-        screens.push(((fx, fy, fw, fh), (vx, vy, vw, vh)));
 
         let mut bo = env.create_object()?;
         bo.set("x", fx)?;
@@ -344,15 +262,6 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         obj.set("bounds", bo)?;
         obj.set("usable", uo)?;
         arr.set(i as u32, obj)?;
-    }
-
-    let total_bounds = (b_min_x, b_min_y, b_max_x - b_min_x, b_max_y - b_min_y);
-    let total_usable = (u_min_x, u_min_y, u_max_x - u_min_x, u_max_y - u_min_y);
-
-    if let Ok(mut data) = SCREEN_DATA.lock() {
-        data.screens = screens;
-        data.total_bounds = total_bounds;
-        data.total_usable = total_usable;
     }
 
     Ok(Either::A(arr.coerce_to_object()?))
@@ -444,7 +353,6 @@ pub fn screen_grab_screen(
 
         let _ = BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, x, y, SRCCOPY);
 
-        // Read pixel data using GetDIBits
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -511,11 +419,10 @@ pub fn screen_grab_screen(
         fn CGColorSpaceRelease(space: *mut std::ffi::c_void);
     }
 
-    // kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst
     #[cfg(target_endian = "little")]
-    const BITMAP_INFO: u32 = (2 << 12) | 2; // kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst
+    const BITMAP_INFO: u32 = (2 << 12) | 2;
     #[cfg(target_endian = "big")]
-    const BITMAP_INFO: u32 = (4 << 12) | 2; // kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedFirst
+    const BITMAP_INFO: u32 = (4 << 12) | 2;
 
     if w <= 0 || h <= 0 {
         return Ok(Either::B(env.get_null()?));
@@ -526,7 +433,6 @@ pub fn screen_grab_screen(
         &CGSize::new(w as f64, h as f64),
     );
 
-    // Determine window ID and capture option
     let window_id = window_handle
         .filter(|&h| h != 0.0)
         .map(|h| h as u32)
@@ -556,8 +462,6 @@ pub fn screen_grab_screen(
         return Ok(Either::B(env.get_null()?));
     }
 
-    // Use CGBitmapContextCreate + CGContextDrawImage to extract pixels,
-    // matching the C++ implementation exactly.
     let len = iw * ih;
     let mut pixels = vec![0u32; len];
 
@@ -583,7 +487,6 @@ pub fn screen_grab_screen(
             &CGSize::new(iw as f64, ih as f64),
         );
 
-        // Get the raw CGImageRef pointer for FFI
         use foreign_types::ForeignType;
         let img_ref = image.as_ptr() as *mut std::ffi::c_void;
 
@@ -593,71 +496,4 @@ pub fn screen_grab_screen(
     }
 
     Ok(Either::A(Uint32Array::new(pixels)))
-}
-
-// =============================================================================
-// screen_isCompositing
-// =============================================================================
-
-#[cfg(target_os = "linux")]
-#[napi(js_name = "screen_isCompositing")]
-pub fn screen_is_compositing() -> bool {
-    true
-}
-
-#[cfg(target_os = "windows")]
-#[napi(js_name = "screen_isCompositing")]
-pub fn screen_is_compositing() -> bool {
-    // DWM is always enabled on Windows 8+
-    unsafe {
-        match windows::Win32::Graphics::Dwm::DwmIsCompositionEnabled() {
-            Ok(enabled) => enabled.as_bool(),
-            Err(_) => true,
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[napi(js_name = "screen_isCompositing")]
-pub fn screen_is_compositing() -> bool {
-    true // macOS always uses Quartz Compositor
-}
-
-// =============================================================================
-// screen_setCompositing
-// =============================================================================
-
-#[napi(js_name = "screen_setCompositing")]
-pub fn screen_set_compositing(_enabled: bool) {
-    // No-op on all platforms
-}
-
-// =============================================================================
-// screen_getTotalBounds
-// =============================================================================
-
-#[napi(js_name = "screen_getTotalBounds")]
-pub fn screen_get_total_bounds(env: Env) -> Result<napi::JsObject> {
-    let tb = SCREEN_DATA.lock().map(|d| d.total_bounds).unwrap_or((0,0,0,0));
-    let mut obj = env.create_object()?;
-    obj.set("x", tb.0)?;
-    obj.set("y", tb.1)?;
-    obj.set("w", tb.2)?;
-    obj.set("h", tb.3)?;
-    Ok(obj)
-}
-
-// =============================================================================
-// screen_getTotalUsable
-// =============================================================================
-
-#[napi(js_name = "screen_getTotalUsable")]
-pub fn screen_get_total_usable(env: Env) -> Result<napi::JsObject> {
-    let tu = SCREEN_DATA.lock().map(|d| d.total_usable).unwrap_or((0,0,0,0));
-    let mut obj = env.create_object()?;
-    obj.set("x", tu.0)?;
-    obj.set("y", tu.1)?;
-    obj.set("w", tu.2)?;
-    obj.set("h", tu.3)?;
-    Ok(obj)
 }

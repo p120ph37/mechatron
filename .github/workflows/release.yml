@@ -125,9 +125,43 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.arch == 'ia32'
+        with:
+          targets: i686-pc-windows-msvc
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        with:
+          targets: x86_64-apple-darwin
+
       - run: npm ci --ignore-scripts
 
-      - run: npm run build -- --target=$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
+      - name: Build Rust napi module
+        run: |
+          cd native-rs
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            cargo build --release --target i686-pc-windows-msvc
+            cp target/i686-pc-windows-msvc/release/mechatron_native.dll mechatron-native.win32-ia32-msvc.node
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            cargo build --release --target x86_64-apple-darwin
+            cp target/x86_64-apple-darwin/release/libmechatron_native.dylib mechatron-native.darwin-x64.node
+          else
+            npm run build
+            if [ "${{ runner.os }}" = "Linux" ]; then
+              cp target/release/libmechatron_native.so mechatron-native.linux-${{ matrix.arch }}-gnu.node
+            elif [ "${{ runner.os }}" = "macOS" ]; then
+              cp target/release/libmechatron_native.dylib mechatron-native.darwin-${{ matrix.arch }}.node
+            elif [ "${{ runner.os }}" = "Windows" ]; then
+              cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
+            fi
+          fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
+          fi
 
       - name: Bundle TypeScript
         run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
@@ -162,7 +196,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: prebuilds/
+          path: native-rs/mechatron-native.*.node
           if-no-files-found: error
 
   release:
@@ -180,7 +214,7 @@ jobs:
         with:
           pattern: prebuilds-*
           merge-multiple: true
-          path: prebuilds
+          path: native-rs
 
       - name: Set package version
         run: |

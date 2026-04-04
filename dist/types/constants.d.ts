@@ -1,0 +1,12 @@
+export declare function getAllKeys(): number[];
+export declare function getKeyNames(): Record<string, number>;
+export declare const BUTTON_LEFT = 0;
+export declare const BUTTON_MID = 1;
+export declare const BUTTON_MIDDLE = 1;
+export declare const BUTTON_RIGHT = 2;
+export declare const BUTTON_X1 = 3;
+export declare const BUTTON_X2 = 4;
+export declare const MEMORY_DEFAULT = 0;
+export declare const MEMORY_SKIP_ERRORS = 1;
+export declare const MEMORY_AUTO_ACCESS = 2;
+export declare function getAllConstants(): Record<string, number>;

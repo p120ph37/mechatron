@@ -2,6 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.3]
+
+### Removed
+- C++ native backend (`src/`, `src/native/`, `src/robot/`) — Rust is now the
+  sole native backend; the C++ fallback and dual-backend test runner are gone
+- `ProcBsdShortInfo` / `proc_pidinfo` usage in Rust — no longer needed now that
+  `mac_is_64_bit` unconditionally returns true
+
+### Fixed
+- macOS `process_getModules` returning 0 modules on both arm64 and x64 —
+  root cause was `mac_is_64_bit()` returning false because modern macOS no
+  longer sets the `P_LP64` flag in `pbsi_flags`; fixed by always returning true
+  (macOS dropped 32-bit process support in Catalina)
+- macOS `VmRegionBasicInfo64` struct had wrong layout — `offset: u64` at byte
+  20 caused Rust to insert 4 bytes alignment padding, making the struct 40
+  bytes vs the kernel's expected 36; fixed by splitting into `offset_lo: u32`
+  and `offset_hi: u32`
+- macOS code signing: re-sign `.node` binary after `strip` invalidates the
+  ad-hoc signature
+- macOS x64 cross-build from arm64 runners
+- TypeScript errors: `tsconfig.json` was set to `"module": "ESNext"` but the
+  package is CJS; corrected to `"module": "CommonJS"` with
+  `"moduleResolution": "node10"`
+- `Bounds.ts` `instanceof` checks on union types that include `number`
+- `Range.ts` rest-spread into overloaded `eq()` method
+
+### Changed
+- Platform key/button/memory constants moved from Rust (`#[cfg]` compile-time)
+  to TypeScript (`lib/constants.ts`, runtime `process.platform` dispatch) —
+  eliminates per-platform constant compilation in the native layer
+- `Keyboard.compile()` moved from Rust to TypeScript (`lib/Keyboard.ts`) —
+  key sequence parsing is now pure TS with no native calls
+- `Keyboard.getState()` iteration moved to TypeScript — Rust only exports
+  `keyboard_getKeyState(keycode)`, TS iterates the platform key list
+- Rust native layer reduced to minimal FFI: thin `#[napi]` wrappers over
+  platform syscalls, no business logic
+- Shared macOS Mach helpers extracted into `native-rs/src/mach.rs` —
+  deduplicates `get_task`, `process_exists`, and Mach extern declarations
+  previously copy-pasted across `process.rs` and `memory.rs`
+- `Keyboard.ts` modifier key handling: 4 copy-paste switch cases replaced with
+  data-driven lookup table
+- `constants.ts` `getAllKeys()`: two 50-line platform-specific key lists
+  replaced with `new Set(Object.values(keys))` — Set deduplication naturally
+  handles the Linux/macOS case where `KEY_ALT == KEY_LALT`
+- `dist/` output changed from single bundled file to individual CJS modules
+  emitted by `tsc`, plus `.d.ts` type declarations
+- macOS Mach VM tests enabled on darwin-arm64 (previously skipped)
+
 ## [v0.0.2] - 2026-04-03
 
 ### Added

@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -11,7 +12,7 @@
     "declarationDir": "./dist/types",
     "outDir": "./dist",
     "rootDir": "./lib",
-    "types": ["bun-types"],
+    "types": ["node"],
     "lib": ["ES2022"]
   },
   "include": ["lib/**/*.ts"],

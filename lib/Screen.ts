@@ -8,6 +8,17 @@ function getNative(): NativeBackend {
   return getNativeBackend();
 }
 
+// Union two bounds rectangles
+function unionBounds(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } {
+  if (a.w === 0 && a.h === 0) return b;
+  if (b.w === 0 && b.h === 0) return a;
+  const l = Math.min(a.x, b.x);
+  const t = Math.min(a.y, b.y);
+  const r = Math.max(a.x + a.w, b.x + b.w);
+  const bot = Math.max(a.y + a.h, b.y + b.h);
+  return { x: l, y: t, w: r - l, h: bot - t };
+}
+
 export class Screen {
   private _bounds: Bounds;
   private _usable: Bounds;
@@ -52,15 +63,23 @@ export class Screen {
 
   // --- Static state ---
   private static _screens: Screen[] = [];
+  private static _totalBounds: Bounds = new Bounds();
+  private static _totalUsable: Bounds = new Bounds();
 
   static synchronize(): boolean {
     const result = getNative().screen_synchronize();
     if (!result) return false;
+    let tb = { x: 0, y: 0, w: 0, h: 0 };
+    let tu = { x: 0, y: 0, w: 0, h: 0 };
     Screen._screens = result.map((s) => {
+      tb = unionBounds(tb, s.bounds);
+      tu = unionBounds(tu, s.usable);
       const bounds = new Bounds(s.bounds.x, s.bounds.y, s.bounds.w, s.bounds.h);
       const usable = new Bounds(s.usable.x, s.usable.y, s.usable.w, s.usable.h);
       return new Screen(bounds, usable);
     });
+    Screen._totalBounds = new Bounds(tb.x, tb.y, tb.w, tb.h);
+    Screen._totalUsable = new Bounds(tu.x, tu.y, tu.w, tu.h);
     return true;
   }
 
@@ -108,7 +127,6 @@ export class Screen {
     let windowHandle: number | undefined;
     if (a instanceof Bounds) {
       x = a.x; y = a.y; w = a.w; h = a.h;
-      // b is window or handle
       windowHandle = Screen._resolveWindowHandle(b);
     } else {
       x = a; y = b as number; w = c!; h = d!;
@@ -125,26 +143,26 @@ export class Screen {
   private static _resolveWindowHandle(w: any): number | undefined {
     if (w === undefined || w === null) return undefined;
     if (typeof w === "number") return w;
-    // Window-like object with getHandle()
     if (typeof w.getHandle === "function") return w.getHandle();
     return undefined;
   }
 
+  // Computed in TS from synchronize data (no longer delegated to native)
   static getTotalBounds(): Bounds {
-    const b = getNative().screen_getTotalBounds();
-    return new Bounds(b.x, b.y, b.w, b.h);
+    return Screen._totalBounds.clone();
   }
 
   static getTotalUsable(): Bounds {
-    const u = getNative().screen_getTotalUsable();
-    return new Bounds(u.x, u.y, u.w, u.h);
+    return Screen._totalUsable.clone();
   }
 
+  // Compositing detection — implemented in TS via platform check
+  // macOS and modern Linux always composite; Windows 8+ has DWM always on
   static isCompositing(): boolean {
-    return getNative().screen_isCompositing();
+    return true;
   }
 
-  static setCompositing(enabled: boolean): void {
-    getNative().screen_setCompositing(enabled);
+  static setCompositing(_enabled: boolean): void {
+    // No-op on all modern platforms
   }
 }

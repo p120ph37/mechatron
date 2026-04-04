@@ -66,7 +66,7 @@ jobs:
           bun-version: latest
 
       - uses: dtolnay/rust-toolchain@stable
-        if: matrix.arch == 'x64' || matrix.arch == 'arm64'
+        if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
 
       # Cross-compile Rust for ia32 needs i686 target
       - uses: dtolnay/rust-toolchain@stable
@@ -74,26 +74,37 @@ jobs:
         with:
           targets: i686-pc-windows-msvc
 
-      - run: npm ci --ignore-scripts
+      # Cross-compile Rust for macOS x64 on arm64 runner
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        with:
+          targets: x86_64-apple-darwin
 
-      - run: npm run build -- --target=$(node -v | sed 's/^v//') --arch ${{ matrix.arch }}
+      - run: npm ci --ignore-scripts
 
       - name: Build Rust napi module
         run: |
           cd native-rs
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             cargo build --release --target i686-pc-windows-msvc
-            cp target/i686-pc-windows-msvc/release/mechatron_native.dll mechatron-native.win32-ia32-msvc.node 2>/dev/null || true
+            cp target/i686-pc-windows-msvc/release/mechatron_native.dll mechatron-native.win32-ia32-msvc.node
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            cargo build --release --target x86_64-apple-darwin
+            cp target/x86_64-apple-darwin/release/libmechatron_native.dylib mechatron-native.darwin-x64.node
           else
-            cargo build --release
+            npm run build
+            if [ "${{ runner.os }}" = "Linux" ]; then
+              cp target/release/libmechatron_native.so mechatron-native.linux-${{ matrix.arch }}-gnu.node
+            elif [ "${{ runner.os }}" = "macOS" ]; then
+              cp target/release/libmechatron_native.dylib mechatron-native.darwin-${{ matrix.arch }}.node
+            elif [ "${{ runner.os }}" = "Windows" ]; then
+              cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
+            fi
           fi
-          # Copy the built library to the expected .node filename
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            cp target/release/libmechatron_native.so mechatron-native.linux-${{ matrix.arch }}-gnu.node
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            cp target/release/libmechatron_native.dylib mechatron-native.darwin-${{ matrix.arch }}.node
-          elif [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            cp target/release/mechatron_native.dll mechatron-native.win32-x64-msvc.node
+          # Re-sign macOS binaries (strip="symbols" in Cargo.toml invalidates the ad-hoc signature;
+          # task_for_pid requires a valid signature even when running as root)
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
           fi
 
       - name: Bundle TypeScript
@@ -140,5 +151,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: prebuilds/
+          path: native-rs/mechatron-native.*.node
           if-no-files-found: error
