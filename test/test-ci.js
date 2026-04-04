@@ -137,7 +137,7 @@ if (process.platform === "darwin")
 	var _probePath = require("path").resolve(__dirname, "..").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 	var _child = require ("child_process").spawnSync (process.execPath, ["-e",
 		"var m = require('" + _probePath + "');" +
-		"var p = m.Process.getCurrent(); var mem = m.Memory(p);" +
+		"var p = m.Process.getCurrent(); var mem = new m.Memory(p);" +
 		"if (!mem.isValid()) process.exit(1);" +
 		"var regions = mem.getRegions();" +
 		"if (regions.length === 0) process.exit(1);" +
