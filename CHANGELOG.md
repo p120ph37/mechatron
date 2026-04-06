@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
   `napi-window`, `napi-process`, `napi-memory` as `optionalDependencies`.
   Users can omit specific subsystems (e.g. memory) to avoid AV false positives,
   or skip all native modules for future Bun FFI support
-- **Unified native loader** (`lib/native.ts`) — `getNative("keyboard")` /
+- **Unified native loader** (`lib/napi.ts`) — `getNative("keyboard")` /
   `isAvailable("keyboard")` resolves native binaries from `@mechatronic/napi-*`
   packages first, falls back to dev layout (`napi/<sub>/`), and returns a
   clear error when absent

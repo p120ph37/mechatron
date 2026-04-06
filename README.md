@@ -111,7 +111,7 @@ Or depend on `mechatron-robot-js` directly — it provides the full robot-js
 All TypeScript lives in the root `mechatron` package under `lib/`.  The native
 backend is a Cargo workspace (`napi/`) of seven per-subsystem `cdylib` crates
 built with napi-rs, each exposing minimal FFI — platform syscall wrappers with
-no business logic.  At runtime, `lib/native.ts` resolves each subsystem's
+no business logic.  At runtime, `lib/napi.ts` resolves each subsystem's
 `.node` binary from its `@mechatronic/napi-*` optional dependency, falling back
 to `napi/<sub>/` for the development layout.
 

@@ -26,8 +26,14 @@ calling conventions (including calling constructors without `new`).
 
 ## What's included
 
-This package re-exports the full mechatron API, which provides complete parity
-with the robot-js 2.2.0 documented surface:
+This package wraps the modern [mechatron](https://www.npmjs.com/package/mechatron)
+API in a compatibility layer that reconstructs the full robot-js 2.2.0 surface:
+`callableClass` constructors (call with or without `new`), top-level `sleep`/
+`clock`, flattened `KEY_*` and `BUTTON_*` constants, `Module.Segment`,
+`Memory.Stats`, `Memory.Region` nested classes, and `getNativeBackend`/
+`setNativeBackend` stubs.
+
+Subsystems covered:
 
 - **Keyboard** — press, release, click, compile, getState
 - **Mouse** — click, press, release, scroll, getPos, setPos, getState

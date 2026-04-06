@@ -2,9 +2,20 @@
   "name": "@mechatronic/napi-process",
   "version": "0.0.0",
   "description": "Native NAPI binary for mechatron process subsystem",
-  "os": ["linux", "darwin", "win32"],
-  "cpu": ["x64", "arm64", "ia32"],
-  "files": ["*.node"],
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64",
+    "ia32"
+  ],
+  "files": [
+    "*.node",
+    "README.md"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
