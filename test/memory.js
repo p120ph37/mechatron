@@ -227,6 +227,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		// --- Cache operations ---
 		assert(typeof mem.isCaching() === "boolean", "isCaching bool");
 		assert(typeof mem.getCacheSize() === "number", "getCacheSize number");
+		// Always exercise clearCache/deleteCache (no-op when not caching)
+		mem.clearCache();
+		mem.deleteCache();
 		if (readable) {
 			var cached = mem.createCache(readable.start, readable.size, 4096);
 			assert(typeof cached === "boolean", "createCache returns boolean");
@@ -242,6 +245,47 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		// Modules of current process
 		var mods = proc.getModules();
 		assert(mods.length > 0, "current proc has modules");
+
+		// --- Memory copy constructor ---
+		var memCopy = new Memory(mem);
+		assert(memCopy.isValid(), "Memory copy ctor valid");
+
+		// --- Region eq/ne/lt/gt/le/ge with numbers and TypeError ---
+		if (regions.length > 0) {
+			var reg0 = regions[0];
+			assert(typeof reg0.eq(reg0.start) === "boolean", "Region eq number");
+			assert(typeof reg0.ne(reg0.start) === "boolean", "Region ne number");
+			assert(typeof reg0.lt(reg0.start) === "boolean", "Region lt number");
+			assert(typeof reg0.gt(reg0.start) === "boolean", "Region gt number");
+			assert(typeof reg0.le(reg0.start) === "boolean", "Region le number");
+			assert(typeof reg0.ge(reg0.start) === "boolean", "Region ge number");
+			var regThrew = false;
+			try { reg0.eq("bad"); } catch(e) { regThrew = true; }
+			assert(regThrew, "Region eq invalid throws");
+			regThrew = false;
+			try { reg0.ne("bad"); } catch(e) { regThrew = true; }
+			assert(regThrew, "Region ne invalid throws");
+			regThrew = false;
+			try { reg0.lt("bad"); } catch(e) { regThrew = true; }
+			assert(regThrew, "Region lt invalid throws");
+			regThrew = false;
+			try { reg0.gt("bad"); } catch(e) { regThrew = true; }
+			assert(regThrew, "Region gt invalid throws");
+			regThrew = false;
+			try { reg0.le("bad"); } catch(e) { regThrew = true; }
+			assert(regThrew, "Region le invalid throws");
+			regThrew = false;
+			try { reg0.ge("bad"); } catch(e) { regThrew = true; }
+			assert(regThrew, "Region ge invalid throws");
+
+			// Region static compare
+			if (regions.length > 1) {
+				var cmp = regions[0].clone();
+				assert(typeof Memory.Region.compare(regions[0], regions[1]) === "number", "Region.compare");
+				// Test equal case
+				assert(Memory.Region.compare(cmp, regions[0]) === 0, "Region.compare eq");
+			}
+		}
 
 		// --- Memory clone ---
 		var memCl = mem.clone();
@@ -312,11 +356,17 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			assert(Array.isArray(mvStride), "readInt8 with stride returns array");
 		}
 
-		// --- setAccess (exercise, may not succeed on all regions) ---
+		// --- setAccess both overloads ---
 		if (readable) {
 			var access = mem.setAccess(readable, readable.readable, readable.writable, readable.executable);
-			assert(typeof access === "boolean", "setAccess returns bool");
+			assert(typeof access === "boolean", "setAccess rwx returns bool");
+			var accessFlags = mem.setAccess(readable, readable.access);
+			assert(typeof accessFlags === "boolean", "setAccess flags returns bool");
 		}
+
+		// --- writeDataAsync ---
+		var pa4 = mem.writeDataAsync(0, Buffer.alloc(1), 1);
+		assert(pa4 instanceof Promise, "writeDataAsync returns Promise");
 
 		// --- readString single ---
 		if (readable) {

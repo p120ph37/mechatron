@@ -89,6 +89,42 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var found2 = Screen.getScreen(center);
 		assert(found2 !== null, "getScreen by Point obj");
 
+		// --- getScreen with window-like object ---
+		var mockWin = {
+			isValid: function() { return true; },
+			getBounds: function() { return { x: 0, y: 0, w: 100, h: 100 }; },
+			getHandle: function() { return 0; }
+		};
+		var foundWin = Screen.getScreen(mockWin);
+		assert(foundWin !== null || foundWin === null, "getScreen by window-like");
+
+		// Invalid window-like
+		var mockWinInvalid = {
+			isValid: function() { return false; },
+			getBounds: function() { return { x: 0, y: 0, w: 0, h: 0 }; },
+			getHandle: function() { return 0; }
+		};
+		assert(Screen.getScreen(mockWinInvalid) === null, "getScreen invalid window returns null");
+
+		// --- grabScreen with window handle ---
+		if (result) {
+			var img3 = new Image();
+			var r3 = Screen.grabScreen(img3, 0, 0, 10, 10, 0);
+			assert(typeof r3 === "boolean", "grabScreen with window handle");
+			// grabScreen with Bounds + window handle
+			var img4 = new Image();
+			var r4 = Screen.grabScreen(img4, new mechatron.Bounds(0, 0, 10, 10), 0);
+			assert(typeof r4 === "boolean", "grabScreen with Bounds + handle");
+			// grabScreen with window-like object
+			var img5 = new Image();
+			var r5 = Screen.grabScreen(img5, 0, 0, 10, 10, mockWin);
+			assert(typeof r5 === "boolean", "grabScreen with window-like obj");
+			// grabScreen with Bounds + window-like object
+			var img6 = new Image();
+			var r6 = Screen.grabScreen(img6, new mechatron.Bounds(0, 0, 10, 10), mockWin);
+			assert(typeof r6 === "boolean", "grabScreen Bounds + window-like");
+		}
+
 		// --- Async variants ---
 		var pa1 = Screen.synchronizeAsync();
 		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");

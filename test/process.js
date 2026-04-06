@@ -111,6 +111,16 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 				assert(typeof m0.ne(m1) === "boolean", "module ne");
 			}
 
+			// Module 5-param constructor
+			var Module = mechatron.Module;
+			var mod5 = new Module(curr, "testmod", "/test/path", 0x1000, 0x2000);
+			assert(mod5.isValid(), "Module 5-param valid");
+			assert(mod5.getName() === "testmod", "Module 5-param name");
+			assert(mod5.getPath() === "/test/path", "Module 5-param path");
+			assert(mod5.getBase() === 0x1000, "Module 5-param base");
+			assert(mod5.getSize() === 0x2000, "Module 5-param size");
+			assert(mod5.getProcess().eq(curr), "Module 5-param process");
+
 			// Module clone
 			var mc = mod.clone();
 			assert(mc.getName() === mod.getName(), "module clone name");
@@ -175,6 +185,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			var pa2 = curr.getModulesAsync();
 			assert(pa2 instanceof Promise, "getModulesAsync returns Promise");
 		}
+
+		// --- exit/kill on invalid process (no-op, no crash) ---
+		var pBogus = new Process();
+		pBogus.exit();
+		pBogus.kill();
 
 		// --- close ---
 		curr.close();

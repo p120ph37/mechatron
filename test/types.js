@@ -72,6 +72,11 @@ module.exports = function (mechatron, log, assert) {
 		// Range ne
 		assert(rc.ne({ min: 1, max: 2 }), "Range ne obj");
 
+		// Range eq TypeError
+		var rThrew = false;
+		try { rc.eq("bad"); } catch(e) { rThrew = true; }
+		assert(rThrew, "Range eq invalid throws");
+
 		// Range toString
 		assert(rc.toString() === "[10, 20]", "Range toString");
 
@@ -147,6 +152,12 @@ module.exports = function (mechatron, log, assert) {
 		var pnorm5 = Point.normalize();
 		assert(pnorm5.x === 0 && pnorm5.y === 0, "Point normalize()");
 
+		// Point add/sub with undefined (hits _resolve default branch)
+		var pDef = p.add();
+		assert(pDef.x === 5 && pDef.y === 10, "Point add() default");
+		var psDef = p.sub();
+		assert(psDef.x === 5 && psDef.y === 10, "Point sub() default");
+
 		// Size
 		var s = new Size(100, 200);
 		assert(s.w === 100 && s.h === 200, "Size ctor");
@@ -203,6 +214,12 @@ module.exports = function (mechatron, log, assert) {
 		var snorm5 = Size.normalize();
 		assert(snorm5.w === 0 && snorm5.h === 0, "Size normalize()");
 
+		// Size add/sub with undefined (hits _resolve default branch)
+		var saDef = s.add();
+		assert(saDef.w === 100 && saDef.h === 200, "Size add() default");
+		var ssDef = s.sub();
+		assert(ssDef.w === 100 && ssDef.h === 200, "Size sub() default");
+
 		// Bounds
 		var b = new Bounds(10, 20, 100, 200);
 		assert(b.x === 10 && b.y === 20 && b.w === 100 && b.h === 200, "Bounds ctor");
@@ -237,6 +254,11 @@ module.exports = function (mechatron, log, assert) {
 		var bs2 = new Bounds();
 		bs2.setLTRB(10, 20, 110, 220);
 		assert(bs2.x === 10 && bs2.y === 20 && bs2.w === 100 && bs2.h === 200, "Bounds setLTRB");
+
+		// Bounds setLTRB TypeError
+		boundsThrew = false;
+		try { bs2.setLTRB("a", 1, 2, 3); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds setLTRB invalid throws");
 
 		// Bounds setPoint/setSize
 		var bs3 = new Bounds(10, 20, 100, 200);
@@ -277,6 +299,10 @@ module.exports = function (mechatron, log, assert) {
 		var bcl = b.clone();
 		assert(bcl.eq(b), "Bounds clone eq");
 
+		// Bounds from {x,y,w,h} object (constructor)
+		var bObj = new Bounds({ x: 10, y: 20, w: 100, h: 200 });
+		assert(bObj.x === 10 && bObj.y === 20 && bObj.w === 100 && bObj.h === 200, "Bounds ctor {x,y,w,h} obj");
+
 		// Bounds from LTRB object
 		var blt = new Bounds({ l: 10, t: 20, r: 110, b: 220 });
 		assert(blt.x === 10 && blt.y === 20 && blt.w === 100 && blt.h === 200, "Bounds ctor LTRB obj");
@@ -284,6 +310,18 @@ module.exports = function (mechatron, log, assert) {
 		// Bounds from Point+Size
 		var bps = new Bounds(new Point(5, 10), new Size(50, 60));
 		assert(bps.x === 5 && bps.y === 10 && bps.w === 50 && bps.h === 60, "Bounds ctor Point+Size");
+
+		// Bounds from plain objects (Point-like + Size-like)
+		var bPlain = new Bounds({ x: 1, y: 2 }, { w: 30, h: 40 });
+		assert(bPlain.x === 1 && bPlain.y === 2 && bPlain.w === 30 && bPlain.h === 40, "Bounds ctor plain obj pair");
+
+		// Bounds from single number
+		var bNum = new Bounds(5);
+		assert(bNum.x === 5 && bNum.y === 5 && bNum.w === 5 && bNum.h === 5, "Bounds ctor single number");
+
+		// Bounds from two numbers
+		var bTwo = new Bounds(3, 7);
+		assert(bTwo.x === 3 && bTwo.y === 3 && bTwo.w === 7 && bTwo.h === 7, "Bounds ctor two numbers");
 
 		// Bounds static normalize
 		var bnorm = Bounds.normalize(1, 2, 3, 4);
@@ -495,6 +533,16 @@ module.exports = function (mechatron, log, assert) {
 		try { img.setPixel(true, new Color()); } catch(e) { setPixThrew = true; }
 		assert(setPixThrew, "Image setPixel invalid throws");
 
+		// Image create TypeError
+		var createThrew = false;
+		try { img.create("bad"); } catch(e) { createThrew = true; }
+		assert(createThrew, "Image create invalid throws");
+
+		// Image getPixel TypeError
+		var getPixThrew = false;
+		try { img.getPixel("bad"); } catch(e) { getPixThrew = true; }
+		assert(getPixThrew, "Image getPixel invalid throws");
+
 		// Image create/destroy
 		var img2 = new Image();
 		assert(!img2.isValid(), "Image default invalid");
@@ -565,6 +613,13 @@ module.exports = function (mechatron, log, assert) {
 		var hStr = h1.toString();
 		assert(hStr.indexOf("0x") === 0, "Hash toString starts with 0x");
 		assert(hStr.length === 10, "Hash toString length 10");
+
+		// Hash append with object that has Symbol.toPrimitive
+		var hPrim = new Hash();
+		var primObj = {};
+		primObj[Symbol.toPrimitive] = function() { return "prim"; };
+		hPrim.append(primObj);
+		assert(hPrim.result !== 0, "Hash append toPrimitive obj");
 
 		log("OK\n");
 		return true;

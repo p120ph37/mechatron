@@ -127,6 +127,19 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var kState = Keyboard.getState();
 		assert(typeof kState === "object", "getState() returns object");
 
+		// --- click with string key (exercises string click overload) ---
+		if (releaseWorks) {
+			k.click("{SPACE}");
+			assert(waitFor(function () {
+				return Keyboard.getState(KEYS.KEY_SPACE) === false;
+			}, 200), "click string SPACE released");
+
+			k.click("a");
+			assert(waitFor(function () {
+				return Keyboard.getState(KEYS.KEY_A) === false;
+			}, 200), "click string 'a' released");
+		}
+
 		// --- getAllKeys / getKeyNames ---
 		var allKeys = mechatron.getAllKeys();
 		assert(allKeys.length > 0, "getAllKeys non-empty");
