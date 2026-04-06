@@ -11,3 +11,4 @@ dist/
 *.tsbuildinfo
 napi/*/mechatron-*.node
 packages/@mechatronic/*/mechatron-*.node
+coverage/
