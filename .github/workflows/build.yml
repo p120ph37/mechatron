@@ -158,14 +158,14 @@ jobs:
             # Fix ownership of files created under sudo so upload-artifact can read them
             sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
             # Generate coverage report from raw V8 data
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
             export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
             run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
           elif [ "${{ runner.os }}" = "Linux" ]; then
             run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           elif [ "${{ runner.os }}" = "macOS" ]; then
@@ -173,7 +173,7 @@ jobs:
             run_and_log sudo -E node test/test.js all --junit "$JUNIT_FILE"
             # Fix ownership of files created under sudo so upload-artifact can read them
             sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
           else
             run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           fi
@@ -286,7 +286,7 @@ jobs:
                 let cur = null;
                 for (const line of lcov.split("\n")) {
                   if (line.startsWith("SF:")) {
-                    cur = line.slice(3).replace(/^.*[\/\\]dist[\/\\]/, "dist/").replace(/\\/g, "/");
+                    cur = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
                     files[cur] = { hit: 0, total: 0 };
                   } else if (line.startsWith("DA:") && cur) {
                     files[cur].total++;
