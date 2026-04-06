@@ -113,14 +113,19 @@ the original `robot-js` API, backed by mechatron.
 - Provide a stable compatibility layer before modernizing mechatron's own API
 
 ### Implementation
-Since mechatron already maintains full API parity with robot-js 2.2.0 (same
-classes, methods, constants, and calling conventions including constructor-
-without-`new`), the shim is a thin re-export package.
+After Phase 4b modernised the mechatron API (dropping `callableClass`, flattened
+globals, etc.), the shim was rewritten from a single-line re-export into a full
+legacy compatibility layer that reconstructs the robot-js 2.2.0 shape on top of
+the modern mechatron modules.
 
 Files:
 - `packages/mechatron-robot-js/package.json` — npm package metadata, depends
   on `mechatron`
-- `packages/mechatron-robot-js/index.js` — single-line re-export of mechatron
+- `packages/mechatron-robot-js/index.js` — full compat layer: wraps every class
+  in `callableClass` Proxy, provides `ROBOT_VERSION` constants, top-level
+  `sleep`/`clock`, `getNativeBackend`/`setNativeBackend` stubs, flattened
+  `KEY_*` and `BUTTON_*` constants, `Module.Segment`/`Memory.Stats`/
+  `Memory.Region` nested references
 - `packages/mechatron-robot-js/index.d.ts` — TypeScript type re-export
 - `packages/mechatron-robot-js/README.md` — usage instructions and npm alias
   tip (`npm install robot-js@npm:mechatron-robot-js`)
@@ -167,9 +172,8 @@ Phase 4 is executed in two parts:
   `-process`, `-memory` — each wraps its own subsystem and ships its own
   per-subsystem `.node` prebuilt
 - `packages/mechatron-robot-js` — thin compatibility shim (phase 3)
-- Root `mechatron` package — meta-package re-exporting all subsystems with
-  `callableClass()` wrappers preserved, so existing `require("mechatron")`
-  consumers continue to work unchanged
+- Root `mechatron` package — meta-package re-exporting all subsystems via
+  modern typed named exports (legacy callers use `mechatron-robot-js`)
 
 #### Cargo Workspace Layout
 - `native-rs/Cargo.toml` — workspace root
