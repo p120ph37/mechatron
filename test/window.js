@@ -35,6 +35,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(!w1.isMinimized(), "empty !minimized");
 		assert(!w1.isMaximized(), "empty !maximized");
 
+		// Exercise setters on invalid window (no-op, no crash)
+		w1.setTopMost(false);
+		w1.setBorderless(false);
+		w1.setMinimized(false);
+		w1.setMaximized(false);
+		w1.setTitle("");
+		w1.close();
+
 		var b = w1.getBounds();
 		assert(b instanceof Bounds, "getBounds returns Bounds");
 		assert(b.eq(0), "empty bounds eq 0");
@@ -134,7 +142,8 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(vwClone.eq(vw), "valid clone eq");
 		}
 
-		// Window.setActive
+		// Window.setActive (exercise on both invalid and valid)
+		Window.setActive(w1);
 		var activeW = Window.getActive();
 		if (activeW.isValid()) {
 			Window.setActive(activeW);

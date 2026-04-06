@@ -3,22 +3,14 @@ import { Timer } from "../types";
 import { getNative } from "../napi";
 import { getKeyNames, getAllKeys } from "./constants";
 
-function resolveKeyName(name: string): number | undefined {
-  const names = getKeyNames();
-  // Direct lookup (already uppercased by caller)
-  if (names[name] !== undefined) return names[name];
-  // Single character -> letter key
-  if (name.length === 1) {
-    const upper = name.toUpperCase();
-    return names[upper];
-  }
-  return undefined;
+function resolveKeyName(name: Uppercase<string>): number | undefined {
+  return getKeyNames()[name];
 }
 
 function compileKeys(keys: string): Array<{ down: boolean; key: number }> | null {
   const result: Array<{ down: boolean; key: number }> = [];
   const modChars: Record<string, number> = { '%': 0, '^': 1, '+': 2, '$': 3 };
-  const modKeyNames = ["ALT", "CONTROL", "SHIFT", "SYSTEM"];
+  const modKeyNames: Uppercase<string>[] = ["ALT", "CONTROL", "SHIFT", "SYSTEM"];
   const modkeys: number[] = [-1, -1, -1, -1];
   let group = 0;
 
@@ -61,7 +53,7 @@ function compileKeys(keys: string): Array<{ down: boolean; key: number }> | null
           }
           i++;
         }
-        const key = resolveKeyName(token);
+        const key = resolveKeyName(token as Uppercase<string>);
         if (key === undefined) return null;
         let keyCount = 1;
         if (inCount) {
@@ -100,7 +92,7 @@ function compileKeys(keys: string): Array<{ down: boolean; key: number }> | null
       case '\t': case '\n': case '\x0b': case '\x0c': case '\r':
         break;
       default: {
-        const upper = ch.toUpperCase();
+        const upper = ch.toUpperCase() as Uppercase<string>;
         const key = resolveKeyName(upper);
         if (key === undefined) return null;
         result.push({ down: true, key });

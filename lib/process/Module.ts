@@ -7,12 +7,7 @@ export class Segment {
   size: number = 0;
   name: string = "";
 
-  constructor() {
-    // Allow calling without new
-    if (!(this instanceof Segment)) {
-      return new Segment();
-    }
-  }
+  constructor() {}
 
   contains(value: number): boolean {
     if (typeof value !== "number") throw new TypeError("Invalid arguments");

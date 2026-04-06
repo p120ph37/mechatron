@@ -130,6 +130,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");
 		var pa2 = Screen.grabScreenAsync(new mechatron.Image(), 0, 0, 10, 10);
 		assert(pa2 instanceof Promise, "grabScreenAsync returns Promise");
+		var pa3 = Screen.grabScreenAsync(new mechatron.Image(), new mechatron.Bounds(0, 0, 10, 10));
+		assert(pa3 instanceof Promise, "grabScreenAsync Bounds returns Promise");
+
+		// --- Screen copy constructor ---
+		var scopy = new Screen(main);
+		assert(scopy.getBounds().eq(main.getBounds()), "Screen copy ctor bounds");
 
 		log("OK\n");
 		return true;
