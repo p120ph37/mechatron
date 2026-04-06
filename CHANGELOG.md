@@ -28,6 +28,11 @@ All notable changes to this project will be documented in this file.
   nested references, flattened `KEY_*` and `BUTTON_*` constants
 - **Conformance test suite** — 320 API-surface checks validating the robot-js
   shim against the documented robot-js 2.2.0 behaviour
+- **Modern test suite** (`test/`) — modular per-subsystem tests exercising the
+  modern mechatron API including async variants; original robot-js interactive
+  test suite preserved in `packages/mechatron-robot-js/test/`
+- **CI test details and code coverage** — JUnit XML test results and c8/V8 line
+  coverage reported per platform in GitHub Actions step summaries
 
 ### Changed
 - **TypeScript reorganised into subsystem subdirectories** — `lib/` now has
