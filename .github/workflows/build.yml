@@ -6,6 +6,9 @@ on:
     branches: [main]
 env:
   HOST_NODE_VERSION: "22"
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   build:
     strategy:
@@ -281,3 +284,130 @@ jobs:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
           path: napi/*/mechatron-*.node
           if-no-files-found: error
+
+  test-summary:
+    if: github.event_name == 'pull_request' && always()
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*
+          path: results
+
+      - name: Build comment body
+        run: |
+          cat <<'SCRIPT' > summary.js
+          const fs = require("fs"), path = require("path");
+          const resultsDir = "results";
+
+          let comment = "";
+          let allPassed = true;
+          let anyResults = false;
+
+          const dirs = fs.readdirSync(resultsDir).filter(d =>
+            d.startsWith("test-results-") && fs.statSync(path.join(resultsDir, d)).isDirectory()
+          ).sort();
+
+          for (const dir of dirs) {
+            const platform = dir.replace("test-results-", "").replace(/-(?=[^-]*$)/, " / ");
+            const junitDir = path.join(resultsDir, dir, "junit");
+            const covDir = path.join(resultsDir, dir, "coverage");
+
+            // Parse JUnit
+            let pass = 0, fail = 0, skip = 0;
+            const rows = [];
+            try {
+              const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith(".xml"));
+              for (const xf of xmlFiles) {
+                const xml = fs.readFileSync(path.join(junitDir, xf), "utf8");
+                const re = /<testcase name="([^"]+)"[^>]*time="([^"]+)"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
+                let m;
+                while ((m = re.exec(xml)) !== null) {
+                  const name = m[1], time = m[2], body = m[3];
+                  const skipped = body.includes("<skipped");
+                  const failed = body.includes("<failure");
+                  if (failed) { fail++; allPassed = false; }
+                  else if (skipped) { skip++; }
+                  else { pass++; }
+                  const icon = failed ? ":x:" : skipped ? ":fast_forward:" : ":white_check_mark:";
+                  rows.push(`| ${name} | ${icon} | ${time}s |`);
+                }
+              }
+            } catch (_) {}
+
+            // Parse coverage percentage
+            let covPct = "";
+            try {
+              const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
+              let hit = 0, total = 0;
+              for (const line of lcov.split("\n")) {
+                if (line.startsWith("DA:")) { total++; if (!line.endsWith(",0")) hit++; }
+              }
+              if (total > 0) covPct = (100 * hit / total).toFixed(1) + "%";
+            } catch (_) {}
+
+            const total = pass + fail + skip;
+            if (total === 0) continue;
+            anyResults = true;
+
+            const status = fail > 0 ? ":x:" : ":white_check_mark:";
+            const covStr = covPct ? ` · ${covPct} coverage` : "";
+            const skipStr = skip > 0 ? `, ${skip} skipped` : "";
+            const failStr = fail > 0 ? `, ${fail} failed` : "";
+            comment += `<details>\n`;
+            comment += `<summary>${status} <b>${platform}</b> — ${pass}/${total} passed${failStr}${skipStr}${covStr}</summary>\n\n`;
+            comment += `| Test | Status | Time |\n|------|--------|------|\n`;
+            comment += rows.join("\n") + "\n";
+
+            // Per-file coverage table
+            if (covPct) {
+              try {
+                const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
+                const files = {};
+                let cur = null;
+                for (const line of lcov.split("\n")) {
+                  if (line.startsWith("SF:")) {
+                    cur = line.slice(3).replace(/^.*[\/\\]dist[\/\\]/, "dist/");
+                    files[cur] = { hit: 0, total: 0 };
+                  } else if (line.startsWith("DA:") && cur) {
+                    files[cur].total++;
+                    if (!line.endsWith(",0")) files[cur].hit++;
+                  }
+                }
+                comment += `\n| File | Lines | Coverage |\n|------|------:|----------|\n`;
+                let tH = 0, tL = 0;
+                for (const [f, s] of Object.entries(files).sort()) {
+                  if (s.total === 0) continue;
+                  comment += `| ${f} | ${s.hit}/${s.total} | ${(100*s.hit/s.total).toFixed(1)}% |\n`;
+                  tH += s.hit; tL += s.total;
+                }
+                comment += `| **Total** | **${tH}/${tL}** | **${tL > 0 ? (100*tH/tL).toFixed(1) : "0"}%** |\n`;
+              } catch (_) {}
+            }
+
+            comment += `\n</details>\n\n`;
+          }
+
+          if (!anyResults) {
+            comment += "_No test results found in artifacts._\n";
+          }
+
+          const heading = allPassed && anyResults
+            ? ":white_check_mark: All tests passed"
+            : ":x: Some tests failed";
+          comment = `## ${heading}\n\n${comment}`;
+
+          fs.writeFileSync("comment-body.md", comment);
+          SCRIPT
+          node summary.js
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Update existing bot comment or create a new one
+          gh pr comment "$PR_NUMBER" --body-file comment-body.md --edit-last 2>/dev/null \
+            || gh pr comment "$PR_NUMBER" --body-file comment-body.md
