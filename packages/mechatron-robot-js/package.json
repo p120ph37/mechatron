@@ -9,7 +9,8 @@
     "index.d.ts"
   ],
   "scripts": {
-    "test": "node test/conformance.js"
+    "test": "node test/conformance.js",
+    "test:interactive": "node test/interactive.js"
   },
   "keywords": [
     "robot-js",

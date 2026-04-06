@@ -18,7 +18,7 @@
     "build:native": "cd napi && cargo build --release",
     "build": "tsc",
     "test": "node test/test.js types timer",
-    "test:ci": "node test/test.js types"
+    "test:all": "node test/test.js all"
   },
   "repository": {
     "type": "git",
