@@ -33,8 +33,16 @@ All notable changes to this project will be documented in this file.
   test suite preserved in `packages/mechatron-robot-js/test/`
 - **CI test details and code coverage** — JUnit XML test results and c8/V8 line
   coverage reported per platform in GitHub Actions step summaries
+- **99% line coverage** — comprehensive test expansion across all subsystems
+  (types, keyboard, mouse, process, memory, window, screen) covering
+  constructor overloads, TypeError branches, comparison operators, async
+  variants, and platform-conditional paths
 
 ### Changed
+- **`Uppercase<string>` type constraint** on `resolveKeyName` — compile-time
+  enforcement that key name arguments are uppercased; literal violations are
+  caught by TypeScript and dynamic strings require explicit
+  `as Uppercase<string>` casts after `toUpperCase()`
 - **TypeScript reorganised into subsystem subdirectories** — `lib/` now has
   `types/`, `keyboard/`, `mouse/`, `clipboard/`, `screen/`, `window/`,
   `process/`, `memory/` subdirectories; `tsc` compiles into `dist/`
@@ -55,6 +63,10 @@ All notable changes to this project will be documented in this file.
 - Committed `dist/` output — now generated on demand by `tsc`
 - `lib/native.ts` monolithic native backend interface — replaced by
   `lib/napi.ts` unified per-subsystem loader
+- Dead `instanceof` constructor guard in `Segment` — unreachable in ES classes
+  where the engine enforces `new`
+- Dead single-character fallback branch in `resolveKeyName` — all callers
+  already call `toUpperCase()` before passing arguments
 
 ## [v0.0.3] - 2026-04-06
 
