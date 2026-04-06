@@ -86,6 +86,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var mc = m.clone();
 		assert(mc.autoDelay instanceof mechatron.Range, "clone autoDelay");
 
+		// --- copy constructor ---
+		var mCopy = new Mouse(m);
+		assert(mCopy.autoDelay instanceof mechatron.Range, "copy ctor autoDelay");
+
+		// --- getState() without button (returns full state object) ---
+		var mState = Mouse.getState();
+		assert(typeof mState === "object", "getState() returns all buttons");
+
 		log("OK\n");
 		return true;
 	}

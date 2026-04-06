@@ -59,6 +59,22 @@ module.exports = function (mechatron, log, assert) {
 		var rr2 = new Range(5, 5);
 		assert(rr2.getRandom() === 5, "Range getRandom min=max");
 
+		// Range constructor overloads
+		var rObj = new Range({ min: 11, max: 22 });
+		assert(rObj.min === 11 && rObj.max === 22, "Range ctor obj");
+		var rVal = new Range(42);
+		assert(rVal.min === 42 && rVal.max === 42, "Range ctor single value");
+
+		// Range eq with object and two numbers
+		assert(rc.eq({ min: 10, max: 20 }), "Range eq obj");
+		assert(rc.eq(10, 20), "Range eq(min,max)");
+
+		// Range ne
+		assert(rc.ne({ min: 1, max: 2 }), "Range ne obj");
+
+		// Range toString
+		assert(rc.toString() === "[10, 20]", "Range toString");
+
 		// Range clone, normalize
 		var rc2 = rc.clone();
 		assert(rc2.eq(rc), "Range clone eq");
@@ -68,6 +84,10 @@ module.exports = function (mechatron, log, assert) {
 		assert(rn2.min === 1 && rn2.max === 2, "Range normalize(Range)");
 		var rn3 = Range.normalize({ min: 4, max: 8 });
 		assert(rn3.min === 4 && rn3.max === 8, "Range normalize(obj)");
+		var rn4 = Range.normalize(5);
+		assert(rn4.min === 5 && rn4.max === 5, "Range normalize(number)");
+		var rn5 = Range.normalize();
+		assert(rn5.min === 0 && rn5.max === 0, "Range normalize()");
 
 		// Point
 		var p = new Point(5, 10);
@@ -83,6 +103,34 @@ module.exports = function (mechatron, log, assert) {
 		var pn = p.neg();
 		assert(pn.x === -5 && pn.y === -10, "Point neg");
 
+		// Point constructor overloads
+		var pObj = new Point({ x: 3, y: 7 });
+		assert(pObj.x === 3 && pObj.y === 7, "Point ctor obj");
+		var pVal = new Point(42);
+		assert(pVal.x === 42 && pVal.y === 42, "Point ctor single value");
+
+		// Point eq with object and two numbers
+		assert(p.eq({ x: 5, y: 10 }), "Point eq obj");
+		assert(p.eq(5, 10), "Point eq(x,y)");
+
+		// Point ne with different types
+		assert(p.ne({ x: 1, y: 2 }), "Point ne obj");
+
+		// Point eq single number (x===a && y===a)
+		var pSame = new Point(7, 7);
+		assert(pSame.eq(7), "Point eq single number");
+		// Point eq TypeError
+		var ptThrew = false;
+		try { p.eq("bad"); } catch(e) { ptThrew = true; }
+		assert(ptThrew, "Point eq invalid throws");
+		// Point add/sub with plain object and single number
+		var paObj = p.add({ x: 1, y: 2 });
+		assert(paObj.x === 6 && paObj.y === 12, "Point add obj");
+		var psNum = p.sub(1);
+		assert(psNum.x === 4 && psNum.y === 9, "Point sub number");
+		// Point toString
+		assert(p.toString() === "[5, 10]", "Point toString");
+
 		// Point toSize, clone, normalize
 		var pts = p.toSize();
 		assert(pts.w === 5 && pts.h === 10, "Point toSize");
@@ -94,6 +142,10 @@ module.exports = function (mechatron, log, assert) {
 		assert(pnorm2.x === 1 && pnorm2.y === 2, "Point normalize(Point)");
 		var pnorm3 = Point.normalize({ x: 4, y: 8 });
 		assert(pnorm3.x === 4 && pnorm3.y === 8, "Point normalize(obj)");
+		var pnorm4 = Point.normalize(5);
+		assert(pnorm4.x === 5 && pnorm4.y === 5, "Point normalize(number)");
+		var pnorm5 = Point.normalize();
+		assert(pnorm5.x === 0 && pnorm5.y === 0, "Point normalize()");
 
 		// Size
 		var s = new Size(100, 200);
@@ -103,6 +155,33 @@ module.exports = function (mechatron, log, assert) {
 		assert(!s.isEmpty(), "Size !isEmpty");
 		assert(new Size(0, 5).isEmpty(), "Size isEmpty w=0");
 		assert(new Size(5, 0).isEmpty(), "Size isEmpty h=0");
+
+		// Size constructor overloads
+		var sObj = new Size({ w: 3, h: 7 });
+		assert(sObj.w === 3 && sObj.h === 7, "Size ctor obj");
+		var sVal = new Size(42);
+		assert(sVal.w === 42 && sVal.h === 42, "Size ctor single value");
+
+		// Size eq with object and two numbers
+		assert(s.eq({ w: 100, h: 200 }), "Size eq obj");
+		assert(s.eq(100, 200), "Size eq(w,h)");
+		assert(new Size(5, 5).eq(5), "Size eq single number");
+
+		// Size ne
+		assert(s.ne({ w: 1, h: 2 }), "Size ne obj");
+		assert(s.ne(1, 2), "Size ne(w,h)");
+
+		// Size eq TypeError
+		var szThrew = false;
+		try { s.eq("bad"); } catch(e) { szThrew = true; }
+		assert(szThrew, "Size eq invalid throws");
+		// Size add/sub with plain object and single number
+		var saObj = s.add({ w: 5, h: 10 });
+		assert(saObj.w === 105 && saObj.h === 210, "Size add obj");
+		var ssNum = s.sub(10);
+		assert(ssNum.w === 90 && ssNum.h === 190, "Size sub number");
+		// Size toString
+		assert(s.toString() === "[100, 200]", "Size toString");
 
 		// Size toPoint, add, sub, clone, normalize
 		var sp = s.toPoint();
@@ -117,6 +196,12 @@ module.exports = function (mechatron, log, assert) {
 		assert(snorm.w === 50 && snorm.h === 60, "Size normalize(w,h)");
 		var snorm2 = Size.normalize(new Size(1, 2));
 		assert(snorm2.w === 1 && snorm2.h === 2, "Size normalize(Size)");
+		var snorm3 = Size.normalize({ w: 3, h: 4 });
+		assert(snorm3.w === 3 && snorm3.h === 4, "Size normalize(obj)");
+		var snorm4 = Size.normalize(7);
+		assert(snorm4.w === 7 && snorm4.h === 7, "Size normalize(number)");
+		var snorm5 = Size.normalize();
+		assert(snorm5.w === 0 && snorm5.h === 0, "Size normalize()");
 
 		// Bounds
 		var b = new Bounds(10, 20, 100, 200);
@@ -204,6 +289,61 @@ module.exports = function (mechatron, log, assert) {
 		var bnorm = Bounds.normalize(1, 2, 3, 4);
 		assert(bnorm.x === 1 && bnorm.y === 2 && bnorm.w === 3 && bnorm.h === 4, "Bounds normalize static");
 
+		// Bounds _resolveArgs/validateArgs: {x,y,w,h} object
+		assert(b.eq({ x: 10, y: 20, w: 100, h: 200 }), "Bounds eq {x,y,w,h} obj");
+		// Bounds _resolveArgs: {l,t,r,b} object
+		assert(b.eq({ l: 10, t: 20, r: 110, b: 220 }), "Bounds eq {l,t,r,b} obj");
+		// Bounds _resolveArgs: (Point-like, Size-like) pair
+		assert(b.eq({ x: 10, y: 20 }, { w: 100, h: 200 }), "Bounds eq (Point,Size) pair");
+		// Bounds ne with object
+		assert(b.ne({ x: 1, y: 2, w: 3, h: 4 }), "Bounds ne obj");
+		// Bounds _resolveArgs: single number
+		var bsn = Bounds.normalize(5);
+		assert(bsn.x === 5 && bsn.y === 5 && bsn.w === 5 && bsn.h === 5, "Bounds normalize(number)");
+		// Bounds _resolveArgs: default (no args)
+		var bsd = Bounds.normalize();
+		assert(bsd.x === 0 && bsd.y === 0 && bsd.w === 0 && bsd.h === 0, "Bounds normalize()");
+		// Bounds _validateArgs: TypeError for string
+		var boundsThrew = false;
+		try { b.eq("invalid"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds eq string throws TypeError");
+		// Bounds _validateArgs: TypeError for invalid object
+		boundsThrew = false;
+		try { b.eq({ z: 1 }); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds eq invalid obj throws TypeError");
+		// Bounds _validateArgs: TypeError for non-number non-object
+		boundsThrew = false;
+		try { b.eq(true); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds eq bool throws TypeError");
+		// Bounds toString
+		assert(b.toString() === "[10, 20, 100, 200]", "Bounds toString");
+		// Bounds containsB with {x,y,w,h} object
+		assert(outer.containsB({ x: 10, y: 10, w: 50, h: 50 }), "Bounds containsB obj");
+		// Bounds intersects with {l,t,r,b} object
+		assert(b1.intersects({ l: 50, t: 50, r: 150, b: 150 }), "Bounds intersects ltrb obj");
+
+		// Bounds containsP TypeError
+		boundsThrew = false;
+		try { b.containsP("bad"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds containsP string throws");
+
+		// Bounds setPoint TypeError
+		boundsThrew = false;
+		try { bs3.setPoint("bad"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds setPoint string throws");
+
+		// Bounds setSize TypeError
+		boundsThrew = false;
+		try { bs3.setSize("bad"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds setSize string throws");
+
+		// Bounds unite with empty bounds
+		var emptyB = new Bounds();
+		var uRes = emptyB.unite(b1);
+		assert(uRes.eq(b1), "Bounds unite empty+b1 = b1");
+		var uRes2 = b1.unite(emptyB);
+		assert(uRes2.eq(b1), "Bounds unite b1+empty = b1");
+
 		// Color
 		var c = new Color(128, 64, 32, 255);
 		assert(c.r === 128 && c.g === 64 && c.b === 32 && c.a === 255, "Color ctor");
@@ -224,6 +364,22 @@ module.exports = function (mechatron, log, assert) {
 		// Color from object
 		var c4 = new Color({ r: 10, g: 20, b: 30 });
 		assert(c4.r === 10 && c4.g === 20 && c4.b === 30 && c4.a === 255, "Color ctor obj default a");
+
+		// Color toString
+		assert(typeof c.toString() === "string", "Color toString");
+		assert(c.toString() === "[128, 64, 32, 255]", "Color toString value");
+
+		// Color eq with object
+		assert(c.eq({ r: 128, g: 64, b: 32, a: 255 }), "Color eq obj");
+		// Color eq with ARGB number
+		assert(c.eq(argb), "Color eq ARGB number");
+		// Color ne with object
+		assert(c.ne({ r: 0, g: 0, b: 0, a: 0 }), "Color ne obj");
+
+		// Color eq TypeError
+		var colThrew = false;
+		try { c.eq("bad"); } catch(e) { colThrew = true; }
+		assert(colThrew, "Color eq invalid throws");
 
 		// Color clone, normalize
 		var ccl = c.clone();
@@ -286,9 +442,58 @@ module.exports = function (mechatron, log, assert) {
 		imgF.flip(true, true);
 		assert(imgF.getPixel(0, 0).r === 255, "Image flipBoth");
 
+		// Image single-index getPixel/setPixel (diagonal access)
+		var imgIdx = new Image(5, 5);
+		imgIdx.fill(0, 0, 0, 255);
+		imgIdx.setPixel(2, new Color(99, 88, 77, 255));
+		var pxIdx = imgIdx.getPixel(2);
+		assert(pxIdx.r === 99 && pxIdx.g === 88 && pxIdx.b === 77, "Image single-index get/set");
+
+		// Image fill TypeError for invalid object
+		var fillThrew = false;
+		try { img.fill({ z: 1 }); } catch(e) { fillThrew = true; }
+		assert(fillThrew, "Image fill invalid obj throws");
+		fillThrew = false;
+		try { img.fill("red"); } catch(e) { fillThrew = true; }
+		assert(fillThrew, "Image fill string throws");
+
+		// Image flipV with multi-row image
+		var imgFV = new Image(2, 3);
+		imgFV.setPixel(0, 0, new Color(255, 0, 0, 255));
+		imgFV.setPixel(1, 0, new Color(255, 0, 0, 255));
+		imgFV.setPixel(0, 2, new Color(0, 0, 255, 255));
+		imgFV.setPixel(1, 2, new Color(0, 0, 255, 255));
+		imgFV.flip(false, true);
+		assert(imgFV.getPixel(0, 0).b === 255, "Image flipV top row now blue");
+		assert(imgFV.getPixel(0, 2).r === 255, "Image flipV bottom row now red");
+
+		// Image toString
+		assert(typeof img.toString() === "string", "Image toString");
+
 		// Image clone
 		var imgCl = img.clone();
 		assert(imgCl.eq(img), "Image clone eq");
+
+		// Image single-number constructor (creates square image)
+		var imgSq = new Image(3);
+		assert(imgSq.isValid(), "Image single-number ctor valid");
+		assert(imgSq.getWidth() === 3 && imgSq.getHeight() === 3, "Image single-number 3x3");
+
+		// Image create with Size object
+		var imgSz = new Image();
+		var createRes = imgSz.create(new Size(4, 5));
+		assert(createRes === true, "Image create(Size) returns true");
+		assert(imgSz.getWidth() === 4 && imgSz.getHeight() === 5, "Image create(Size) dims");
+
+		// Image create with single number (square)
+		var imgSq2 = new Image();
+		imgSq2.create(6);
+		assert(imgSq2.getWidth() === 6 && imgSq2.getHeight() === 6, "Image create(number) square");
+
+		// Image setPixel TypeError
+		var setPixThrew = false;
+		try { img.setPixel(true, new Color()); } catch(e) { setPixThrew = true; }
+		assert(setPixThrew, "Image setPixel invalid throws");
 
 		// Image create/destroy
 		var img2 = new Image();
@@ -338,6 +543,28 @@ module.exports = function (mechatron, log, assert) {
 		assert(h7.result !== 0, "Hash ctor with string");
 		var h8 = new Hash(h7);
 		assert(h8.eq(h7), "Hash copy ctor");
+
+		// Hash constructor with number
+		var h9 = new Hash(12345);
+		assert(h9.result === 12345, "Hash ctor number");
+
+		// Hash append with ArrayBuffer
+		var h10 = new Hash();
+		h10.append(new ArrayBuffer(4));
+		assert(typeof h10.result === "number", "Hash append ArrayBuffer");
+
+		// Hash ne TypeError
+		var hashThrew = false;
+		try { h1.ne("invalid"); } catch(e) { hashThrew = true; }
+		assert(hashThrew, "Hash ne invalid throws");
+		hashThrew = false;
+		try { h1.eq("invalid"); } catch(e) { hashThrew = true; }
+		assert(hashThrew, "Hash eq invalid throws");
+
+		// Hash toString
+		var hStr = h1.toString();
+		assert(hStr.indexOf("0x") === 0, "Hash toString starts with 0x");
+		assert(hStr.length === 10, "Hash toString length 10");
 
 		log("OK\n");
 		return true;
@@ -401,8 +628,19 @@ module.exports = function (mechatron, log, assert) {
 		assert(t.le(t3) === false, "earlier timer !le later");
 		assert(t.ge(t3) === true, "earlier timer ge later");
 
-		// Static compare
+		// Static compare (including equal)
 		assert(Timer.compare(t, t3) > 0, "Timer.compare earlier>later");
+		var teq1 = new Timer();
+		teq1.start();
+		var teq2 = teq1.clone();
+		assert(Timer.compare(teq1, teq2) === 0, "Timer.compare equal");
+
+		// Restart on non-started timer
+		var tns = new Timer();
+		assert(tns.restart() === 0, "Timer restart non-started returns 0");
+
+		// Timer.sleep with min,max numbers
+		Timer.sleep(1, 5);
 
 		// Static getCpuTime
 		var c1 = Timer.getCpuTime();

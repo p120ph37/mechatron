@@ -69,6 +69,32 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var active = Window.getActive();
 		assert(active instanceof Window, "getActive returns Window");
 
+		// mapToClient/mapToScreen overloads (no args, Point obj)
+		var mp0 = w1.mapToClient();
+		assert(mp0 instanceof Point, "mapToClient() no args");
+		var ms0 = w1.mapToScreen();
+		assert(ms0 instanceof Point, "mapToScreen() no args");
+		var mpPt = w1.mapToClient(new Point(10, 20));
+		assert(mpPt instanceof Point, "mapToClient(Point)");
+		var msPt = w1.mapToScreen(new Point(10, 20));
+		assert(msPt instanceof Point, "mapToScreen(Point)");
+		var mpObj = w1.mapToClient({ x: 5, y: 5 });
+		assert(mpObj instanceof Point, "mapToClient(obj)");
+		var msObj = w1.mapToScreen({ x: 5, y: 5 });
+		assert(msObj instanceof Point, "mapToScreen(obj)");
+
+		// setBounds/setClient overloads (no-crash on invalid window)
+		w1.setBounds();
+		w1.setBounds(0, 0, 100, 100);
+		w1.setBounds({ x: 0, y: 0, w: 100, h: 100 });
+		w1.setClient();
+		w1.setClient(0, 0, 100, 100);
+		w1.setClient({ x: 0, y: 0, w: 100, h: 100 });
+
+		// Window copy constructor
+		var wCopy = new Window(w1);
+		assert(wCopy.eq(w1), "Window copy ctor eq");
+
 		// Test window setters/getters on a valid window if one exists
 		if (list.length > 0) {
 			var vw = list[0];
@@ -85,6 +111,33 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			if (origTitle) {
 				vw.setTitle(origTitle);
 			}
+
+			// Exercise more methods on valid windows
+			assert(typeof vw.isValid() === "boolean", "valid isValid");
+			assert(typeof vw.isTopMost() === "boolean", "valid isTopMost");
+			assert(typeof vw.isBorderless() === "boolean", "valid isBorderless");
+			assert(typeof vw.isMinimized() === "boolean", "valid isMinimized");
+			assert(typeof vw.isMaximized() === "boolean", "valid isMaximized");
+			assert(typeof vw.getPID() === "number", "valid getPID");
+			assert(typeof vw.getHandle() === "number", "valid getHandle");
+			var vwProc = vw.getProcess();
+			assert(typeof vwProc === "object", "valid getProcess");
+			var vwClient = vw.getClient();
+			assert(vwClient instanceof Bounds, "valid getClient");
+
+			// setMinimized/setMaximized
+			vw.setMinimized(false);
+			vw.setMaximized(false);
+
+			// close (on a cloned handle to avoid disrupting test)
+			var vwClone = vw.clone();
+			assert(vwClone.eq(vw), "valid clone eq");
+		}
+
+		// Window.setActive
+		var activeW = Window.getActive();
+		if (activeW.isValid()) {
+			Window.setActive(activeW);
 		}
 
 		// --- isAxEnabled ---

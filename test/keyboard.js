@@ -119,6 +119,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var kc = k.clone();
 		assert(kc.autoDelay instanceof mechatron.Range, "clone autoDelay");
 
+		// --- copy constructor ---
+		var kCopy = new Keyboard(k);
+		assert(kCopy.autoDelay instanceof mechatron.Range, "copy ctor autoDelay");
+
+		// --- getState() without keycode (returns full state object) ---
+		var kState = Keyboard.getState();
+		assert(typeof kState === "object", "getState() returns object");
+
 		// --- getAllKeys / getKeyNames ---
 		var allKeys = mechatron.getAllKeys();
 		assert(allKeys.length > 0, "getAllKeys non-empty");

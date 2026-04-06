@@ -115,10 +115,54 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			var mc = mod.clone();
 			assert(mc.getName() === mod.getName(), "module clone name");
 			assert(mc.getBase() === mod.getBase(), "module clone base");
+
+			// Module getSegments
+			var segs = mod.getSegments();
+			assert(segs instanceof Array, "module getSegments is array");
+
+			// Module clone with segments populated
+			var mc2 = mod.clone();
+			assert(mc2.getSegments() instanceof Array, "cloned module getSegments");
+
+			// Module TypeError for comparison with invalid type
+			var modThrew = false;
+			try { mod.lt("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module lt invalid throws");
+			modThrew = false;
+			try { mod.gt("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module gt invalid throws");
+			modThrew = false;
+			try { mod.le("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module le invalid throws");
+			modThrew = false;
+			try { mod.ge("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module ge invalid throws");
+			modThrew = false;
+			try { mod.eq("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module eq invalid throws");
+			modThrew = false;
+			try { mod.ne("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module ne invalid throws");
+
+			// Segment ne
+			if (segs.length > 0) {
+				var segNe = segs[0].ne(new mechatron.Segment());
+				assert(typeof segNe === "boolean", "segment ne returns bool");
+			}
 		} else {
 			expectOrSkip("machVM", "Process.getModules (mach VM)");
 			log("(getModules unavailable) ");
 		}
+
+		// --- Process copy constructor ---
+		var pCopy = new Process(curr);
+		assert(pCopy.eq(curr), "copy ctor eq");
+		assert(pCopy.getPID() === curr.getPID(), "copy ctor pid");
+
+		// --- Process clone ---
+		var pClone = curr.clone();
+		assert(pClone.eq(curr), "clone eq");
+		assert(pClone.getPID() === curr.getPID(), "clone pid");
 
 		// --- is64Bit, isDebugged ---
 		assert(typeof curr.is64Bit() === "boolean", "is64Bit bool");

@@ -51,6 +51,20 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			assert(!seg3.ne(seg), "segment clone !ne");
 			assert(seg.ne(seg2), "segment ne different");
 
+			// Segment TypeError branches
+			var segThrew = false;
+			try { seg.lt("bad"); } catch(e) { segThrew = true; }
+			assert(segThrew, "segment lt invalid throws");
+			segThrew = false;
+			try { seg.gt("bad"); } catch(e) { segThrew = true; }
+			assert(segThrew, "segment gt invalid throws");
+			segThrew = false;
+			try { seg.le("bad"); } catch(e) { segThrew = true; }
+			assert(segThrew, "segment le invalid throws");
+			segThrew = false;
+			try { seg.ge("bad"); } catch(e) { segThrew = true; }
+			assert(segThrew, "segment ge invalid throws");
+
 			// Segment static compare
 			assert(Segment.compare(seg, seg2) === -1, "Segment.compare lt");
 			assert(Segment.compare(seg2, seg) === 1, "Segment.compare gt");
@@ -228,6 +242,93 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		// Modules of current process
 		var mods = proc.getModules();
 		assert(mods.length > 0, "current proc has modules");
+
+		// --- Memory clone ---
+		var memCl = mem.clone();
+		assert(memCl.isValid(), "clone valid");
+		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
+
+		// --- Write operations on readable/writable region ---
+		var writable = null;
+		for (var wi = 0; wi < regions.length; ++wi) {
+			if (regions[wi].valid && regions[wi].bound && regions[wi].readable && regions[wi].writable && regions[wi].size > 64) {
+				writable = regions[wi];
+				break;
+			}
+		}
+
+		if (writable) {
+			// Read original values, write, then restore
+			var origBuf = Buffer.alloc(8);
+			mem.readData(writable.start, origBuf, 8);
+
+			// writeInt8
+			assert(typeof mem.writeInt8(writable.start, 42) === "boolean", "writeInt8 returns bool");
+			// writeInt16
+			assert(typeof mem.writeInt16(writable.start, 1234) === "boolean", "writeInt16 returns bool");
+			// writeInt32
+			assert(typeof mem.writeInt32(writable.start, 12345678) === "boolean", "writeInt32 returns bool");
+			// writeReal32
+			assert(typeof mem.writeReal32(writable.start, 3.14) === "boolean", "writeReal32 returns bool");
+			// writeReal64
+			assert(typeof mem.writeReal64(writable.start, 3.14159265) === "boolean", "writeReal64 returns bool");
+			// writeBool
+			assert(typeof mem.writeBool(writable.start, true) === "boolean", "writeBool returns bool");
+			// writeInt64
+			assert(typeof mem.writeInt64(writable.start, 9999) === "boolean", "writeInt64 returns bool");
+			// writeString
+			assert(typeof mem.writeString(writable.start, "hi") === "boolean", "writeString returns bool");
+			// writePtr
+			assert(typeof mem.writePtr(writable.start, 0) === "boolean", "writePtr returns bool");
+
+			// Restore original data
+			mem.writeData(writable.start, origBuf, 8);
+		}
+
+		// --- Multi-value (count > 1) typed reads ---
+		if (readable && readable.size >= 32) {
+			var mv8 = mem.readInt8(readable.start, 4);
+			assert(Array.isArray(mv8), "readInt8 count=4 returns array");
+			assert(mv8.length === 4, "readInt8 count=4 length");
+			var mv16 = mem.readInt16(readable.start, 2);
+			assert(Array.isArray(mv16), "readInt16 count=2 returns array");
+			var mv32 = mem.readInt32(readable.start, 2);
+			assert(Array.isArray(mv32), "readInt32 count=2 returns array");
+			var mvr32 = mem.readReal32(readable.start, 2);
+			assert(Array.isArray(mvr32), "readReal32 count=2 returns array");
+			var mvr64 = mem.readReal64(readable.start, 2);
+			assert(Array.isArray(mvr64), "readReal64 count=2 returns array");
+			var mvb = mem.readBool(readable.start, 4);
+			assert(Array.isArray(mvb), "readBool count=4 returns array");
+			var mvs = mem.readString(readable.start, 4, 2);
+			assert(Array.isArray(mvs), "readString count=2 returns array");
+			var mv64 = mem.readInt64(readable.start, 2);
+			assert(Array.isArray(mv64), "readInt64 count=2 returns array");
+			var mvp = mem.readPtr(readable.start, 2);
+			assert(Array.isArray(mvp), "readPtr count=2 returns array");
+
+			// Multi-value with stride
+			var mvStride = mem.readInt8(readable.start, 2, 4);
+			assert(Array.isArray(mvStride), "readInt8 with stride returns array");
+		}
+
+		// --- setAccess (exercise, may not succeed on all regions) ---
+		if (readable) {
+			var access = mem.setAccess(readable, readable.readable, readable.writable, readable.executable);
+			assert(typeof access === "boolean", "setAccess returns bool");
+		}
+
+		// --- readString single ---
+		if (readable) {
+			var rs = mem.readString(readable.start, 4);
+			assert(typeof rs === "string" || rs === null, "readString returns string|null");
+		}
+
+		// --- readInt64 single ---
+		if (readable && readable.size >= 8) {
+			var r64 = mem.readInt64(readable.start);
+			assert(typeof r64 === "number" || r64 === null, "readInt64 returns number|null");
+		}
 
 		// --- Async variants ---
 		var pa1 = mem.getRegionsAsync();
