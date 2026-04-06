@@ -57,12 +57,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// shift down, a down/up, b down/up, shift up
 		assert(list.length === 6, "compile +(ab) length");
 
-		// Compile error cases
-		assert(Keyboard.compile("}") === null, "compile unmatched } null");
-		assert(Keyboard.compile("{") === null, "compile unmatched { null");
-		assert(Keyboard.compile("{NOTAKEY}") === null, "compile invalid key null");
-		assert(Keyboard.compile("(") === null, "compile unmatched ( null");
-		assert(Keyboard.compile(")") === null, "compile unmatched ) null");
+		// Compile error cases (returns empty array)
+		assert(Keyboard.compile("}").length === 0, "compile unmatched } empty");
+		assert(Keyboard.compile("{").length === 0, "compile unmatched { empty");
+		assert(Keyboard.compile("{NOTAKEY}").length === 0, "compile invalid key empty");
+		assert(Keyboard.compile("(").length === 0, "compile unmatched ( empty");
+		assert(Keyboard.compile(")").length === 0, "compile unmatched ) empty");
 
 		// Compile whitespace (ignored)
 		list = Keyboard.compile("\t\n");

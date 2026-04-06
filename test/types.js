@@ -382,7 +382,8 @@ module.exports = function (mechatron, log, assert) {
 		assert(t2.hasStarted(), "cloned timer hasStarted");
 		assert(t.eq(t2), "cloned timer eq");
 
-		// hasExpired with 0
+		// hasExpired with 0 (need some time to have passed)
+		Timer.sleep(1);
 		assert(t.hasExpired(0), "Timer hasExpired(0)");
 
 		// ne
