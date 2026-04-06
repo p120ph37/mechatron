@@ -36,20 +36,13 @@ function tryLoad(subsystem: Subsystem): any {
   const path = require("path");
   const nodeFile = getNodeFile(subsystem);
 
-  // Strategy 1: @mechatronic/napi-<sub> package (installed via optionalDependencies)
+  // Resolve from @mechatronic/napi-<sub> package (installed via optionalDependencies,
+  // or linked via npm workspaces during development)
   try {
     const pkgDir = path.dirname(
       require.resolve(`@mechatronic/napi-${subsystem}/package.json`)
     );
     _cache[subsystem] = require(path.join(pkgDir, nodeFile));
-    return _cache[subsystem];
-  } catch (_) {}
-
-  // Strategy 2: development layout — native-rs/<sub>/
-  try {
-    _cache[subsystem] = require(
-      path.resolve(__dirname, "..", "napi", subsystem, nodeFile)
-    );
     return _cache[subsystem];
   } catch (_) {}
 

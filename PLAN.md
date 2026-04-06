@@ -173,8 +173,8 @@ Phase 4 is executed in two parts:
   packages containing per-subsystem `.node` prebuilt binaries, listed as
   `optionalDependencies` of `mechatron`
 - `packages/mechatron-robot-js` — compatibility shim (phase 3)
-- `lib/napi.ts` — unified native loader: tries `@mechatronic/napi-<sub>`
-  first, falls back to `napi/<sub>/` for dev layout
+- `lib/napi.ts` — unified native loader: resolves `@mechatronic/napi-<sub>`
+  packages (workspace symlinks provide resolution during development)
 
 #### Cargo Workspace Layout
 - `napi/Cargo.toml` — workspace root

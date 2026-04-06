@@ -12,8 +12,7 @@ All notable changes to this project will be documented in this file.
   or skip all native modules for future Bun FFI support
 - **Unified native loader** (`lib/napi.ts`) — `getNative("keyboard")` /
   `isAvailable("keyboard")` resolves native binaries from `@mechatronic/napi-*`
-  packages first, falls back to dev layout (`napi/<sub>/`), and returns a
-  clear error when absent
+  packages and returns a clear error when absent
 - **Async API variants** — `*Async` Promise-returning methods for operations
   that may block: `Screen.grabScreenAsync`/`synchronizeAsync`,
   `Process.getListAsync`/`getModulesAsync`, `Window.getListAsync`,
