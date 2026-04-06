@@ -77,6 +77,18 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			log("(grabScreen unavailable) ");
 		}
 
+		// --- Screen clone ---
+		var scl = main.clone();
+		assert(scl.getBounds().eq(main.getBounds()), "screen clone bounds");
+
+		// --- getScreen with point ---
+		var center = main.getBounds().getCenter();
+		var found = Screen.getScreen(center.x, center.y);
+		assert(found !== null, "getScreen by point");
+		// getScreen with Point object
+		var found2 = Screen.getScreen(center);
+		assert(found2 !== null, "getScreen by Point obj");
+
 		// --- Async variants ---
 		var pa1 = Screen.synchronizeAsync();
 		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");

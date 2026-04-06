@@ -186,29 +186,39 @@ jobs:
           npm link
           npm link mechatron -w mechatron-robot-js
 
-          JUNIT_DIR="${RUNNER_TEMP}/junit"
-          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-          START=$(date +%s%N 2>/dev/null || echo 0)
-          OUTPUT=$(node packages/mechatron-robot-js/test/conformance.js 2>&1) && RC=0 || RC=$?
-          END=$(date +%s%N 2>/dev/null || echo 0)
-          echo "$OUTPUT"
-          if [ "$START" != "0" ] && [ "$END" != "0" ]; then
-            ELAPSED=$(echo "scale=3; ($END - $START) / 1000000000" | bc)
-          else
-            ELAPSED="0.000"
-          fi
-
-          # Append a testcase to the existing JUnit XML (before closing </testsuite>)
-          if [ -f "$JUNIT_FILE" ]; then
-            if [ "$RC" -eq 0 ]; then
-              sed -i.bak "s|</testsuite>|<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"${ELAPSED}\"/></testsuite>|" "$JUNIT_FILE"
-            else
-              MSG=$(echo "$OUTPUT" | grep "FAIL:" | head -5 | tr '\n' ' ' | sed 's/&/\&amp;/g; s/"/\&quot;/g; s/</\&lt;/g; s/>/\&gt;/g')
-              sed -i.bak "s|</testsuite>|<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"${ELAPSED}\"><failure message=\"${MSG}\"/></testcase></testsuite>|" "$JUNIT_FILE"
-            fi
-            rm -f "${JUNIT_FILE}.bak"
-          fi
-          exit $RC
+          # Run conformance tests and append result to JUnit XML
+          node -e "
+            const { execFileSync } = require('child_process');
+            const fs = require('fs');
+            const junitFile = process.env.JUNIT_FILE;
+            const start = Date.now();
+            let rc = 0, output = '';
+            try {
+              output = execFileSync(process.execPath,
+                ['packages/mechatron-robot-js/test/conformance.js'],
+                { encoding: 'utf8', stdio: ['pipe','pipe','pipe'] });
+            } catch (e) {
+              rc = e.status || 1;
+              output = (e.stdout || '') + (e.stderr || '');
+            }
+            const elapsed = ((Date.now() - start) / 1000).toFixed(3);
+            process.stdout.write(output);
+            if (fs.existsSync(junitFile)) {
+              const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              let tc;
+              if (rc === 0) {
+                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>';
+              } else {
+                const fails = output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ');
+                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(fails) + '\"/></testcase>';
+              }
+              const xml = fs.readFileSync(junitFile, 'utf8');
+              fs.writeFileSync(junitFile, xml.replace('</testsuite>', tc + '</testsuite>'));
+            }
+            process.exit(rc);
+          "
+        env:
+          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml
 
       - uses: actions/upload-artifact@v7
         if: always()

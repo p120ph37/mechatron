@@ -19,6 +19,44 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		var Process = mechatron.Process;
 		var Memory  = mechatron.Memory;
 
+		// --- Segment (data type) ---
+		var Segment = mechatron.Segment;
+		if (Segment) {
+			var seg = new Segment();
+			assert(seg.valid === false, "empty segment invalid");
+			assert(seg.base === 0, "empty segment base");
+			assert(seg.size === 0, "empty segment size");
+			assert(seg.name === "", "empty segment name");
+
+			// Segment contains
+			seg.base = 100; seg.size = 50;
+			assert(seg.contains(100), "segment contains start");
+			assert(seg.contains(149), "segment contains end-1");
+			assert(!seg.contains(150), "segment !contains end");
+			assert(!seg.contains(99), "segment !contains before");
+
+			// Segment comparisons
+			var seg2 = new Segment();
+			seg2.base = 200; seg2.size = 10;
+			assert(seg.lt(seg2), "segment lt");
+			assert(!seg.gt(seg2), "segment !gt");
+			assert(seg.le(seg2), "segment le");
+			assert(!seg.ge(seg2), "segment !ge");
+			assert(seg.lt(200), "segment lt number");
+			assert(seg.le(100), "segment le number");
+
+			// Segment eq/ne
+			var seg3 = seg.clone();
+			assert(seg3.eq(seg), "segment clone eq");
+			assert(!seg3.ne(seg), "segment clone !ne");
+			assert(seg.ne(seg2), "segment ne different");
+
+			// Segment static compare
+			assert(Segment.compare(seg, seg2) === -1, "Segment.compare lt");
+			assert(Segment.compare(seg2, seg) === 1, "Segment.compare gt");
+			assert(Segment.compare(seg, seg) === 0, "Segment.compare eq");
+		}
+
 		// --- Module (data type only) ---
 		var mod = new Module();
 		assert(mod.valid === false, "empty module invalid");
@@ -27,8 +65,28 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		assert(mod.size === 0, "empty module size");
 		assert(mod.isValid() === false, "empty module isValid");
 		assert(mod.getName() === "", "empty module getName");
+		assert(mod.getPath() === "", "empty module getPath");
 		assert(mod.getBase() === 0, "empty module getBase");
 		assert(mod.getSize() === 0, "empty module getSize");
+		assert(mod.getProcess() instanceof Process, "empty module getProcess");
+		assert(mod.contains(0) === false, "empty module !contains 0");
+		assert(mod.getSegments().length === 0, "empty module getSegments empty");
+
+		// Module comparisons
+		assert(mod.eq(0), "empty module eq 0");
+		assert(mod.ne(1), "empty module ne 1");
+		assert(mod.lt(1), "empty module lt 1");
+		assert(!mod.gt(1), "empty module !gt 1");
+		assert(mod.le(0), "empty module le 0");
+		assert(mod.ge(0), "empty module ge 0");
+
+		// Module clone
+		var modCl = mod.clone();
+		assert(modCl.eq(mod), "module clone eq");
+		assert(modCl.getName() === mod.getName(), "module clone name");
+
+		// Module static compare
+		assert(Module.compare(mod, modCl) === 0, "Module.compare eq");
 
 		if (!machVMAvailable) {
 			expectOrSkip("machVM", "Memory (mach VM)");
@@ -101,9 +159,71 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		assert(region.bound, "getRegion bound");
 		assert(region.readable, "getRegion readable");
 
+		// --- Stats ---
+		var stats = mem.getStats();
+		assert(typeof stats === "object", "getStats object");
+		var stats2 = stats.clone();
+		assert(stats2.eq(stats), "stats clone eq");
+		assert(!stats2.ne(stats), "stats clone !ne");
+
+		// --- Region properties ---
+		var region0 = regions[0];
+		assert(typeof region0.valid === "boolean", "region valid bool");
+		assert(typeof region0.bound === "boolean", "region bound bool");
+		assert(typeof region0.start === "number", "region start number");
+		assert(typeof region0.size === "number", "region size number");
+		assert(typeof region0.readable === "boolean", "region readable bool");
+		assert(typeof region0.writable === "boolean", "region writable bool");
+		if (region0.valid && region0.size > 0) {
+			assert(region0.contains(region0.start), "region contains start");
+			assert(!region0.contains(region0.start + region0.size), "region !contains end");
+		}
+
+		// Region comparisons
+		if (regions.length > 1) {
+			var r0 = regions[0], r1 = regions[1];
+			assert(typeof r0.lt(r1) === "boolean", "region lt");
+			assert(typeof r0.gt(r1) === "boolean", "region gt");
+			assert(typeof r0.le(r1) === "boolean", "region le");
+			assert(typeof r0.ge(r1) === "boolean", "region ge");
+			assert(typeof r0.eq(r1) === "boolean", "region eq");
+			assert(typeof r0.ne(r1) === "boolean", "region ne");
+			var rcl = r0.clone();
+			assert(rcl.eq(r0), "region clone eq");
+		}
+
+		// --- Typed reads from readable region ---
+		if (readable) {
+			var v8 = mem.readInt8(readable.start);
+			assert(typeof v8 === "number" || v8 === null, "readInt8 returns number|null");
+			var v16 = mem.readInt16(readable.start);
+			assert(typeof v16 === "number" || v16 === null, "readInt16 returns number|null");
+			var v32 = mem.readInt32(readable.start);
+			assert(typeof v32 === "number" || v32 === null, "readInt32 returns number|null");
+			var vr32 = mem.readReal32(readable.start);
+			assert(typeof vr32 === "number" || vr32 === null, "readReal32 returns number|null");
+			var vr64 = mem.readReal64(readable.start);
+			assert(typeof vr64 === "number" || vr64 === null, "readReal64 returns number|null");
+			var vb = mem.readBool(readable.start);
+			assert(typeof vb === "boolean" || vb === null, "readBool returns bool|null");
+			var vp = mem.readPtr(readable.start);
+			assert(typeof vp === "number" || vp === null, "readPtr returns number|null");
+		}
+
 		// --- Cache operations ---
 		assert(typeof mem.isCaching() === "boolean", "isCaching bool");
 		assert(typeof mem.getCacheSize() === "number", "getCacheSize number");
+		if (readable) {
+			var cached = mem.createCache(readable.start, readable.size, 4096);
+			assert(typeof cached === "boolean", "createCache returns boolean");
+			if (cached) {
+				assert(mem.isCaching(), "isCaching after createCache");
+				assert(mem.getCacheSize() > 0, "getCacheSize > 0");
+				mem.clearCache();
+				mem.deleteCache();
+				assert(!mem.isCaching(), "!isCaching after deleteCache");
+			}
+		}
 
 		// Modules of current process
 		var mods = proc.getModules();

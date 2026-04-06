@@ -65,6 +65,19 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		// --- isSys64Bit ---
 		assert(typeof Process.isSys64Bit() === "boolean", "isSys64Bit bool");
 
+		// --- open / close ---
+		var p4 = new Process();
+		assert(p4.open(curr.getPID()), "open by pid");
+		assert(p4.isValid(), "opened valid");
+		p4.close();
+
+		// --- getHandle ---
+		assert(typeof curr.getHandle() === "number", "getHandle number");
+
+		// --- getWindows ---
+		var wins = curr.getWindows();
+		assert(wins instanceof Array, "getWindows is array");
+
 		// --- getModules ---
 		if (machVMAvailable) {
 			var mods = curr.getModules();
@@ -74,8 +87,34 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			// Module properties
 			var mod = mods[0];
 			assert(typeof mod.getName() === "string", "module getName");
+			assert(typeof mod.getPath() === "string", "module getPath");
 			assert(typeof mod.getBase() === "number", "module getBase");
 			assert(typeof mod.getSize() === "number", "module getSize");
+			assert(mod.isValid(), "module isValid");
+			assert(mod.getProcess() instanceof Process, "module getProcess");
+
+			// Module contains
+			if (mod.getSize() > 0) {
+				assert(mod.contains(mod.getBase()), "module contains base");
+				assert(!mod.contains(0), "module !contains 0");
+			}
+
+			// Module comparison
+			if (mods.length > 1) {
+				var m0 = mods[0], m1 = mods[1];
+				var cmp = (m0.getBase() < m1.getBase());
+				assert(m0.lt(m1) === cmp, "module lt");
+				assert(m0.gt(m1) === !cmp && m0.getBase() !== m1.getBase(), "module gt");
+				assert(typeof m0.le(m1) === "boolean", "module le");
+				assert(typeof m0.ge(m1) === "boolean", "module ge");
+				assert(typeof m0.eq(m1) === "boolean", "module eq");
+				assert(typeof m0.ne(m1) === "boolean", "module ne");
+			}
+
+			// Module clone
+			var mc = mod.clone();
+			assert(mc.getName() === mod.getName(), "module clone name");
+			assert(mc.getBase() === mod.getBase(), "module clone base");
 		} else {
 			expectOrSkip("machVM", "Process.getModules (mach VM)");
 			log("(getModules unavailable) ");

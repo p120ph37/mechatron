@@ -82,6 +82,10 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// --- autoDelay ---
 		assert(m.autoDelay instanceof mechatron.Range, "autoDelay is Range");
 
+		// --- clone ---
+		var mc = m.clone();
+		assert(mc.autoDelay instanceof mechatron.Range, "clone autoDelay");
+
 		log("OK\n");
 		return true;
 	}

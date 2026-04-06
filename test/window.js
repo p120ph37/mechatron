@@ -53,6 +53,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(w1.eq(0), "empty eq 0");
 		assert(w1.ne(8888), "empty ne 8888");
 
+		// --- Window clone ---
+		var wc = w1.clone();
+		assert(wc.eq(w1), "clone eq original");
+
+		// --- getProcess ---
+		var wp = w1.getProcess();
+		assert(typeof wp === "object", "getProcess returns object");
+
 		// --- getList ---
 		var list = Window.getList();
 		assert(list instanceof Array, "getList is array");
@@ -60,6 +68,24 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// --- getActive ---
 		var active = Window.getActive();
 		assert(active instanceof Window, "getActive returns Window");
+
+		// Test window setters/getters on a valid window if one exists
+		if (list.length > 0) {
+			var vw = list[0];
+			// setBounds/getBounds round-trip
+			var origBounds = vw.getBounds();
+			assert(origBounds instanceof Bounds, "valid getBounds");
+
+			// setTopMost/setBorderless/setMinimized/setMaximized (just exercise them)
+			vw.setTopMost(false);
+			vw.setBorderless(false);
+
+			// setTitle (no-crash test)
+			var origTitle = vw.getTitle();
+			if (origTitle) {
+				vw.setTitle(origTitle);
+			}
+		}
 
 		// --- isAxEnabled ---
 		assert(typeof Window.isAxEnabled() === "boolean", "isAxEnabled bool");

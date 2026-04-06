@@ -37,6 +37,41 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		list = Keyboard.compile("{SHIFT}{CONTROL}{ALT}");
 		assert(list.length === 6, "compile modifiers length");
 
+		// Compile with repetition count
+		list = Keyboard.compile("{SPACE 3}");
+		assert(list.length === 6, "compile SPACE x3 length");
+
+		// Compile plain characters
+		list = Keyboard.compile("abc");
+		assert(list.length === 6, "compile 'abc' length");
+
+		// Compile modifier prefixes (+ = shift, ^ = ctrl, % = alt)
+		list = Keyboard.compile("+a");
+		assert(list.length >= 4, "compile +a has shift down+up + a down+up");
+		// The first event should be shift down
+		assert(list[0].down === true, "compile +a shift down first");
+
+		// Compile with groups: modifier applied to group
+		list = Keyboard.compile("+(ab)");
+		assert(list !== null, "compile +(ab) not null");
+		// shift down, a down/up, b down/up, shift up
+		assert(list.length === 6, "compile +(ab) length");
+
+		// Compile error cases
+		assert(Keyboard.compile("}") === null, "compile unmatched } null");
+		assert(Keyboard.compile("{") === null, "compile unmatched { null");
+		assert(Keyboard.compile("{NOTAKEY}") === null, "compile invalid key null");
+		assert(Keyboard.compile("(") === null, "compile unmatched ( null");
+		assert(Keyboard.compile(")") === null, "compile unmatched ) null");
+
+		// Compile whitespace (ignored)
+		list = Keyboard.compile("\t\n");
+		assert(list !== null && list.length === 0, "compile whitespace empty");
+
+		// Compile repetition edge: 0 count
+		list = Keyboard.compile("{SPACE 0}");
+		assert(list !== null && list.length === 0, "compile SPACE x0 empty");
+
 		// --- autoDelay ---
 		assert(k.autoDelay instanceof mechatron.Range, "autoDelay is Range");
 
@@ -79,6 +114,10 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(typeof KEYS.KEY_SHIFT === "number", "KEY_SHIFT is number");
 		assert(typeof KEYS.KEY_CONTROL === "number", "KEY_CONTROL is number");
 		assert(typeof KEYS.KEY_ALT === "number", "KEY_ALT is number");
+
+		// --- clone ---
+		var kc = k.clone();
+		assert(kc.autoDelay instanceof mechatron.Range, "clone autoDelay");
 
 		// --- getAllKeys / getKeyNames ---
 		var allKeys = mechatron.getAllKeys();
