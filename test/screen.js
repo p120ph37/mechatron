@@ -77,19 +77,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			log("(grabScreen unavailable) ");
 		}
 
-		log("OK\n");
-		return true;
-	}
-
-	function testScreenAsync() {
-		log("  Screen (async)... ");
-
-		var Screen = mechatron.Screen;
-
-		var p1 = Screen.synchronizeAsync();
-		assert(p1 instanceof Promise, "synchronizeAsync returns Promise");
-		var p2 = Screen.grabScreenAsync(new mechatron.Image(), 0, 0, 10, 10);
-		assert(p2 instanceof Promise, "grabScreenAsync returns Promise");
+		// --- Async variants ---
+		var pa1 = Screen.synchronizeAsync();
+		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");
+		var pa2 = Screen.grabScreenAsync(new mechatron.Image(), 0, 0, 10, 10);
+		assert(pa2 instanceof Promise, "grabScreenAsync returns Promise");
 
 		log("OK\n");
 		return true;
@@ -97,6 +89,5 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 	return {
 		testScreen: testScreen,
-		testScreenAsync: testScreenAsync,
 	};
 };

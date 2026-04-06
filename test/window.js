@@ -64,17 +64,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// --- isAxEnabled ---
 		assert(typeof Window.isAxEnabled() === "boolean", "isAxEnabled bool");
 
-		log("OK\n");
-		return true;
-	}
-
-	function testWindowAsync() {
-		log("  Window (async)... ");
-
-		var Window = mechatron.Window;
-
-		var p1 = Window.getListAsync();
-		assert(p1 instanceof Promise, "getListAsync returns Promise");
+		// --- Async variants ---
+		var pa1 = Window.getListAsync();
+		assert(pa1 instanceof Promise, "getListAsync returns Promise");
 
 		log("OK\n");
 		return true;
@@ -82,6 +74,5 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 	return {
 		testWindow: testWindow,
-		testWindowAsync: testWindowAsync,
 	};
 };

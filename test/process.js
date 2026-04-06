@@ -85,26 +85,15 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		assert(typeof curr.is64Bit() === "boolean", "is64Bit bool");
 		assert(typeof curr.isDebugged() === "boolean", "isDebugged bool");
 
-		// --- close ---
-		curr.close();
-
-		log("OK\n");
-		return true;
-	}
-
-	function testProcessAsync() {
-		log("  Process (async)... ");
-
-		var Process = mechatron.Process;
-
-		var p1 = Process.getListAsync();
-		assert(p1 instanceof Promise, "getListAsync returns Promise");
-
-		var curr = Process.getCurrent();
+		// --- Async variants ---
+		var pa1 = Process.getListAsync();
+		assert(pa1 instanceof Promise, "getListAsync returns Promise");
 		if (machVMAvailable) {
-			var p2 = curr.getModulesAsync();
-			assert(p2 instanceof Promise, "getModulesAsync returns Promise");
+			var pa2 = curr.getModulesAsync();
+			assert(pa2 instanceof Promise, "getModulesAsync returns Promise");
 		}
+
+		// --- close ---
 		curr.close();
 
 		log("OK\n");
@@ -113,6 +102,5 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 
 	return {
 		testProcess: testProcess,
-		testProcessAsync: testProcessAsync,
 	};
 };

@@ -184,24 +184,6 @@ var memoryModule    = require("./memory")(mechatron, log, assert, waitFor, expec
 
 ////////////////////////////////////////////////////////////////////////////////
 
-function testAvailability() {
-	log("  Availability... ");
-
-	var subs = ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"];
-	for (var i = 0; i < subs.length; ++i) {
-		assert(typeof mechatron.isAvailable(subs[i]) === "boolean",
-			"isAvailable(" + subs[i] + ") is boolean");
-	}
-
-	// At least one subsystem should be available (we already probed keyboard)
-	assert(mechatron.isAvailable("keyboard"), "keyboard available");
-
-	log("OK\n");
-	return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 function main() {
 	log("\nMECHATRON TEST SUITE [" + _backendArg.toUpperCase() + " backend]\n");
 	log("------------------------------\n");
@@ -220,22 +202,26 @@ function main() {
 	}
 	log("------------------------------\n\n");
 
+	// Verify isAvailable() for all subsystems before running tests
+	log("  Availability... ");
+	var subs = ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"];
+	for (var i = 0; i < subs.length; ++i) {
+		assert(typeof mechatron.isAvailable(subs[i]) === "boolean",
+			"isAvailable(" + subs[i] + ") is boolean");
+	}
+	assert(mechatron.isAvailable("keyboard"), "keyboard available");
+	log("OK\n\n");
+
 	var tests = [
-		["types",        typesModule.testTypes],
-		["timer",        typesModule.testTimer],
-		["availability", testAvailability],
-		["keyboard",     keyboardModule.testKeyboard],
-		["mouse",        mouseModule.testMouse],
-		["clipboard",    clipboardModule.testClipboard],
-		["clipboard-async", clipboardModule.testClipboardAsync],
-		["process",      processModule.testProcess],
-		["process-async", processModule.testProcessAsync],
-		["window",       windowModule.testWindow],
-		["window-async", windowModule.testWindowAsync],
-		["screen",       screenModule.testScreen],
-		["screen-async", screenModule.testScreenAsync],
-		["memory",       memoryModule.testMemory],
-		["memory-async", memoryModule.testMemoryAsync],
+		["types",     typesModule.testTypes],
+		["timer",     typesModule.testTimer],
+		["keyboard",  keyboardModule.testKeyboard],
+		["mouse",     mouseModule.testMouse],
+		["clipboard", clipboardModule.testClipboard],
+		["process",   processModule.testProcess],
+		["window",    windowModule.testWindow],
+		["screen",    screenModule.testScreen],
+		["memory",    memoryModule.testMemory],
 	];
 
 	// Parse command line for specific tests

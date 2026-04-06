@@ -109,32 +109,13 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		var mods = proc.getModules();
 		assert(mods.length > 0, "current proc has modules");
 
-		proc.close();
-
-		log("OK\n");
-		return true;
-	}
-
-	function testMemoryAsync() {
-		log("  Memory (async)... ");
-
-		if (!machVMAvailable) {
-			log("(skipped - mach VM unavailable) OK\n");
-			return true;
-		}
-
-		var Process = mechatron.Process;
-		var Memory  = mechatron.Memory;
-
-		var proc = Process.getCurrent();
-		var mem = new Memory(proc);
-
-		var p1 = mem.getRegionsAsync();
-		assert(p1 instanceof Promise, "getRegionsAsync returns Promise");
-		var p2 = mem.readDataAsync(0, Buffer.alloc(1), 1);
-		assert(p2 instanceof Promise, "readDataAsync returns Promise");
-		var p3 = mem.findAsync("  ");
-		assert(p3 instanceof Promise, "findAsync returns Promise");
+		// --- Async variants ---
+		var pa1 = mem.getRegionsAsync();
+		assert(pa1 instanceof Promise, "getRegionsAsync returns Promise");
+		var pa2 = mem.readDataAsync(0, Buffer.alloc(1), 1);
+		assert(pa2 instanceof Promise, "readDataAsync returns Promise");
+		var pa3 = mem.findAsync("  ");
+		assert(pa3 instanceof Promise, "findAsync returns Promise");
 
 		proc.close();
 
@@ -144,6 +125,5 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 
 	return {
 		testMemory: testMemory,
-		testMemoryAsync: testMemoryAsync,
 	};
 };

@@ -32,6 +32,10 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 			assert(Clipboard.getSequence() === 0, "linux getSequence");
 
+			// Async variants still return Promises (even if ops fail on linux)
+			assert(Clipboard.getTextAsync() instanceof Promise, "linux getTextAsync Promise");
+			assert(Clipboard.setTextAsync("x") instanceof Promise, "linux setTextAsync Promise");
+
 			log("OK (linux - no clipboard manager)\n");
 			return true;
 		}
@@ -77,15 +81,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// Cleanup
 		Clipboard.clear();
 
-		log("OK\n");
-		return true;
-	}
-
-	function testClipboardAsync() {
-		log("  Clipboard (async)... ");
-
-		var Clipboard = mechatron.Clipboard;
-
+		// --- Async variants ---
 		var p1 = Clipboard.getTextAsync();
 		assert(p1 instanceof Promise, "getTextAsync returns Promise");
 		var p2 = Clipboard.setTextAsync("async-test");
@@ -101,6 +97,5 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 	return {
 		testClipboard: testClipboard,
-		testClipboardAsync: testClipboardAsync,
 	};
 };
