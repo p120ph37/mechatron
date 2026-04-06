@@ -187,84 +187,54 @@ jobs:
           npm link mechatron -w mechatron-robot-js
           node packages/mechatron-robot-js/test/conformance.js
 
-      - name: Test summary
+      - name: Test annotations
         if: always()
         run: |
-          JUNIT_DIR="${RUNNER_TEMP}/junit"
-          COV_DIR="${RUNNER_TEMP}/coverage"
-
-          # Write step summary and emit workflow annotations
+          # Emit workflow annotations for failures and totals (visible on job pages)
           node -e "
             const fs = require('fs'), path = require('path');
             const junitDir = process.env.JUNIT_DIR;
             const covDir = process.env.COV_DIR;
             const platform = '${{ matrix.os }}/${{ matrix.arch }}';
-            let summary = '## Test Results — ' + platform + '\n\n';
 
-            // Parse JUnit XML files
             let totalPass = 0, totalFail = 0;
             try {
               const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith('.xml'));
               for (const xf of xmlFiles) {
                 const xml = fs.readFileSync(path.join(junitDir, xf), 'utf8');
                 const re = /<testcase name=\"([^\"]+)\"[^>]*time=\"([^\"]+)\"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
-                summary += '| Test | Status | Time |\n|------|--------|------|\n';
                 let m;
                 while ((m = re.exec(xml)) !== null) {
-                  const name = m[1], time = m[2], body = m[3];
+                  const name = m[1], body = m[3];
                   const failed = body.includes('<failure');
                   if (failed) {
                     totalFail++;
-                    // Extract failure message for annotation
                     const msgMatch = body.match(/message=\"([^\"]*)\"/);
                     const msg = msgMatch ? msgMatch[1] : 'Test failed';
                     console.log('::error title=' + name + ' (' + platform + ')::' + msg);
                   } else {
                     totalPass++;
                   }
-                  summary += '| ' + name + ' | ' + (failed ? ':x: Fail' : ':white_check_mark: Pass') + ' | ' + time + 's |\n';
                 }
               }
             } catch (_) {}
 
             const total = totalPass + totalFail;
             if (total > 0) {
-              summary += '\n**' + totalPass + '/' + total + ' passed' + (totalFail > 0 ? ', ' + totalFail + ' failed' : '') + '**\n';
               console.log('::notice title=Tests (' + platform + ')::' + totalPass + '/' + total + ' passed');
-            } else {
-              summary += '_No test results found_\n';
             }
 
-            // Parse lcov.info for coverage
             try {
               const lcov = fs.readFileSync(path.join(covDir, 'lcov.info'), 'utf8');
-              const files = {};
-              let cur = null;
+              let hit = 0, lines = 0;
               for (const line of lcov.split('\n')) {
-                if (line.startsWith('SF:')) {
-                  cur = line.slice(3).replace(/^.*[\/\\\\]dist[\/\\\\]/, 'dist/').replace(/\\\\/g, '/');
-                  files[cur] = { hit: 0, total: 0 };
-                } else if (line.startsWith('DA:') && cur) {
-                  files[cur].total++;
-                  if (!line.endsWith(',0')) files[cur].hit++;
-                }
+                if (line.startsWith('DA:')) { lines++; if (!line.endsWith(',0')) hit++; }
               }
-              let totalHit = 0, totalLines = 0;
-              summary += '\n### Code Coverage\n\n';
-              summary += '| File | Lines | Coverage |\n|------|------:|----------|\n';
-              for (const [f, s] of Object.entries(files).sort()) {
-                if (s.total === 0) continue;
-                const pct = (100 * s.hit / s.total).toFixed(1);
-                summary += '| ' + f + ' | ' + s.hit + '/' + s.total + ' | ' + pct + '% |\n';
-                totalHit += s.hit; totalLines += s.total;
+              if (lines > 0) {
+                console.log('::notice title=Coverage (' + platform + ')::' + (100*hit/lines).toFixed(1) + '% line coverage (' + hit + '/' + lines + ' lines)');
               }
-              const totalPct = totalLines > 0 ? (100 * totalHit / totalLines).toFixed(1) : '0.0';
-              summary += '| **Total** | **' + totalHit + '/' + totalLines + '** | **' + totalPct + '%** |\n';
-              console.log('::notice title=Coverage (' + platform + ')::' + totalPct + '% line coverage (' + totalHit + '/' + totalLines + ' lines)');
             } catch (_) {}
-
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
-          " || echo "_Summary generation failed_" >> "$GITHUB_STEP_SUMMARY"
+          " || true
         env:
           JUNIT_DIR: ${{ runner.temp }}/junit
           COV_DIR: ${{ runner.temp }}/coverage
@@ -286,7 +256,7 @@ jobs:
           if-no-files-found: error
 
   test-summary:
-    if: github.event_name == 'pull_request' && always()
+    if: always()
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -399,10 +369,13 @@ jobs:
           comment = `## ${heading}\n\n${comment}`;
 
           fs.writeFileSync("comment-body.md", comment);
+          // Also write to workflow summary page
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, comment);
           SCRIPT
           node summary.js
 
       - name: Post PR comment
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
