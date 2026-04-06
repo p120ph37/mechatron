@@ -242,7 +242,7 @@ jobs:
               let cur = null;
               for (const line of lcov.split('\n')) {
                 if (line.startsWith('SF:')) {
-                  cur = line.slice(3).replace(/^.*[\/\\\\]dist[\/\\\\]/, 'dist/');
+                  cur = line.slice(3).replace(/^.*[\/\\\\]dist[\/\\\\]/, 'dist/').replace(/\\\\/g, '/');
                   files[cur] = { hit: 0, total: 0 };
                 } else if (line.startsWith('DA:') && cur) {
                   files[cur].total++;
@@ -368,7 +368,7 @@ jobs:
                 let cur = null;
                 for (const line of lcov.split("\n")) {
                   if (line.startsWith("SF:")) {
-                    cur = line.slice(3).replace(/^.*[\/\\]dist[\/\\]/, "dist/");
+                    cur = line.slice(3).replace(/^.*[\/\\]dist[\/\\]/, "dist/").replace(/\\/g, "/");
                     files[cur] = { hit: 0, total: 0 };
                   } else if (line.startsWith("DA:") && cur) {
                     files[cur].total++;
