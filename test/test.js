@@ -13,7 +13,7 @@
 // Modules                                                                    //
 //----------------------------------------------------------------------------//
 
-var mRobot   = require ("..");
+var mRobot   = require ("mechatron-robot-js");
 var mFS      = require ("fs");
 var mSprintf = require ("sprintf-js").sprintf;
 var mReadLn  = require ("readline-sync");
@@ -51,15 +51,9 @@ function assert (cond, thisArg, args)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-var testTypes     = require ("./types"    )(mRobot, log, mSprintf, getline, assert);
-var testTimer     = require ("./timer"    )(mRobot, log, mSprintf, getline, assert);
-var testKeyboard  = require ("./keyboard" )(mRobot, log, mSprintf, getline, assert);
-var testMouse     = require ("./mouse"    )(mRobot, log, mSprintf, getline, assert);
-var testProcess   = require ("./process"  )(mRobot, log, mSprintf, getline, assert);
-var testWindow    = require ("./window"   )(mRobot, log, mSprintf, getline, assert);
-var testMemory    = require ("./memory"   )(mRobot, log, mSprintf, getline, assert);
-var testScreen    = require ("./screen"   )(mRobot, log, mSprintf, getline, assert);
-var testClipboard = require ("./clipboard")(mRobot, log, mSprintf, getline, assert);
+function loadTest(name) {
+	return require ("./" + name)(mRobot, log, mSprintf, getline, assert);
+}
 
 
 
@@ -169,15 +163,15 @@ function main (argc, argv)
 	var res = 2;
 	while (res)
 	{
-		if (_types     && !testTypes    ()) break;
-		if (_timer     && !testTimer    ()) break;
-		if (_keyboard  && !testKeyboard ()) break;
-		if (_mouse     && !testMouse    ()) break;
-		if (_process   && !testProcess  ()) break;
-		if (_window    && !testWindow   ()) break;
-		if (_memory    && !testMemory   ()) break;
-		if (_screen    && !testScreen   ()) break;
-		if (_clipboard && !testClipboard()) break;
+		if (_types     && !loadTest("types"    )()) break;
+		if (_timer     && !loadTest("timer"    )()) break;
+		if (_keyboard  && !loadTest("keyboard" )()) break;
+		if (_mouse     && !loadTest("mouse"    )()) break;
+		if (_process   && !loadTest("process"  )()) break;
+		if (_window    && !loadTest("window"   )()) break;
+		if (_memory    && !loadTest("memory"   )()) break;
+		if (_screen    && !loadTest("screen"   )()) break;
+		if (_clipboard && !loadTest("clipboard")()) break;
 		res = 0;
 	}
 
