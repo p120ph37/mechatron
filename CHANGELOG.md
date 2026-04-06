@@ -31,20 +31,26 @@ All notable changes to this project will be documented in this file.
   shim against the documented robot-js 2.2.0 behaviour
 
 ### Changed
-- **All TypeScript consolidated in root package** — the monolithic TS codebase
-  lives in `lib/` under the root `mechatron` package; sub-packages are
-  native-binary-only carriers.  Single `tsc` build (no project references)
+- **TypeScript reorganised into subsystem subdirectories** — `lib/` now has
+  `types/`, `keyboard/`, `mouse/`, `clipboard/`, `screen/`, `window/`,
+  `process/`, `memory/` subdirectories; `tsc` compiles into `dist/`
 - **Modern API surface** — `mechatron` exports plain typed ES class constructors
   via named exports; `callableClass()` Proxy wrapping, flattened `KEY_*`
   globals, top-level `sleep`/`clock`, `Module.Segment`/`Memory.Stats`/
   `Memory.Region` nesting, and `get/setNativeBackend` stubs are removed from
   the modern surface (available via `mechatron-robot-js` for legacy consumers)
+- **Cargo workspace split** — `native-rs/` renamed to `napi/` with one
+  `cdylib` crate per subsystem plus a shared helper crate, producing separate
+  `.node` binaries per subsystem
 - `Process.getModules()` performs Module-wrapping and `_proc` attachment
-  internally instead of via a monkey-patch in the meta-package
+  internally instead of via monkey-patching from the entry point
 - Typed raw-payload interfaces replace ad-hoc `any` parameters (`RawRegion`,
   `RawRect`, `RawScreen`, `WindowLike`)
-- CI uses `npm link` for the root-package self-link (replaces manual symlink
-  that failed on Windows Git Bash)
+
+### Removed
+- Committed `dist/` output — now generated on demand by `tsc`
+- `lib/native.ts` monolithic native backend interface — replaced by
+  `lib/napi.ts` unified per-subsystem loader
 
 ## [v0.0.3] - 2026-04-06
 
