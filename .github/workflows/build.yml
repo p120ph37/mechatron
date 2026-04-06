@@ -32,9 +32,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
@@ -187,59 +187,7 @@ jobs:
           npm link mechatron -w mechatron-robot-js
           node packages/mechatron-robot-js/test/conformance.js
 
-      - name: Test annotations
-        if: always()
-        run: |
-          # Emit workflow annotations for failures and totals (visible on job pages)
-          node -e "
-            const fs = require('fs'), path = require('path');
-            const junitDir = process.env.JUNIT_DIR;
-            const covDir = process.env.COV_DIR;
-            const platform = '${{ matrix.os }}/${{ matrix.arch }}';
-
-            let totalPass = 0, totalFail = 0;
-            try {
-              const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith('.xml'));
-              for (const xf of xmlFiles) {
-                const xml = fs.readFileSync(path.join(junitDir, xf), 'utf8');
-                const re = /<testcase name=\"([^\"]+)\"[^>]*time=\"([^\"]+)\"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
-                let m;
-                while ((m = re.exec(xml)) !== null) {
-                  const name = m[1], body = m[3];
-                  const failed = body.includes('<failure');
-                  if (failed) {
-                    totalFail++;
-                    const msgMatch = body.match(/message=\"([^\"]*)\"/);
-                    const msg = msgMatch ? msgMatch[1] : 'Test failed';
-                    console.log('::error title=' + name + ' (' + platform + ')::' + msg);
-                  } else {
-                    totalPass++;
-                  }
-                }
-              }
-            } catch (_) {}
-
-            const total = totalPass + totalFail;
-            if (total > 0) {
-              console.log('::notice title=Tests (' + platform + ')::' + totalPass + '/' + total + ' passed');
-            }
-
-            try {
-              const lcov = fs.readFileSync(path.join(covDir, 'lcov.info'), 'utf8');
-              let hit = 0, lines = 0;
-              for (const line of lcov.split('\n')) {
-                if (line.startsWith('DA:')) { lines++; if (!line.endsWith(',0')) hit++; }
-              }
-              if (lines > 0) {
-                console.log('::notice title=Coverage (' + platform + ')::' + (100*hit/lines).toFixed(1) + '% line coverage (' + hit + '/' + lines + ' lines)');
-              }
-            } catch (_) {}
-          " || true
-        env:
-          JUNIT_DIR: ${{ runner.temp }}/junit
-          COV_DIR: ${{ runner.temp }}/coverage
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-${{ matrix.os }}-${{ matrix.arch }}
@@ -249,7 +197,7 @@ jobs:
             ${{ runner.temp }}/coverage/
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
           path: napi/*/mechatron-*.node
@@ -260,7 +208,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: test-results-*
           path: results

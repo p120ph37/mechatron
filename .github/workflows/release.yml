@@ -15,7 +15,7 @@ jobs:
       version: ${{ steps.parse.outputs.version }}
       prerelease: ${{ steps.parse.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-tags: true
 
@@ -97,9 +97,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
@@ -208,7 +208,7 @@ jobs:
           npm link mechatron -w mechatron-robot-js
           node packages/mechatron-robot-js/test/conformance.js
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
           path: napi/*/mechatron-*.node
@@ -221,11 +221,11 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.RELEASE_PAT }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: prebuilds-*
           merge-multiple: true
@@ -295,7 +295,7 @@ jobs:
             --notes-file /tmp/release-body.md \
             $FLAGS
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
