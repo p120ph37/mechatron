@@ -185,7 +185,30 @@ jobs:
           # Use `npm link` to replace it with the working copy (uses junctions on Windows).
           npm link
           npm link mechatron -w mechatron-robot-js
-          node packages/mechatron-robot-js/test/conformance.js
+
+          JUNIT_DIR="${RUNNER_TEMP}/junit"
+          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
+          START=$(date +%s%N 2>/dev/null || echo 0)
+          OUTPUT=$(node packages/mechatron-robot-js/test/conformance.js 2>&1) && RC=0 || RC=$?
+          END=$(date +%s%N 2>/dev/null || echo 0)
+          echo "$OUTPUT"
+          if [ "$START" != "0" ] && [ "$END" != "0" ]; then
+            ELAPSED=$(echo "scale=3; ($END - $START) / 1000000000" | bc)
+          else
+            ELAPSED="0.000"
+          fi
+
+          # Append a testcase to the existing JUnit XML (before closing </testsuite>)
+          if [ -f "$JUNIT_FILE" ]; then
+            if [ "$RC" -eq 0 ]; then
+              sed -i.bak "s|</testsuite>|<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"${ELAPSED}\"/></testsuite>|" "$JUNIT_FILE"
+            else
+              MSG=$(echo "$OUTPUT" | grep "FAIL:" | head -5 | tr '\n' ' ' | sed 's/&/\&amp;/g; s/"/\&quot;/g; s/</\&lt;/g; s/>/\&gt;/g')
+              sed -i.bak "s|</testsuite>|<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"${ELAPSED}\"><failure message=\"${MSG}\"/></testcase></testsuite>|" "$JUNIT_FILE"
+            fi
+            rm -f "${JUNIT_FILE}.bak"
+          fi
+          exit $RC
 
       - uses: actions/upload-artifact@v7
         if: always()
