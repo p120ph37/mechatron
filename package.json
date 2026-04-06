@@ -35,16 +35,17 @@
     "dist/"
   ],
   "optionalDependencies": {
-    "@mechatronic/napi-keyboard": "*",
-    "@mechatronic/napi-mouse": "*",
     "@mechatronic/napi-clipboard": "*",
-    "@mechatronic/napi-screen": "*",
-    "@mechatronic/napi-window": "*",
+    "@mechatronic/napi-keyboard": "*",
+    "@mechatronic/napi-memory": "*",
+    "@mechatronic/napi-mouse": "*",
     "@mechatronic/napi-process": "*",
-    "@mechatronic/napi-memory": "*"
+    "@mechatronic/napi-screen": "*",
+    "@mechatronic/napi-window": "*"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "c8": "^11.0.0",
     "pngjs": "^6.0.0",
     "readline-sync": "~1.4",
     "sprintf-js": "~1.1",

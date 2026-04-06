@@ -188,18 +188,18 @@ jobs:
             done
             sudo launchctl stop com.apple.tccd 2>/dev/null || true
             sleep 1
-            sudo "$X64_ABS" test/test-ci.js all
+            sudo "$X64_ABS" test/test.js all
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
+            ./node-${NODE_VERSION}-win-x86/node test/test.js all
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run --auto-servernum node test/test-ci.js all
+            xvfb-run --auto-servernum node test/test.js all
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            sudo node test/test-ci.js all
+            sudo node test/test.js all
           else
-            node test/test-ci.js all
+            node test/test.js all
           fi
 
       - name: Run mechatron-robot-js conformance tests

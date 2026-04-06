@@ -21,11 +21,21 @@
 //----------------------------------------------------------------------------//
 
 var _allArgs = process.argv.slice(2);
-var _backendIdx = _allArgs.indexOf("--backend");
-var _backendArg = (_backendIdx >= 0) ? _allArgs[_backendIdx + 1] : null;
-var _testArgs = (_backendIdx >= 0) ? _allArgs.filter(function (_, i) {
-	return i !== _backendIdx && i !== _backendIdx + 1;
-}) : _allArgs.slice();
+
+// Parse named flags: --backend <val>, --junit <path>
+function extractFlag(args, flag) {
+	var idx = args.indexOf(flag);
+	if (idx < 0) return { value: null, rest: args };
+	var val = args[idx + 1] || null;
+	var rest = args.filter(function (_, i) { return i !== idx && i !== idx + 1; });
+	return { value: val, rest: rest };
+}
+
+var _b = extractFlag(_allArgs, "--backend");
+var _backendArg = _b.value;
+var _j = extractFlag(_b.rest, "--junit");
+var _junitPath = _j.value;
+var _testArgs = _j.rest;
 
 // When no --backend specified, run as dual-backend coordinator
 if (!_backendArg) {
@@ -58,6 +68,7 @@ if (!_backendArg) {
 			process.stdout.write("\n>>> Running tests with " + _be.toUpperCase() + " backend...\n");
 
 			var _childArgs = [__filename].concat(_testArgs).concat(["--backend", _be]);
+			if (_junitPath) _childArgs.push("--junit", _junitPath.replace(/\.xml$/, "-" + _be + ".xml"));
 			var _result = _child_process.spawnSync(process.execPath, _childArgs, {
 				stdio: "inherit",
 				env: process.env,
@@ -233,23 +244,76 @@ function main() {
 	}
 
 	var failed = false;
+	var results = [];
 	for (var i = 0; i < tests.length; ++i) {
+		var t0 = performance.now();
+		var err = null;
 		try {
 			tests[i][1]();
 		} catch (e) {
 			log("  FAILED: " + tests[i][0] + " - " + e.message + "\n");
 			if (e.stack) log("  " + e.stack.split("\n").slice(0, 3).join("\n  ") + "\n");
 			failed = true;
+			err = e;
 		}
+		results.push({
+			name: tests[i][0],
+			time: ((performance.now() - t0) / 1000).toFixed(3),
+			error: err,
+		});
 	}
 
 	log("\n------------------------------\n");
 	if (failed) {
 		log("SOME TESTS FAILED\n");
-		return 2;
+	} else {
+		log("ALL TESTS PASSED\n\n");
 	}
-	log("ALL TESTS PASSED\n\n");
-	return 0;
+
+	// Write JUnit XML if requested
+	if (_junitPath) {
+		writeJUnit(_junitPath, results);
+	}
+
+	return failed ? 2 : 0;
+}
+
+function writeJUnit(filePath, results) {
+	var fs = require("fs");
+	var path = require("path");
+	var passed = results.filter(function (r) { return !r.error; }).length;
+	var failures = results.length - passed;
+	var totalTime = results.reduce(function (s, r) { return s + parseFloat(r.time); }, 0).toFixed(3);
+
+	var xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+	xml += '<testsuites tests="' + results.length + '" failures="' + failures + '" time="' + totalTime + '">\n';
+	xml += '  <testsuite name="mechatron" tests="' + results.length + '" failures="' + failures + '" time="' + totalTime + '">\n';
+	for (var i = 0; i < results.length; ++i) {
+		var r = results[i];
+		xml += '    <testcase name="' + escapeXml(r.name) + '" classname="mechatron" time="' + r.time + '"';
+		if (r.error) {
+			xml += '>\n';
+			xml += '      <failure message="' + escapeXml(r.error.message) + '">';
+			xml += escapeXml(r.error.stack || r.error.message);
+			xml += '</failure>\n';
+			xml += '    </testcase>\n';
+		} else {
+			xml += '/>\n';
+		}
+	}
+	xml += '  </testsuite>\n';
+	xml += '</testsuites>\n';
+
+	try {
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	} catch (_) {}
+	fs.writeFileSync(filePath, xml);
+	log("JUnit XML written to " + filePath + "\n");
+}
+
+function escapeXml(s) {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 process.exitCode = main();

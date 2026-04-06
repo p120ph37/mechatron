@@ -127,8 +127,15 @@ jobs:
 
       - name: Run tests
         run: |
+          JUNIT_DIR="${RUNNER_TEMP}/junit"
+          mkdir -p "$JUNIT_DIR"
           TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
+          C8="./node_modules/.bin/c8"
+          C8_ARGS="--reporter text --reporter lcov --reports-dir ${RUNNER_TEMP}/coverage"
+
           run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
             # Cross-compiled x64 on arm64 macOS — download x64 node to run tests
             NODE_VERSION=$(node -v)
@@ -142,18 +149,24 @@ jobs:
             done
             sudo launchctl stop com.apple.tccd 2>/dev/null || true
             sleep 1
-            run_and_log sudo "$X64_ABS" test/test.js all
+            # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"
+            # Generate coverage report from raw V8 data
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            run_and_log xvfb-run --auto-servernum node test/test.js all
+            run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            run_and_log sudo node test/test.js all
+            run_and_log sudo $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           else
-            run_and_log node test/test.js all
+            run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           fi
 
       - name: Run mechatron-robot-js conformance tests
@@ -165,11 +178,79 @@ jobs:
           npm link mechatron -w mechatron-robot-js
           node packages/mechatron-robot-js/test/conformance.js
 
+      - name: Test summary
+        if: always()
+        run: |
+          JUNIT_DIR="${RUNNER_TEMP}/junit"
+          COV_DIR="${RUNNER_TEMP}/coverage"
+
+          echo "## Test Results — ${{ matrix.os }} / ${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Parse JUnit XML for test details (lightweight — no extra deps)
+          for f in "$JUNIT_DIR"/*.xml; do
+            [ -f "$f" ] || continue
+            node -e "
+              const fs = require('fs');
+              const xml = fs.readFileSync('$f', 'utf8');
+              const tests = xml.match(/<testcase[^>]*>/g) || [];
+              const failures = xml.match(/<failure /g) || [];
+              const total = tests.length, fail = failures.length, pass = total - fail;
+              let md = '| Test | Status | Time |\n|------|--------|------|\n';
+              const re = /<testcase name=\"([^\"]+)\"[^>]*time=\"([^\"]+)\"[^>]*(\/>|>[\s\S]*?<\/testcase>)/g;
+              let m;
+              while ((m = re.exec(xml)) !== null) {
+                const name = m[1], time = m[2], body = m[3];
+                const ok = !body.includes('<failure');
+                md += '| ' + name + ' | ' + (ok ? ':white_check_mark: Pass' : ':x: Fail') + ' | ' + time + 's |\n';
+              }
+              md += '\n**' + pass + '/' + total + ' passed' + (fail > 0 ? ', ' + fail + ' failed' : '') + '**\n';
+              console.log(md);
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "_No test results found_" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          # Append coverage summary if available
+          if [ -f "$COV_DIR/lcov.info" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Code Coverage" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            # Parse lcov.info for per-file line coverage
+            node -e "
+              const fs = require('fs');
+              const lcov = fs.readFileSync('$COV_DIR/lcov.info', 'utf8');
+              const files = {};
+              let cur = null;
+              for (const line of lcov.split('\n')) {
+                if (line.startsWith('SF:')) {
+                  cur = line.slice(3).replace(/^.*\/dist\//, 'dist/');
+                  files[cur] = { hit: 0, total: 0 };
+                } else if (line.startsWith('DA:') && cur) {
+                  files[cur].total++;
+                  if (!line.endsWith(',0')) files[cur].hit++;
+                }
+              }
+              let totalHit = 0, totalLines = 0;
+              let md = '| File | Lines | Coverage |\n|------|------:|----------|\n';
+              for (const [f, {hit, total}] of Object.entries(files).sort()) {
+                if (total === 0) continue;
+                const pct = (100 * hit / total).toFixed(1);
+                md += '| ' + f + ' | ' + hit + '/' + total + ' | ' + pct + '% |\n';
+                totalHit += hit; totalLines += total;
+              }
+              const totalPct = totalLines > 0 ? (100 * totalHit / totalLines).toFixed(1) : '0.0';
+              md += '| **Total** | **' + totalHit + '/' + totalLines + '** | **' + totalPct + '%** |\n';
+              console.log(md);
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "_Coverage report unavailable_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-log-${{ matrix.os }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/test-output.txt
+          name: test-results-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/test-output.txt
+            ${{ runner.temp }}/junit/
+            ${{ runner.temp }}/coverage/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
