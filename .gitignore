@@ -5,10 +5,9 @@ prebuilds/
 build-*/
 node_modules/
 .DS_STORE
-native-rs/target/
-native-rs/*.node
+napi/target/
+napi/*.node
 dist/
-packages/*/dist/
 *.tsbuildinfo
-packages/mechatron-*/mechatron-*.node
-native-rs/*/mechatron-*.node
+napi/*/mechatron-*.node
+packages/@mechatronic/*/mechatron-*.node

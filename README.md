@@ -20,24 +20,33 @@ Prebuilt binaries are included for:
 ## Install
 
 ```sh
-npm install mechatron          # all subsystems (meta-package)
-npm install mechatron-keyboard # only keyboard — smaller install, no AV triggers
+npm install mechatron   # all subsystems (native modules are optionalDependencies)
 ```
 
-### Packages
+To omit specific native subsystems (e.g. to avoid AV false positives from the
+memory-inspection binary):
 
-| Package | Description |
-|---------|-------------|
-| `mechatron` | Meta-package — re-exports all subsystems |
-| `mechatron-types` | Shared data types (Point, Size, Bounds, Color, Range, Hash, Image, Timer) |
-| `mechatron-keyboard` | Keyboard simulation and state |
-| `mechatron-mouse` | Mouse simulation and state |
-| `mechatron-clipboard` | Clipboard read/write (text + image) |
-| `mechatron-screen` | Screen enumeration and capture |
-| `mechatron-window` | Window enumeration and management |
-| `mechatron-process` | Process enumeration and inspection |
-| `mechatron-memory` | Process memory read/write/search |
-| `mechatron-robot-js` | Drop-in robot-js 2.2.0 replacement (legacy API surface) |
+```sh
+npm install mechatron --omit=optional                 # skip all native modules
+npm install mechatron @mechatronic/napi-keyboard       # only keyboard native
+npm install mechatron @mechatronic/napi-{keyboard,mouse,screen}  # pick and choose
+```
+
+### Native Packages
+
+All TypeScript lives in `mechatron`.  Native NAPI binaries are split into
+separately-installable optional packages under `@mechatronic/`:
+
+| Package | Subsystem |
+|---------|-----------|
+| `@mechatronic/napi-keyboard` | Keyboard simulation and state |
+| `@mechatronic/napi-mouse` | Mouse simulation and state |
+| `@mechatronic/napi-clipboard` | Clipboard read/write (text + image) |
+| `@mechatronic/napi-screen` | Screen enumeration and capture |
+| `@mechatronic/napi-window` | Window enumeration and management |
+| `@mechatronic/napi-process` | Process enumeration and inspection |
+| `@mechatronic/napi-memory` | Process memory read/write/search |
+| **`mechatron-robot-js`** | Drop-in robot-js 2.2.0 replacement (legacy API) |
 
 ## Usage
 
@@ -99,20 +108,20 @@ Or depend on `mechatron-robot-js` directly — it provides the full robot-js
 
 ## Architecture
 
-The codebase is an npm workspace of nine packages.  The native backend is a
-Cargo workspace of seven per-subsystem `cdylib` crates (`native-rs/`) built
-with napi-rs, each exposing minimal FFI — platform syscall wrappers with no
-business logic.  The TypeScript layer in each `packages/mechatron-*/` package
-owns all API logic: argument validation, key constants, keyboard compile, and
-state iteration.  `tsc --build` compiles all packages via project references.
+All TypeScript lives in the root `mechatron` package under `lib/`.  The native
+backend is a Cargo workspace (`napi/`) of seven per-subsystem `cdylib` crates
+built with napi-rs, each exposing minimal FFI — platform syscall wrappers with
+no business logic.  At runtime, `lib/native.ts` resolves each subsystem's
+`.node` binary from its `@mechatronic/napi-*` optional dependency, falling back
+to `napi/<sub>/` for the development layout.
 
 ## Build from Source
 
 Requires: Rust toolchain, Node.js 18+
 
 ```sh
-cd native-rs && cargo build --release  # build all native crates
-npx tsc --build                        # compile TypeScript
+cd napi && cargo build --release  # build all native crates
+npx tsc                           # compile TypeScript
 ```
 
 ## Test

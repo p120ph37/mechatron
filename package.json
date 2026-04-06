@@ -5,19 +5,18 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "workspaces": [
-    "packages/mechatron-types",
-    "packages/mechatron-keyboard",
-    "packages/mechatron-mouse",
-    "packages/mechatron-clipboard",
-    "packages/mechatron-screen",
-    "packages/mechatron-window",
-    "packages/mechatron-process",
-    "packages/mechatron-memory",
+    "packages/@mechatronic/napi-keyboard",
+    "packages/@mechatronic/napi-mouse",
+    "packages/@mechatronic/napi-clipboard",
+    "packages/@mechatronic/napi-screen",
+    "packages/@mechatronic/napi-window",
+    "packages/@mechatronic/napi-process",
+    "packages/@mechatronic/napi-memory",
     "packages/mechatron-robot-js"
   ],
   "scripts": {
-    "build:native": "cd native-rs && cargo build --release",
-    "build": "tsc --build",
+    "build:native": "cd napi && cargo build --release",
+    "build": "tsc",
     "test": "node test/test.js types timer",
     "test:ci": "node test/test.js types"
   },
@@ -35,15 +34,14 @@
   "files": [
     "dist/"
   ],
-  "dependencies": {
-    "mechatron-types": "*",
-    "mechatron-keyboard": "*",
-    "mechatron-mouse": "*",
-    "mechatron-clipboard": "*",
-    "mechatron-screen": "*",
-    "mechatron-window": "*",
-    "mechatron-process": "*",
-    "mechatron-memory": "*"
+  "optionalDependencies": {
+    "@mechatronic/napi-keyboard": "*",
+    "@mechatronic/napi-mouse": "*",
+    "@mechatronic/napi-clipboard": "*",
+    "@mechatronic/napi-screen": "*",
+    "@mechatronic/napi-window": "*",
+    "@mechatronic/napi-process": "*",
+    "@mechatronic/napi-memory": "*"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

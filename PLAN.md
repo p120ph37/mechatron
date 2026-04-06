@@ -47,8 +47,8 @@ Replaced the C++ native layer with Rust using `napi-rs`, maintaining full
 behavioral parity with the original robot-js documented APIs.
 
 ### 2a. Rust Native Backend
-- `native-rs/` — Cargo workspace with napi-rs v2 `#[napi]` attribute macros
-- `native-rs/src/` — Rust source modules: `keyboard.rs`, `mouse.rs`,
+- `napi/` — Cargo workspace with napi-rs v2 `#[napi]` attribute macros
+- `napi/src/` — Rust source modules: `keyboard.rs`, `mouse.rs`,
   `clipboard.rs`, `screen.rs`, `window.rs`, `process.rs`, `memory.rs`,
   `mach.rs` (shared macOS helpers), `x11.rs` (shared Linux helpers)
 - Platform-specific code via `#[cfg(target_os = "...")]` guards
@@ -165,35 +165,35 @@ Phase 4 is executed in two parts:
 
 ### 4a. Modular Split (COMPLETE)
 
-#### npm Workspace Layout
-- `packages/mechatron-types` — pure data types (Point, Size, Bounds, Color,
-  Range, Hash, Image, Timer); no native dependency
-- `packages/mechatron-keyboard`, `-mouse`, `-clipboard`, `-screen`, `-window`,
-  `-process`, `-memory` — each wraps its own subsystem and ships its own
-  per-subsystem `.node` prebuilt
-- `packages/mechatron-robot-js` — thin compatibility shim (phase 3)
-- Root `mechatron` package — meta-package re-exporting all subsystems via
-  modern typed named exports (legacy callers use `mechatron-robot-js`)
+#### Package Layout
+- Root `mechatron` package — all TypeScript lives in `lib/`, exports the full
+  modern API via named exports
+- `packages/@mechatronic/napi-keyboard`, `napi-mouse`, `napi-clipboard`,
+  `napi-screen`, `napi-window`, `napi-process`, `napi-memory` — native-only
+  packages containing per-subsystem `.node` prebuilt binaries, listed as
+  `optionalDependencies` of `mechatron`
+- `packages/mechatron-robot-js` — compatibility shim (phase 3)
+- `lib/napi.ts` — unified native loader: tries `@mechatronic/napi-<sub>`
+  first, falls back to `napi/<sub>/` for dev layout
 
 #### Cargo Workspace Layout
-- `native-rs/Cargo.toml` — workspace root
-- `native-rs/shared/` — internal lib crate for `x11.rs` / `mach.rs` helpers
-- `native-rs/{keyboard,mouse,clipboard,screen,window,process,memory}/` —
+- `napi/Cargo.toml` — workspace root
+- `napi/shared/` — internal lib crate for `x11.rs` / `mach.rs` helpers
+- `napi/{keyboard,mouse,clipboard,screen,window,process,memory}/` —
   one `cdylib` crate per subsystem, each including its source via
-  `#[path = "../../src/<module>.rs"]` from the shared `native-rs/src/` tree
+  `#[path = "../../src/<module>.rs"]` from the shared `napi/src/` tree
 - CI builds all seven crates and distributes each `.node` into the matching
-  `packages/mechatron-<sub>/` directory
+  `packages/@mechatronic/napi-<sub>/` directory
 
 #### Build System
-- `tsc --build` is the single canonical TypeScript build path; bun was dropped
-- TypeScript project references link all packages for incremental builds
-- `dist/` is no longer committed — generated on demand by `tsc --build`
+- `tsc` compiles all TypeScript from `lib/` into `dist/` (single tsconfig,
+  no project references); bun was dropped
+- `dist/` is not committed — generated on demand by `tsc`
 
 #### Release Flow
-- Root version bump via `npm version` is applied across all nine workspaces
-- Cross-package dependencies are rewritten to the exact release version at
-  publish time
-- Publish order: types → subsystems → meta-package → robot-js shim
+- Root version bump via `npm version` is applied across all workspaces
+- `optionalDependencies` are pinned to the exact release version at publish
+- Publish order: native packages → main package → robot-js shim
 
 ### 4b. API Modernization (COMPLETE)
 - `*Async` Promise-returning variants for potentially-blocking operations:
@@ -215,17 +215,17 @@ Phase 4 is executed in two parts:
 
 ### Published Package Matrix
 
-| Package | Capabilities |
-|---------|-------------|
-| `mechatron` | Meta-package / re-exports all |
-| `mechatron-keyboard` | Keyboard simulation and state |
-| `mechatron-mouse` | Mouse simulation and state |
-| `mechatron-clipboard` | Clipboard read/write (text + image) |
-| `mechatron-screen` | Screen enumeration and capture |
-| `mechatron-window` | Window enumeration and management |
-| `mechatron-process` | Process enumeration and inspection |
-| `mechatron-memory` | Process memory read/write/search |
-| `mechatron-types` | Shared types (Point, Bounds, Image, etc.) |
+| Package | Contents |
+|---------|---------|
+| `mechatron` | All TypeScript + API exports |
+| `@mechatronic/napi-keyboard` | Native binary: keyboard |
+| `@mechatronic/napi-mouse` | Native binary: mouse |
+| `@mechatronic/napi-clipboard` | Native binary: clipboard |
+| `@mechatronic/napi-screen` | Native binary: screen |
+| `@mechatronic/napi-window` | Native binary: window |
+| `@mechatronic/napi-process` | Native binary: process |
+| `@mechatronic/napi-memory` | Native binary: memory |
+| `mechatron-robot-js` | Legacy robot-js 2.2.0 compat shim |
 
 ### Motivation for Split
 - **AV false positives**: Memory inspection (read/write foreign process memory,
@@ -245,5 +245,5 @@ Phase 4 is executed in two parts:
 | 1 | **Complete** | C++ NAPI port, flat backend, CI on 6 platforms |
 | 2 | **Complete** | Rust NAPI rewrite via napi-rs, full robot-js API parity |
 | 3 | **Complete** | mechatron-robot-js compatibility shim |
-| 4a | **Complete** | Modular package split (9 npm packages + 7 per-subsystem Rust crates) |
+| 4a | **Complete** | Segmented native packages (`@mechatronic/napi-*` as optionalDependencies) |
 | 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |

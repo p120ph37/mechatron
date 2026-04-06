@@ -1,52 +1,50 @@
 /**
  * mechatron — modern desktop automation API.
  *
- * This meta-package re-exports the full modern API of every subsystem package
- * (`mechatron-keyboard`, `-mouse`, `-clipboard`, `-screen`, `-window`,
- * `-process`, `-memory`, and the shared `-types`).  Consumers that only need
- * one capability should depend on that subsystem directly to minimise install
- * size and native-binary surface area.
+ * All subsystem TypeScript lives in this package.  Native binaries are
+ * delivered via optional `@mechatronic/napi-*` packages — install only the
+ * subsystems you need, or omit AV-sensitive ones like `napi-memory`.
  *
- * The API uses ordinary ES class constructors (no `callableClass()` proxy
- * magic), named exports throughout, and provides `*Async` variants for
- * operations that may block (screen capture, process / window enumeration,
- * memory scanning, clipboard IO).  Legacy robot-js 2.2.0 callers should use
- * `mechatron-robot-js`, which layers the historical shape on top of this
- * module.
+ * Legacy robot-js 2.2.0 callers should use `mechatron-robot-js`, which
+ * layers the historical shape on top of this module.
  */
 
 // Data types
-export { Point, Size, Bounds, Color, Range, Hash, Image, Timer } from "mechatron-types";
+export { Point, Size, Bounds, Color, Range, Hash, Image, Timer } from "./types";
 
 // Keyboard
-export { Keyboard, KEYS, getAllKeys, getKeyNames, getAllKeyConstants } from "mechatron-keyboard";
-export type { KeyTable } from "mechatron-keyboard";
+export { Keyboard, KEYS, getAllKeys, getKeyNames, getAllKeyConstants } from "./keyboard";
+export type { KeyTable } from "./keyboard";
 
 // Mouse
 export {
   Mouse,
   BUTTON_LEFT, BUTTON_MID, BUTTON_MIDDLE, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2,
-} from "mechatron-mouse";
+} from "./mouse";
 
 // Clipboard
-export { Clipboard } from "mechatron-clipboard";
+export { Clipboard } from "./clipboard";
 
 // Screen
-export { Screen } from "mechatron-screen";
-export type { WindowLike } from "mechatron-screen";
+export { Screen } from "./screen";
+export type { WindowLike } from "./screen";
 
 // Window
-export { Window } from "mechatron-window";
+export { Window } from "./window";
 
 // Process / Module
-export { Process, Module, Segment } from "mechatron-process";
-export type { ModuleData } from "mechatron-process";
+export { Process, Module, Segment } from "./process";
+export type { ModuleData } from "./process";
 
 // Memory
 export {
   Memory, Stats, Region,
   MEMORY_DEFAULT, MEMORY_SKIP_ERRORS, MEMORY_AUTO_ACCESS,
-} from "mechatron-memory";
+} from "./memory";
+
+// Native availability checking
+export { isAvailable } from "./napi";
+export type { Subsystem } from "./napi";
 
 /** Version of the mechatron meta-package. */
 export const VERSION = "0.0.0";

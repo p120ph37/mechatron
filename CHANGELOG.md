@@ -5,22 +5,23 @@ All notable changes to this project will be documented in this file.
 ## [v0.0.4]
 
 ### Added
-- **Modular packages** — split the monolithic `mechatron` package into nine
-  independently-installable npm packages (`mechatron-types`, `-keyboard`,
-  `-mouse`, `-clipboard`, `-screen`, `-window`, `-process`, `-memory`,
-  `-robot-js`) backed by a Cargo workspace of seven per-subsystem native crates
-  sharing a common Rust source tree
-- **npm workspaces + TypeScript project references** — `tsc --build` compiles
-  all packages in dependency order; bun transpile path removed
+- **Segmented native packages** — native NAPI binaries are delivered via
+  `@mechatronic/napi-keyboard`, `napi-mouse`, `napi-clipboard`, `napi-screen`,
+  `napi-window`, `napi-process`, `napi-memory` as `optionalDependencies`.
+  Users can omit specific subsystems (e.g. memory) to avoid AV false positives,
+  or skip all native modules for future Bun FFI support
+- **Unified native loader** (`lib/native.ts`) — `getNative("keyboard")` /
+  `isAvailable("keyboard")` resolves native binaries from `@mechatronic/napi-*`
+  packages first, falls back to dev layout (`napi/<sub>/`), and returns a
+  clear error when absent
 - **Async API variants** — `*Async` Promise-returning methods for operations
   that may block: `Screen.grabScreenAsync`/`synchronizeAsync`,
   `Process.getListAsync`/`getModulesAsync`, `Window.getListAsync`,
   `Clipboard.{get,set}{Text,Image}Async`, `Memory.{getRegions,readData,
   writeData,find}Async` (currently `queueMicrotask`-wrapped; can migrate to
   true `napi::Task` worker threads without changing the public surface)
-- **`KEYS` record** — typed `Readonly<KeyTable>` in `mechatron-keyboard`,
-  re-exported by the meta-package (replaces flattened `KEY_*` top-level
-  globals)
+- **`KEYS` record** — typed `Readonly<KeyTable>` (replaces flattened `KEY_*`
+  top-level globals)
 - **`mechatron-robot-js` compatibility shim** — full legacy robot-js 2.2.0
   surface: `callableClass()` Proxy wrapping (constructor-without-`new`),
   `ROBOT_VERSION` constants, top-level `sleep`/`clock`, `getNativeBackend`/
@@ -30,20 +31,20 @@ All notable changes to this project will be documented in this file.
   shim against the documented robot-js 2.2.0 behaviour
 
 ### Changed
-- **Modern meta-package API** — `mechatron` now exports plain typed ES class
-  constructors via named exports; `callableClass()` Proxy wrapping, flattened
-  `KEY_*` globals, top-level `sleep`/`clock`, `Module.Segment`/`Memory.Stats`/
-  `Memory.Region` nesting, and `get/setNativeBackend` stubs are all removed
-  from the modern surface (available via `mechatron-robot-js` for legacy
-  consumers)
-- `Process.getModules()` now performs the Module-wrapping and `_proc`
-  attachment internally instead of via a monkey-patch in the meta-package
+- **All TypeScript consolidated in root package** — the monolithic TS codebase
+  lives in `lib/` under the root `mechatron` package; sub-packages are
+  native-binary-only carriers.  Single `tsc` build (no project references)
+- **Modern API surface** — `mechatron` exports plain typed ES class constructors
+  via named exports; `callableClass()` Proxy wrapping, flattened `KEY_*`
+  globals, top-level `sleep`/`clock`, `Module.Segment`/`Memory.Stats`/
+  `Memory.Region` nesting, and `get/setNativeBackend` stubs are removed from
+  the modern surface (available via `mechatron-robot-js` for legacy consumers)
+- `Process.getModules()` performs Module-wrapping and `_proc` attachment
+  internally instead of via a monkey-patch in the meta-package
 - Typed raw-payload interfaces replace ad-hoc `any` parameters (`RawRegion`,
   `RawRect`, `RawScreen`, `WindowLike`)
 - CI uses `npm link` for the root-package self-link (replaces manual symlink
   that failed on Windows Git Bash)
-- `test/test-ci.js` updated for modern API: `new Class(...)` constructors,
-  `KEYS.KEY_*` lookups, mach VM probe uses `new Memory(p)`
 
 ## [v0.0.3] - 2026-04-06
 
@@ -81,7 +82,7 @@ All notable changes to this project will be documented in this file.
   `keyboard_getKeyState(keycode)`, TS iterates the platform key list
 - Rust native layer reduced to minimal FFI: thin `#[napi]` wrappers over
   platform syscalls, no business logic
-- Shared macOS Mach helpers extracted into `native-rs/src/mach.rs` —
+- Shared macOS Mach helpers extracted into `napi/src/mach.rs` —
   deduplicates `get_task`, `process_exists`, and Mach extern declarations
   previously copy-pasted across `process.rs` and `memory.rs`
 - `Keyboard.ts` modifier key handling: 4 copy-paste switch cases replaced with
@@ -96,7 +97,7 @@ All notable changes to this project will be documented in this file.
 ## [v0.0.2] - 2026-04-03
 
 ### Added
-- Rust native backend (`native-rs/`) via napi-rs, replacing C++ as the default
+- Rust native backend (`napi/`) via napi-rs, replacing C++ as the default
   native layer while maintaining full behavioral parity with the robot-js
   documented APIs
 - Prebuilt Rust `.node` binaries for all 6 platform/arch targets (linux-x64,
@@ -124,7 +125,7 @@ All notable changes to this project will be documented in this file.
 - Rust is now the default native backend; C++ is retained as fallback
 - `Clipboard.getImage()` defers `image.destroy()` until after the native read
   succeeds, preserving the existing image on failure (per Robot documentation)
-- `package.json` `files` field includes `native-rs/*.node` for prebuilt Rust
+- `package.json` `files` field includes `napi/*.node` for prebuilt Rust
   binaries
 
 ### Not Implemented (intentional)

@@ -1,14 +1,17 @@
 {
-  "files": [],
-  "references": [
-    { "path": "packages/mechatron-types" },
-    { "path": "packages/mechatron-keyboard" },
-    { "path": "packages/mechatron-mouse" },
-    { "path": "packages/mechatron-clipboard" },
-    { "path": "packages/mechatron-screen" },
-    { "path": "packages/mechatron-window" },
-    { "path": "packages/mechatron-process" },
-    { "path": "packages/mechatron-memory" },
-    { "path": "tsconfig.meta.json" }
-  ]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node10",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "outDir": "./dist",
+    "rootDir": "./lib",
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  "include": ["lib/**/*.ts"]
 }

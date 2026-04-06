@@ -81,7 +81,7 @@ jobs:
       - name: Build Rust napi modules
         run: |
           SUBS="keyboard mouse clipboard screen window process memory"
-          cd native-rs
+          cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CARGO_TARGET=i686-pc-windows-msvc
             cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
@@ -110,20 +110,20 @@ jobs:
           for s in $SUBS; do
             SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
             DST_NAME="mechatron-${s}.${TRIPLE}.node"
-            # Copy into native-rs/<sub>/ (for dev layout & artifact upload)
+            # Copy into napi/<sub>/ (for dev layout & artifact upload)
             cp "$SRC" "$s/$DST_NAME"
-            # Copy into packages/mechatron-<sub>/ (for published layout & tests)
-            cp "$SRC" "../packages/mechatron-${s}/$DST_NAME"
+            # Copy into packages/@mechatronic/napi-<sub>/ (for published layout)
+            cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
             # Re-sign macOS binaries (strip="symbols" invalidates ad-hoc signature;
             # task_for_pid requires a valid signature even when running as root)
             if [ "${{ runner.os }}" = "macOS" ]; then
               codesign --force --sign - "$s/$DST_NAME"
-              codesign --force --sign - "../packages/mechatron-${s}/$DST_NAME"
+              codesign --force --sign - "../packages/@mechatronic/napi-${s}/$DST_NAME"
             fi
           done
 
-      - name: Build TypeScript (all packages)
-        run: npx tsc --build
+      - name: Build TypeScript
+        run: npx tsc
 
       - name: Run tests
         run: |
@@ -175,5 +175,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: native-rs/*/mechatron-*.node
+          path: napi/*/mechatron-*.node
           if-no-files-found: error

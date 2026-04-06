@@ -1,0 +1,14 @@
+{
+  "name": "@mechatronic/napi-memory",
+  "version": "0.0.0",
+  "description": "Native NAPI binary for mechatron memory subsystem",
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64", "ia32"],
+  "files": ["*.node"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p120ph37/mechatron.git",
+    "directory": "packages/@mechatronic/napi-memory"
+  }
+}

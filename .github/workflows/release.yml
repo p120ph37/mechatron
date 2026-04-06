@@ -139,7 +139,7 @@ jobs:
       - name: Build Rust napi modules
         run: |
           SUBS="keyboard mouse clipboard screen window process memory"
-          cd native-rs
+          cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CARGO_TARGET=i686-pc-windows-msvc
             cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
@@ -165,15 +165,15 @@ jobs:
             SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
             DST_NAME="mechatron-${s}.${TRIPLE}.node"
             cp "$SRC" "$s/$DST_NAME"
-            cp "$SRC" "../packages/mechatron-${s}/$DST_NAME"
+            cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
             if [ "${{ runner.os }}" = "macOS" ]; then
               codesign --force --sign - "$s/$DST_NAME"
-              codesign --force --sign - "../packages/mechatron-${s}/$DST_NAME"
+              codesign --force --sign - "../packages/@mechatronic/napi-${s}/$DST_NAME"
             fi
           done
 
-      - name: Build TypeScript (all packages)
-        run: npx tsc --build
+      - name: Build TypeScript
+        run: npx tsc
 
       - name: Run tests
         run: |
@@ -211,7 +211,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: native-rs/*/mechatron-*.node
+          path: napi/*/mechatron-*.node
           if-no-files-found: error
 
   release:
@@ -229,44 +229,43 @@ jobs:
         with:
           pattern: prebuilds-*
           merge-multiple: true
-          path: native-rs
+          path: napi
 
       - name: Distribute native modules to packages
         run: |
           for sub in keyboard mouse clipboard screen window process memory; do
-            cp native-rs/$sub/mechatron-$sub.*.node packages/mechatron-$sub/ 2>/dev/null || true
+            cp napi/$sub/mechatron-$sub.*.node packages/@mechatronic/napi-$sub/ 2>/dev/null || true
           done
 
       - name: Set package versions (all workspaces)
         run: |
           VERSION="${{ needs.detect-release.outputs.version }}"
           SEMVER="${VERSION#v}"
-          # Root meta-package
+          # Root package
           npm version "$SEMVER" --no-git-tag-version
-          # Sub-packages
-          for pkg in packages/mechatron-types packages/mechatron-keyboard packages/mechatron-mouse \
-                     packages/mechatron-clipboard packages/mechatron-screen packages/mechatron-window \
-                     packages/mechatron-process packages/mechatron-memory packages/mechatron-robot-js; do
+          # Native packages + robot-js shim
+          for pkg in packages/@mechatronic/napi-keyboard packages/@mechatronic/napi-mouse \
+                     packages/@mechatronic/napi-clipboard packages/@mechatronic/napi-screen \
+                     packages/@mechatronic/napi-window packages/@mechatronic/napi-process \
+                     packages/@mechatronic/napi-memory packages/mechatron-robot-js; do
             (cd "$pkg" && npm version "$SEMVER" --no-git-tag-version)
           done
-          # Pin cross-package dependencies to exact version
+          # Pin optionalDependencies and robot-js dep to exact version
           node -e "
             const fs = require('fs');
             const V = '$SEMVER';
             const root = JSON.parse(fs.readFileSync('package.json'));
-            for (const k of Object.keys(root.dependencies || {})) {
-              if (k.startsWith('mechatron-')) root.dependencies[k] = V;
+            for (const k of Object.keys(root.optionalDependencies || {})) {
+              if (k.startsWith('@mechatronic/')) root.optionalDependencies[k] = V;
             }
             fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
-            const subs = ['types','keyboard','mouse','clipboard','screen','window','process','memory','robot-js'];
-            for (const s of subs) {
-              const p = 'packages/mechatron-' + s + '/package.json';
-              const pkg = JSON.parse(fs.readFileSync(p));
-              for (const k of Object.keys(pkg.dependencies || {})) {
-                if (k === 'mechatron' || k.startsWith('mechatron-')) pkg.dependencies[k] = V;
-              }
-              fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+            // Pin mechatron dep in robot-js
+            const rjp = 'packages/mechatron-robot-js/package.json';
+            const rj = JSON.parse(fs.readFileSync(rjp));
+            for (const k of Object.keys(rj.dependencies || {})) {
+              if (k === 'mechatron') rj.dependencies[k] = V;
             }
+            fs.writeFileSync(rjp, JSON.stringify(rj, null, 2) + '\n');
           "
 
       - name: Extract changelog entry
@@ -304,7 +303,7 @@ jobs:
       - name: Install dependencies and build
         run: |
           npm ci --ignore-scripts
-          npx tsc --build
+          npx tsc
 
       - name: Publish all packages to npm
         run: |
@@ -312,11 +311,11 @@ jobs:
           if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
             TAG="next"
           fi
-          # Publish in dependency order: types first, then subsystems, then meta, then shim
-          for sub in types keyboard mouse clipboard screen window process memory; do
-            (cd "packages/mechatron-$sub" && npm publish --access public --tag "$TAG")
+          # Publish native packages first, then main package, then shim
+          for sub in keyboard mouse clipboard screen window process memory; do
+            (cd "packages/@mechatronic/napi-$sub" && npm publish --access public --tag "$TAG")
           done
-          # Meta-package (root)
+          # Main package (all TS)
           npm publish --access public --tag "$TAG"
           # Compatibility shim
           (cd packages/mechatron-robot-js && npm publish --access public --tag "$TAG")
