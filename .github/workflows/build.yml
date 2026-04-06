@@ -152,6 +152,8 @@ jobs:
             # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
             export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
             run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"
+            # Fix ownership of files created under sudo so upload-artifact can read them
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
             # Generate coverage report from raw V8 data
             $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
@@ -164,7 +166,11 @@ jobs:
           elif [ "${{ runner.os }}" = "Linux" ]; then
             run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            run_and_log sudo $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log sudo -E node test/test.js all --junit "$JUNIT_FILE"
+            # Fix ownership of files created under sudo so upload-artifact can read them
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src dist/ 2>/dev/null || true
           else
             run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           fi
@@ -184,45 +190,56 @@ jobs:
           JUNIT_DIR="${RUNNER_TEMP}/junit"
           COV_DIR="${RUNNER_TEMP}/coverage"
 
-          echo "## Test Results — ${{ matrix.os }} / ${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          # Write step summary and emit workflow annotations
+          node -e "
+            const fs = require('fs'), path = require('path');
+            const junitDir = process.env.JUNIT_DIR;
+            const covDir = process.env.COV_DIR;
+            const platform = '${{ matrix.os }}/${{ matrix.arch }}';
+            let summary = '## Test Results — ' + platform + '\n\n';
 
-          # Parse JUnit XML for test details (lightweight — no extra deps)
-          for f in "$JUNIT_DIR"/*.xml; do
-            [ -f "$f" ] || continue
-            node -e "
-              const fs = require('fs');
-              const xml = fs.readFileSync('$f', 'utf8');
-              const tests = xml.match(/<testcase[^>]*>/g) || [];
-              const failures = xml.match(/<failure /g) || [];
-              const total = tests.length, fail = failures.length, pass = total - fail;
-              let md = '| Test | Status | Time |\n|------|--------|------|\n';
-              const re = /<testcase name=\"([^\"]+)\"[^>]*time=\"([^\"]+)\"[^>]*(\/>|>[\s\S]*?<\/testcase>)/g;
-              let m;
-              while ((m = re.exec(xml)) !== null) {
-                const name = m[1], time = m[2], body = m[3];
-                const ok = !body.includes('<failure');
-                md += '| ' + name + ' | ' + (ok ? ':white_check_mark: Pass' : ':x: Fail') + ' | ' + time + 's |\n';
+            // Parse JUnit XML files
+            let totalPass = 0, totalFail = 0;
+            try {
+              const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith('.xml'));
+              for (const xf of xmlFiles) {
+                const xml = fs.readFileSync(path.join(junitDir, xf), 'utf8');
+                const re = /<testcase name=\"([^\"]+)\"[^>]*time=\"([^\"]+)\"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
+                summary += '| Test | Status | Time |\n|------|--------|------|\n';
+                let m;
+                while ((m = re.exec(xml)) !== null) {
+                  const name = m[1], time = m[2], body = m[3];
+                  const failed = body.includes('<failure');
+                  if (failed) {
+                    totalFail++;
+                    // Extract failure message for annotation
+                    const msgMatch = body.match(/message=\"([^\"]*)\"/);
+                    const msg = msgMatch ? msgMatch[1] : 'Test failed';
+                    console.log('::error title=' + name + ' (' + platform + ')::' + msg);
+                  } else {
+                    totalPass++;
+                  }
+                  summary += '| ' + name + ' | ' + (failed ? ':x: Fail' : ':white_check_mark: Pass') + ' | ' + time + 's |\n';
+                }
               }
-              md += '\n**' + pass + '/' + total + ' passed' + (fail > 0 ? ', ' + fail + ' failed' : '') + '**\n';
-              console.log(md);
-            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "_No test results found_" >> "$GITHUB_STEP_SUMMARY"
-          done
+            } catch (_) {}
 
-          # Append coverage summary if available
-          if [ -f "$COV_DIR/lcov.info" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "### Code Coverage" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            # Parse lcov.info for per-file line coverage
-            node -e "
-              const fs = require('fs');
-              const lcov = fs.readFileSync('$COV_DIR/lcov.info', 'utf8');
+            const total = totalPass + totalFail;
+            if (total > 0) {
+              summary += '\n**' + totalPass + '/' + total + ' passed' + (totalFail > 0 ? ', ' + totalFail + ' failed' : '') + '**\n';
+              console.log('::notice title=Tests (' + platform + ')::' + totalPass + '/' + total + ' passed');
+            } else {
+              summary += '_No test results found_\n';
+            }
+
+            // Parse lcov.info for coverage
+            try {
+              const lcov = fs.readFileSync(path.join(covDir, 'lcov.info'), 'utf8');
               const files = {};
               let cur = null;
               for (const line of lcov.split('\n')) {
                 if (line.startsWith('SF:')) {
-                  cur = line.slice(3).replace(/^.*\/dist\//, 'dist/');
+                  cur = line.slice(3).replace(/^.*[\/\\\\]dist[\/\\\\]/, 'dist/');
                   files[cur] = { hit: 0, total: 0 };
                 } else if (line.startsWith('DA:') && cur) {
                   files[cur].total++;
@@ -230,18 +247,24 @@ jobs:
                 }
               }
               let totalHit = 0, totalLines = 0;
-              let md = '| File | Lines | Coverage |\n|------|------:|----------|\n';
-              for (const [f, {hit, total}] of Object.entries(files).sort()) {
-                if (total === 0) continue;
-                const pct = (100 * hit / total).toFixed(1);
-                md += '| ' + f + ' | ' + hit + '/' + total + ' | ' + pct + '% |\n';
-                totalHit += hit; totalLines += total;
+              summary += '\n### Code Coverage\n\n';
+              summary += '| File | Lines | Coverage |\n|------|------:|----------|\n';
+              for (const [f, s] of Object.entries(files).sort()) {
+                if (s.total === 0) continue;
+                const pct = (100 * s.hit / s.total).toFixed(1);
+                summary += '| ' + f + ' | ' + s.hit + '/' + s.total + ' | ' + pct + '% |\n';
+                totalHit += s.hit; totalLines += s.total;
               }
               const totalPct = totalLines > 0 ? (100 * totalHit / totalLines).toFixed(1) : '0.0';
-              md += '| **Total** | **' + totalHit + '/' + totalLines + '** | **' + totalPct + '%** |\n';
-              console.log(md);
-            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "_Coverage report unavailable_" >> "$GITHUB_STEP_SUMMARY"
-          fi
+              summary += '| **Total** | **' + totalHit + '/' + totalLines + '** | **' + totalPct + '%** |\n';
+              console.log('::notice title=Coverage (' + platform + ')::' + totalPct + '% line coverage (' + totalHit + '/' + totalLines + ' lines)');
+            } catch (_) {}
+
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          " || echo "_Summary generation failed_" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          JUNIT_DIR: ${{ runner.temp }}/junit
+          COV_DIR: ${{ runner.temp }}/coverage
 
       - uses: actions/upload-artifact@v4
         if: always()
