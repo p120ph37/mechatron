@@ -306,13 +306,20 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			childProc.open(_child.pid);
 			var childMem = new Memory(childProc);
 
-			// Locate the 0xA5-filled buffer in the child's address space
+			// Locate the 0xA5-filled buffer in the child's address space.
+			// Search for 48 consecutive bytes to reduce false positives,
+			// then pick the first hit in a writable region (read-only
+			// matches can appear in e.g. data sections on macOS).
 			var _hp = [];
-			for (var _hi = 0; _hi < 16; _hi++) _hp.push("a5");
-			var _addrs = childMem.find(_hp.join(" "), undefined, undefined, 1);
+			for (var _hi = 0; _hi < 48; _hi++) _hp.push("a5");
+			var _addrs = childMem.find(_hp.join(" "), undefined, undefined, 10);
+			var wa = null;
+			for (var _ai = 0; _ai < _addrs.length; _ai++) {
+				var _reg = childMem.getRegion(_addrs[_ai]);
+				if (_reg.writable) { wa = _addrs[_ai]; break; }
+			}
 
-			if (_addrs.length > 0) {
-				var wa = _addrs[0];
+			if (wa !== null) {
 
 				// Helper: query child's HTTP server for the buffer hex dump
 				function _queryChild() {
@@ -335,7 +342,8 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 				//   [28-31] writeReal32(1.5)
 				//   [32-39] writeReal64(2.5)
 				//   [40-47] writePtr(0x1234)
-				childMem.writeInt8(wa, 0x42);
+				assert(childMem.writeInt8(wa, 0x42),
+					"cross-process writeInt8 succeeded");
 				childMem.writeInt16(wa + 2, 0x1234);
 				childMem.writeInt32(wa + 4, 0x12345678);
 				childMem.writeBool(wa + 8, true);
@@ -418,7 +426,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 				assert(_hex.substring(0, 2) === "a5",
 					"cross-process writeData restore visible");
 			} else {
-				log("(child scratch not found) ");
+				log("(child scratch not found or not writable) ");
 			}
 
 			_child.kill();
