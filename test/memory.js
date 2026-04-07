@@ -206,24 +206,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			assert(rcl.eq(r0), "region clone eq");
 		}
 
-		// --- Typed reads from readable region ---
-		if (readable) {
-			var v8 = mem.readInt8(readable.start);
-			assert(typeof v8 === "number" || v8 === null, "readInt8 returns number|null");
-			var v16 = mem.readInt16(readable.start);
-			assert(typeof v16 === "number" || v16 === null, "readInt16 returns number|null");
-			var v32 = mem.readInt32(readable.start);
-			assert(typeof v32 === "number" || v32 === null, "readInt32 returns number|null");
-			var vr32 = mem.readReal32(readable.start);
-			assert(typeof vr32 === "number" || vr32 === null, "readReal32 returns number|null");
-			var vr64 = mem.readReal64(readable.start);
-			assert(typeof vr64 === "number" || vr64 === null, "readReal64 returns number|null");
-			var vb = mem.readBool(readable.start);
-			assert(typeof vb === "boolean" || vb === null, "readBool returns bool|null");
-			var vp = mem.readPtr(readable.start);
-			assert(typeof vp === "number" || vp === null, "readPtr returns number|null");
-		}
-
 		// --- Cache operations ---
 		assert(typeof mem.isCaching() === "boolean", "isCaching bool");
 		assert(typeof mem.getCacheSize() === "number", "getCacheSize number");
@@ -344,18 +326,24 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 
 				// Write various types at non-overlapping offsets, then verify
 				// via a single HTTP query that the child process sees them all.
-				//   [0]    writeInt8(0x42)
-				//   [2-3]  writeInt16(0x1234)
-				//   [4-7]  writeInt32(0x12345678)
-				//   [8]    writeBool(true)
+				//   [0]     writeInt8(0x42)
+				//   [2-3]   writeInt16(0x1234)
+				//   [4-7]   writeInt32(0x12345678)
+				//   [8]     writeBool(true)
 				//   [16-23] writeInt64(0x1122)
 				//   [24-25] writeString("Hi")
+				//   [28-31] writeReal32(1.5)
+				//   [32-39] writeReal64(2.5)
+				//   [40-47] writePtr(0x1234)
 				childMem.writeInt8(wa, 0x42);
 				childMem.writeInt16(wa + 2, 0x1234);
 				childMem.writeInt32(wa + 4, 0x12345678);
 				childMem.writeBool(wa + 8, true);
 				childMem.writeInt64(wa + 16, 0x1122);
 				childMem.writeString(wa + 24, "Hi");
+				childMem.writeReal32(wa + 28, 1.5);
+				childMem.writeReal64(wa + 32, 2.5);
+				childMem.writePtr(wa + 40, 0x1234);
 
 				// Read back via typed read methods
 				assert(childMem.readInt8(wa) === 0x42,
@@ -370,6 +358,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 					"cross-process readInt64");
 				assert(childMem.readString(wa + 24, 2) === "Hi",
 					"cross-process readString");
+				assert(childMem.readReal32(wa + 28) === 1.5,
+					"cross-process readReal32");
+				assert(childMem.readReal64(wa + 32) === 2.5,
+					"cross-process readReal64");
+				assert(childMem.readPtr(wa + 40) === 0x1234,
+					"cross-process readPtr");
 
 				// Verify via child's own view (HTTP hex dump)
 				var _hex = _queryChild();
@@ -385,6 +379,10 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 					"cross-process writeInt64 visible");
 				assert(_hex.substring(48, 52) === "4869",
 					"cross-process writeString visible");
+				assert(_hex.substring(56, 64) === "0000c03f",
+					"cross-process writeReal32 visible");
+				assert(_hex.substring(64, 80) === "0000000000000440",
+					"cross-process writeReal64 visible");
 
 				// Round 2: negative / signed values
 				childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
@@ -468,18 +466,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		// --- writeDataAsync ---
 		var pa4 = mem.writeDataAsync(0, Buffer.alloc(1), 1);
 		assert(pa4 instanceof Promise, "writeDataAsync returns Promise");
-
-		// --- readString single ---
-		if (readable) {
-			var rs = mem.readString(readable.start, 4);
-			assert(typeof rs === "string" || rs === null, "readString returns string|null");
-		}
-
-		// --- readInt64 single ---
-		if (readable && readable.size >= 8) {
-			var r64 = mem.readInt64(readable.start);
-			assert(typeof r64 === "number" || r64 === null, "readInt64 returns number|null");
-		}
 
 		// --- Async variants ---
 		var pa1 = mem.getRegionsAsync();
