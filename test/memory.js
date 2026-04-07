@@ -284,17 +284,15 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			+ "mechatron-memtest-" + process.pid;
 		try { _fs.unlinkSync(_portFile); } catch (_) {}
 
-		// Child source: 64-byte buffer filled with 0xA5, served as hex via HTTP
-		var _childSrc =
-			'var h=require("http"),f=require("fs"),' +
-			'b=Buffer.alloc(64,0xA5),' +
-			's=h.createServer(function(q,r){r.end(b.toString("hex"))});' +
-			's.listen(0,function(){' +
-			'f.writeFileSync(' + JSON.stringify(_portFile) + ',""+s.address().port)})';
+		// Generate a random 16-byte UUID sentinel so find() cannot
+		// match stale data or read-only sections in the child process.
+		// Passed as a CLI arg so the UUID literal never appears in the
+		// child's source code or JIT-compiled AST.
+		var _uuidHex = require("crypto").randomBytes(16).toString("hex");
 
-		var _child = _cp.spawn(process.execPath, ["-e", _childSrc], {
-			stdio: "ignore"
-		});
+		var _child = _cp.spawn(process.execPath,
+			[require("path").join(__dirname, "memory-child.js"), _uuidHex, _portFile],
+			{ stdio: "ignore" });
 		var _port = null;
 		for (var _pi = 0; _pi < 50 && !_port; _pi++) {
 			mechatron.Timer.sleep(100);
@@ -306,20 +304,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			childProc.open(_child.pid);
 			var childMem = new Memory(childProc);
 
-			// Locate the 0xA5-filled buffer in the child's address space.
-			// Search for 48 consecutive bytes to reduce false positives,
-			// then pick the first hit in a writable region (read-only
-			// matches can appear in e.g. data sections on macOS).
-			var _hp = [];
-			for (var _hi = 0; _hi < 48; _hi++) _hp.push("a5");
-			var _addrs = childMem.find(_hp.join(" "), undefined, undefined, 10);
-			var wa = null;
-			for (var _ai = 0; _ai < _addrs.length; _ai++) {
-				var _reg = childMem.getRegion(_addrs[_ai]);
-				if (_reg.writable) { wa = _addrs[_ai]; break; }
-			}
+			// Locate the buffer via its UUID sentinel — guaranteed unique
+			var _addrs = childMem.find(
+				_uuidHex.match(/../g).join(" "), undefined, undefined, 1);
 
-			if (wa !== null) {
+			if (_addrs.length > 0) {
+				var wa = _addrs[0];
 
 				// Helper: query child's HTTP server for the buffer hex dump
 				function _queryChild() {
@@ -426,7 +416,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 				assert(_hex.substring(0, 2) === "a5",
 					"cross-process writeData restore visible");
 			} else {
-				log("(child scratch not found or not writable) ");
+				log("(child sentinel not found) ");
 			}
 
 			_child.kill();
