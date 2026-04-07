@@ -292,42 +292,143 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		assert(memCl.isValid(), "clone valid");
 		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
 
-		// --- Write operations on readable/writable region ---
-		var writable = null;
-		for (var wi = 0; wi < regions.length; ++wi) {
-			if (regions[wi].valid && regions[wi].bound && regions[wi].readable && regions[wi].writable && regions[wi].size > 64) {
-				writable = regions[wi];
-				break;
+		// --- Cross-process memory write verification ---
+		// Spawn a child node HTTP server that holds a known buffer, write to
+		// the child's memory via the Memory API, then HTTP GET the child to
+		// prove the target process sees the change.
+		var _cp = require("child_process");
+		var _fs = require("fs");
+		var _portFile = require("os").tmpdir() + require("path").sep
+			+ "mechatron-memtest-" + process.pid;
+		try { _fs.unlinkSync(_portFile); } catch (_) {}
+
+		// Child source: 64-byte buffer filled with 0xA5, served as hex via HTTP
+		var _childSrc =
+			'var h=require("http"),f=require("fs"),' +
+			'b=Buffer.alloc(64,0xA5),' +
+			's=h.createServer(function(q,r){r.end(b.toString("hex"))});' +
+			's.listen(0,function(){' +
+			'f.writeFileSync(' + JSON.stringify(_portFile) + ',""+s.address().port)})';
+
+		var _child = _cp.spawn(process.execPath, ["-e", _childSrc], {
+			stdio: "ignore"
+		});
+		var _port = null;
+		for (var _pi = 0; _pi < 50 && !_port; _pi++) {
+			mechatron.Timer.sleep(100);
+			try { _port = +_fs.readFileSync(_portFile, "utf8"); } catch (_) {}
+		}
+
+		if (_port) {
+			var childProc = new Process();
+			childProc.open(_child.pid);
+			var childMem = new Memory(childProc);
+
+			// Locate the 0xA5-filled buffer in the child's address space
+			var _hp = [];
+			for (var _hi = 0; _hi < 16; _hi++) _hp.push("a5");
+			var _addrs = childMem.find(_hp.join(" "), undefined, undefined, 1);
+
+			if (_addrs.length > 0) {
+				var wa = _addrs[0];
+
+				// Helper: query child's HTTP server for the buffer hex dump
+				function _queryChild() {
+					return _cp.execFileSync(process.execPath, ["-e",
+						'var h=require("http");' +
+						'h.get("http://127.0.0.1:' + _port + '/",function(r){' +
+						'var d="";r.on("data",function(c){d+=c});' +
+						'r.on("end",function(){process.stdout.write(d)})})'],
+						{ encoding: "utf8", timeout: 5000 });
+				}
+
+				// Write various types at non-overlapping offsets, then verify
+				// via a single HTTP query that the child process sees them all.
+				//   [0]    writeInt8(0x42)
+				//   [2-3]  writeInt16(0x1234)
+				//   [4-7]  writeInt32(0x12345678)
+				//   [8]    writeBool(true)
+				//   [16-23] writeInt64(0x1122)
+				//   [24-25] writeString("Hi")
+				childMem.writeInt8(wa, 0x42);
+				childMem.writeInt16(wa + 2, 0x1234);
+				childMem.writeInt32(wa + 4, 0x12345678);
+				childMem.writeBool(wa + 8, true);
+				childMem.writeInt64(wa + 16, 0x1122);
+				childMem.writeString(wa + 24, "Hi");
+
+				// Read back via typed read methods
+				assert(childMem.readInt8(wa) === 0x42,
+					"cross-process readInt8");
+				assert(childMem.readInt16(wa + 2) === 0x1234,
+					"cross-process readInt16");
+				assert(childMem.readInt32(wa + 4) === 0x12345678,
+					"cross-process readInt32");
+				assert(childMem.readBool(wa + 8) === true,
+					"cross-process readBool");
+				assert(childMem.readInt64(wa + 16) === 0x1122,
+					"cross-process readInt64");
+				assert(childMem.readString(wa + 24, 2) === "Hi",
+					"cross-process readString");
+
+				// Verify via child's own view (HTTP hex dump)
+				var _hex = _queryChild();
+				assert(_hex.substring(0, 2) === "42",
+					"cross-process writeInt8 visible");
+				assert(_hex.substring(4, 8) === "3412",
+					"cross-process writeInt16 visible");
+				assert(_hex.substring(8, 16) === "78563412",
+					"cross-process writeInt32 visible");
+				assert(_hex.substring(16, 18) === "01",
+					"cross-process writeBool visible");
+				assert(_hex.substring(32, 36) === "2211",
+					"cross-process writeInt64 visible");
+				assert(_hex.substring(48, 52) === "4869",
+					"cross-process writeString visible");
+
+				// Round 2: negative / signed values
+				childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
+				childMem.writeInt8(wa, -1);           // ff
+				childMem.writeInt16(wa + 2, -2);      // fe ff
+				childMem.writeInt32(wa + 4, -3);      // fd ff ff ff
+				childMem.writeInt64(wa + 16, -4);     // fc ff ff ff ff ff ff ff
+
+				// Read back via typed read methods — verify sign is preserved
+				assert(childMem.readInt8(wa) === -1,
+					"cross-process readInt8 negative");
+				assert(childMem.readInt16(wa + 2) === -2,
+					"cross-process readInt16 negative");
+				assert(childMem.readInt32(wa + 4) === -3,
+					"cross-process readInt32 negative");
+				assert(childMem.readInt64(wa + 16) === -4,
+					"cross-process readInt64 negative");
+
+				// Verify the same via child's own view (HTTP hex dump)
+				_hex = _queryChild();
+				assert(_hex.substring(0, 2) === "ff",
+					"cross-process writeInt8 negative visible");
+				assert(_hex.substring(4, 8) === "feff",
+					"cross-process writeInt16 negative visible");
+				assert(_hex.substring(8, 16) === "fdffffff",
+					"cross-process writeInt32 negative visible");
+				assert(_hex.substring(32, 48) === "fcffffffffffffff",
+					"cross-process writeInt64 negative visible");
+
+				// Restore original fill
+				childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
+				_hex = _queryChild();
+				assert(_hex.substring(0, 2) === "a5",
+					"cross-process writeData restore visible");
+			} else {
+				log("(child scratch not found) ");
 			}
+
+			_child.kill();
+			childProc.close();
+		} else {
+			log("(child server failed to start) ");
 		}
-
-		if (writable) {
-			// Read original values, write, then restore
-			var origBuf = Buffer.alloc(8);
-			mem.readData(writable.start, origBuf, 8);
-
-			// writeInt8
-			assert(typeof mem.writeInt8(writable.start, 42) === "boolean", "writeInt8 returns bool");
-			// writeInt16
-			assert(typeof mem.writeInt16(writable.start, 1234) === "boolean", "writeInt16 returns bool");
-			// writeInt32
-			assert(typeof mem.writeInt32(writable.start, 12345678) === "boolean", "writeInt32 returns bool");
-			// writeReal32
-			assert(typeof mem.writeReal32(writable.start, 3.14) === "boolean", "writeReal32 returns bool");
-			// writeReal64
-			assert(typeof mem.writeReal64(writable.start, 3.14159265) === "boolean", "writeReal64 returns bool");
-			// writeBool
-			assert(typeof mem.writeBool(writable.start, true) === "boolean", "writeBool returns bool");
-			// writeInt64
-			assert(typeof mem.writeInt64(writable.start, 9999) === "boolean", "writeInt64 returns bool");
-			// writeString
-			assert(typeof mem.writeString(writable.start, "hi") === "boolean", "writeString returns bool");
-			// writePtr
-			assert(typeof mem.writePtr(writable.start, 0) === "boolean", "writePtr returns bool");
-
-			// Restore original data
-			mem.writeData(writable.start, origBuf, 8);
-		}
+		try { _fs.unlinkSync(_portFile); } catch (_) {}
 
 		// --- Multi-value (count > 1) typed reads ---
 		if (readable && readable.size >= 32) {
