@@ -284,14 +284,8 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			+ "mechatron-memtest-" + process.pid;
 		try { _fs.unlinkSync(_portFile); } catch (_) {}
 
-		// Generate a random 16-byte UUID sentinel so find() cannot
-		// match stale data or read-only sections in the child process.
-		// Passed as a CLI arg so the UUID literal never appears in the
-		// child's source code or JIT-compiled AST.
-		var _uuidHex = require("crypto").randomBytes(16).toString("hex");
-
 		var _child = _cp.spawn(process.execPath,
-			[require("path").join(__dirname, "memory-child.js"), _uuidHex, _portFile],
+			[require("path").join(__dirname, "memory-child.js"), _portFile],
 			{ stdio: "ignore" });
 		var _port = null;
 		for (var _pi = 0; _pi < 50 && !_port; _pi++) {
@@ -304,22 +298,25 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			childProc.open(_child.pid);
 			var childMem = new Memory(childProc);
 
-			// Locate the buffer via its UUID sentinel — guaranteed unique
-			var _addrs = childMem.find(
-				_uuidHex.match(/../g).join(" "), undefined, undefined, 1);
+			// Helper: query child's HTTP server for the buffer hex dump
+			function _queryChild() {
+				return _cp.execFileSync(process.execPath, ["-e",
+					'var h=require("http");' +
+					'h.get("http://127.0.0.1:' + _port + '/",function(r){' +
+					'var d="";r.on("data",function(c){d+=c});' +
+					'r.on("end",function(){process.stdout.write(d)})})'],
+					{ encoding: "utf8", timeout: 5000 });
+			}
+
+			// Fetch the child's random buffer contents, then use the
+			// first 16 bytes as a search needle — guaranteed unique
+			// since the child generated them via crypto.randomBytes().
+			var _initHex = _queryChild();
+			var _needle = _initHex.substring(0, 32).match(/../g).join(" ");
+			var _addrs = childMem.find(_needle, undefined, undefined, 1);
 
 			if (_addrs.length > 0) {
 				var wa = _addrs[0];
-
-				// Helper: query child's HTTP server for the buffer hex dump
-				function _queryChild() {
-					return _cp.execFileSync(process.execPath, ["-e",
-						'var h=require("http");' +
-						'h.get("http://127.0.0.1:' + _port + '/",function(r){' +
-						'var d="";r.on("data",function(c){d+=c});' +
-						'r.on("end",function(){process.stdout.write(d)})})'],
-						{ encoding: "utf8", timeout: 5000 });
-				}
 
 				// Write various types at non-overlapping offsets, then verify
 				// via a single HTTP query that the child process sees them all.
