@@ -10,7 +10,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVMAvailable) {
+module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 	function testMemory() {
 		log("  Memory... ");
@@ -101,12 +101,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 
 		// Module static compare
 		assert(Module.compare(mod, modCl) === 0, "Module.compare eq");
-
-		if (!machVMAvailable) {
-			expectOrSkip("machVM", "Memory (mach VM)");
-			log("(macOS mach VM unavailable) OK\n");
-			return true;
-		}
 
 		// --- Invalid memory ---
 		var mem = new Memory();
@@ -315,6 +309,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 			var _needle = _initHex.substring(0, 32).match(/../g).join(" ");
 			var _addrs = childMem.find(_needle, undefined, undefined, 1);
 
+			assert(_addrs.length > 0, "child sentinel found via find()");
 			if (_addrs.length > 0) {
 				var wa = _addrs[0];
 
@@ -412,14 +407,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 				_hex = _queryChild();
 				assert(_hex.substring(0, 2) === "a5",
 					"cross-process writeData restore visible");
-			} else {
-				log("(child sentinel not found) ");
 			}
 
 			_child.kill();
 			childProc.close();
 		} else {
-			log("(child server failed to start) ");
+			assert(false, "child HTTP server failed to start");
 		}
 		try { _fs.unlinkSync(_portFile); } catch (_) {}
 

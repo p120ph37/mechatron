@@ -107,40 +107,16 @@ var mechatron = require("..");
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// On macOS, mach VM operations can SIGABRT without proper entitlements.
-// Probe once in a child process and record the result.
-var gMachVMAvailable = (process.platform !== "darwin");
-if (process.platform === "darwin") {
-	var _probePath = require("path").resolve(__dirname, "..").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-	var _child = require("child_process").spawnSync(process.execPath, ["-e",
-		"var m = require('" + _probePath + "');" +
-		"var p = m.Process.getCurrent(); var mem = new m.Memory(p);" +
-		"if (!mem.isValid()) process.exit(1);" +
-		"var regions = mem.getRegions();" +
-		"if (regions.length === 0) process.exit(1);" +
-		"var buf = Buffer.alloc(16);" +
-		"for (var i = 0; i < regions.length; i++) {" +
-		"  if (regions[i].valid && regions[i].readable && regions[i].size > 16) {" +
-		"    mem.readData(regions[i].start, buf, 16); break;" +
-		"  }" +
-		"}" +
-		"var mods = p.getModules();" +
-		"if (mods.length === 0) process.exit(1);" +
-		"process.exit(0);"
-	], { timeout: 10000, stdio: "ignore" });
-	gMachVMAvailable = (_child.status === 0);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 // Platform capability expectations
 var gExpected = {
-	"linux-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
-	"linux-arm64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
-	"darwin-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: true  },
-	"darwin-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: true  },
-	"win32-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
-	"win32-ia32":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true,  machVM: false },
+	"linux-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
+	"linux-arm64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
+	"darwin-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
+	"darwin-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
+	"win32-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
+	"win32-ia32":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
 };
 
 var gPlatformKey = process.platform + "-" + process.arch;
@@ -188,10 +164,10 @@ var typesModule     = require("./types")(mechatron, log, assert);
 var keyboardModule  = require("./keyboard")(mechatron, log, assert, waitFor, expectOrSkip);
 var mouseModule     = require("./mouse")(mechatron, log, assert, waitFor, expectOrSkip);
 var clipboardModule = require("./clipboard")(mechatron, log, assert, waitFor, expectOrSkip);
-var processModule   = require("./process")(mechatron, log, assert, waitFor, expectOrSkip, gMachVMAvailable);
+var processModule   = require("./process")(mechatron, log, assert, waitFor, expectOrSkip);
 var windowModule    = require("./window")(mechatron, log, assert, waitFor, expectOrSkip);
 var screenModule    = require("./screen")(mechatron, log, assert, waitFor, expectOrSkip);
-var memoryModule    = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip, gMachVMAvailable);
+var memoryModule    = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -202,8 +178,6 @@ function main() {
 	log("Node: " + process.version + "\n");
 	log("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
 	log("Backend: " + _backendArg + "\n");
-	if (process.platform === "darwin")
-		log("Mach VM: " + (gMachVMAvailable ? "available" : "unavailable") + "\n");
 	var expectKeys = Object.keys(gExpect);
 	if (expectKeys.length > 0) {
 		var required = expectKeys.filter(function (k) { return gExpect[k]; });

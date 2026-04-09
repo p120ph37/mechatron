@@ -10,7 +10,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVMAvailable) {
+module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 	function testProcess() {
 		log("  Process... ");
@@ -79,7 +79,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		assert(wins instanceof Array, "getWindows is array");
 
 		// --- getModules ---
-		if (machVMAvailable) {
+		{
 			var mods = curr.getModules();
 			assert(mods instanceof Array, "getModules is array");
 			assert(mods.length > 0, "getModules non-empty");
@@ -159,9 +159,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 				var segNe = segs[0].ne(new mechatron.Segment());
 				assert(typeof segNe === "boolean", "segment ne returns bool");
 			}
-		} else {
-			expectOrSkip("machVM", "Process.getModules (mach VM)");
-			log("(getModules unavailable) ");
 		}
 
 		// --- Process copy constructor ---
@@ -181,10 +178,8 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip, machVM
 		// --- Async variants ---
 		var pa1 = Process.getListAsync();
 		assert(pa1 instanceof Promise, "getListAsync returns Promise");
-		if (machVMAvailable) {
-			var pa2 = curr.getModulesAsync();
-			assert(pa2 instanceof Promise, "getModulesAsync returns Promise");
-		}
+		var pa2 = curr.getModulesAsync();
+		assert(pa2 instanceof Promise, "getModulesAsync returns Promise");
 
 		// --- exit/kill on invalid process (no-op, no crash) ---
 		var pBogus = new Process();
