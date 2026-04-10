@@ -1,36 +1,18 @@
-/* Cross-process memory test helper.
+/* Cross-process memory test helper for mechatron.
  *
- * Purpose: stand in for the real-world "game trainer" scenario where a
- * mechatron caller attaches to a foreign target process.  Because Node.js
- * ships with the hardened runtime on macOS, it makes a bad target without
- * custom entitlements; a plain compiled binary does not enable hardened
- * runtime by default, so mechatron's Memory API can attach to it as long
- * as the caller is the same user (the exact same rule that applies when
- * a user has fully disabled SIP or enabled Developer Mode to allow
- * debugging third-party apps).
+ * A deliberately plain compiled binary that stands in for a real-world
+ * debug target (e.g. a game).  Because it isn't built with the macOS
+ * hardened runtime that Node ships with, mechatron can attach to it as
+ * any same-user process — the same as targeting a non-hardened binary
+ * with SIP disabled or Developer Mode enabled.
  *
  * Protocol:
- *   argv    (none)
- *   stdin   Each newline triggers a fresh hex dump on stdout.  EOF or
- *           a closed pipe causes the helper to exit cleanly.
- *   stdout  For every newline received on stdin, prints the current
- *           hex dump of the helper's internal 64-byte buffer as a
- *           single line.  The parent uses the first dump both as the
- *           readiness signal and to learn the initial buffer contents,
- *           so it can locate the buffer in the helper's address space
- *           via Memory.find().
+ *   stdin   Any line triggers a fresh hex dump on stdout.  EOF exits.
+ *   stdout  64 bytes of `buf` as lowercase hex followed by a newline.
  *
- * The buffer is accessed through a `volatile const unsigned char *` on
- * every dump, which is the standard C idiom for prohibiting the
- * compiler from hoisting or caching the reads — the parent writes to
- * this memory from a different process, which is invisible to the
- * optimizer.
- *
- * The initial buffer contents are generated from a time+pid seed.  Not
- * cryptographic, but plenty for a test needle.
- *
- * No external dependencies — builds with any C99 compiler, e.g.:
- *   clang -O2 test/memory-child.c -o test/memory-child
+ * `buf` is `volatile` so the compiler cannot hoist or cache its reads
+ * across the dump loop — another process writes to it, which is
+ * invisible to the optimizer.
  */
 
 #include <stdio.h>
@@ -46,19 +28,7 @@
 
 #define BUFLEN 64
 
-static unsigned char buf[BUFLEN];
-
-static void dump(void) {
-    /* The `volatile` qualifier forces the compiler to re-read each byte
-     * from memory on every access, so writes that other processes poke
-     * into `buf` are observed rather than hoisted out of the loop. */
-    volatile const unsigned char *p = buf;
-    for (int i = 0; i < BUFLEN; i++) {
-        printf("%02x", p[i]);
-    }
-    putchar('\n');
-    fflush(stdout);
-}
+static volatile unsigned char buf[BUFLEN];
 
 int main(void) {
     srand((unsigned)time(NULL) ^ (unsigned)getpid());
@@ -66,10 +36,13 @@ int main(void) {
         buf[i] = (unsigned char)(rand() & 0xff);
     }
 
-    /* Any line on stdin triggers a fresh dump. */
     char line[16];
     while (fgets(line, sizeof line, stdin) != NULL) {
-        dump();
+        for (int i = 0; i < BUFLEN; i++) {
+            printf("%02x", buf[i]);
+        }
+        putchar('\n');
+        fflush(stdout);
     }
 
     return 0;
