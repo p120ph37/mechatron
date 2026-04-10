@@ -270,11 +270,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- Cross-process memory write verification ---
 		// Spawn a compiled native helper (see test/memory-child.rs) that
-		// allocates a known buffer and serves a fresh hex dump of it on
-		// every HTTP GET.  mechatron attaches to the helper's address
-		// space via the Memory API and performs round-trip writes/reads;
-		// the child's own view is verified by HTTP-querying it after
-		// each round of writes.
+		// allocates a random buffer internally and serves a fresh hex
+		// dump of it on every HTTP GET.  mechatron attaches to the
+		// helper's address space via the Memory API and performs
+		// round-trip writes/reads; the child's own view is verified by
+		// HTTP-querying it after each round of writes.
 		//
 		// Rationale for using a native binary (not `node`) as the target:
 		// on macOS, the official Node.js binary ships with the hardened
@@ -287,35 +287,57 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// either of those is exactly what we get here by targeting a
 		// non-hardened binary.
 		var _cp = require("child_process");
-		var _fs = require("fs");
-		var _os = require("os");
 		var _path = require("path");
 		var _http = require("http");
-		var _crypto = require("crypto");
 
-		var _initialHex = _crypto.randomBytes(64).toString("hex");
 		var _helperExt = process.platform === "win32" ? ".exe" : "";
 		var _helper = _path.join(__dirname, "memory-child" + _helperExt);
-		var _portFile = _path.join(_os.tmpdir(),
-			"mechatron-memtest-" + process.pid + "-" + Date.now());
-		try { _fs.unlinkSync(_portFile); } catch (_) {}
 
-		var _child = _cp.spawn(_helper, [_initialHex, _portFile],
-			{ stdio: "inherit" });
+		// stdout: pipe (we use the first line as the readiness signal
+		// carrying the bound TCP port).  stderr: inherit so any helper
+		// panics surface directly in the test log.
+		var _child = _cp.spawn(_helper, [],
+			{ stdio: ["ignore", "pipe", "inherit"] });
 
-		function _sleep(ms) {
-			return new Promise(function (r) { setTimeout(r, ms); });
-		}
-
-		async function _waitForPort() {
-			for (var i = 0; i < 50; i++) {
-				try {
-					var s = _fs.readFileSync(_portFile, "utf8").trim();
-					if (s.length > 0) return +s;
-				} catch (_) {}
-				await _sleep(100);
-			}
-			throw new Error("native helper failed to publish port");
+		function _waitForPort() {
+			return new Promise(function (resolve, reject) {
+				var buf = "";
+				var settled = false;
+				var onData = function (chunk) {
+					if (settled) return;
+					buf += chunk.toString("utf8");
+					var nl = buf.indexOf("\n");
+					if (nl < 0) return;
+					settled = true;
+					clearTimeout(t);
+					_child.stdout.removeListener("data", onData);
+					_child.stdout.removeListener("error", onErr);
+					var line = buf.slice(0, nl).replace(/\r$/, "");
+					var n = parseInt(line, 10);
+					if (isNaN(n) || n <= 0 || n > 65535) {
+						reject(new Error("bad port line from child: " + line));
+					} else {
+						resolve(n);
+					}
+				};
+				var onErr = function (e) {
+					if (settled) return;
+					settled = true;
+					clearTimeout(t);
+					_child.stdout.removeListener("data", onData);
+					_child.stdout.removeListener("error", onErr);
+					reject(e);
+				};
+				var t = setTimeout(function () {
+					if (settled) return;
+					settled = true;
+					_child.stdout.removeListener("data", onData);
+					_child.stdout.removeListener("error", onErr);
+					reject(new Error("timeout waiting for child port"));
+				}, 5000);
+				_child.stdout.on("data", onData);
+				_child.stdout.on("error", onErr);
+			});
 		}
 
 		function _queryChild(port) {
@@ -340,8 +362,17 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		try {
 			var _port = await _waitForPort();
-			var _readyHex = await _queryChild(_port);
-			assert(_readyHex === _initialHex, "native helper ready + hex match");
+			// Drain any further stdout so the pipe doesn't back-pressure
+			// the child if it were to print more.  (It won't — the port
+			// line is the only thing the helper emits — but it's cheap.)
+			_child.stdout.on("data", function () {});
+
+			// The child generates its own initial buffer; the parent
+			// learns it via a first HTTP query and uses that as the
+			// search needle.
+			var _initialHex = await _queryChild(_port);
+			assert(/^[0-9a-f]{128}$/.test(_initialHex),
+				"native helper emitted 64-byte hex dump");
 
 			var childProc = new Process();
 			assert(childProc.open(_child.pid), "open child process");
@@ -456,7 +487,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			childProc.close();
 		} finally {
 			try { _child.kill(); } catch (_) {}
-			try { _fs.unlinkSync(_portFile); } catch (_) {}
 		}
 
 		// --- Multi-value (count > 1) typed reads ---

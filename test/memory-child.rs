@@ -10,41 +10,54 @@
 // debugging third-party apps).
 //
 // Protocol:
-//   argv[1]  Initial buffer contents as lowercase hex (even length).
-//   argv[2]  Path where the helper writes its HTTP port after binding.
+//   argv      (none)
+//   stdout    On startup, prints the bound TCP port as a single line,
+//             which is the parent's readiness signal.
+//   HTTP GET  Responds with a fresh hex dump of the helper's internal
+//             64-byte buffer.  The parent learns the initial contents
+//             by making a first HTTP request, locates the buffer in
+//             the helper's address space by using that value as a
+//             needle, then cross-process-writes to it and re-queries
+//             to verify.
 //
-// The helper binds a loopback TCP socket on an ephemeral port, writes the
-// port number to argv[2] as its readiness signal, and then serves any
-// HTTP GET by responding with a fresh hex dump of the buffer.  Reads go
-// through std::ptr::read_volatile on every dump so the compiler cannot
-// hoist or cache them — the parent writes to this memory from a
+// Reads go through std::ptr::read_volatile on every dump so the compiler
+// cannot hoist or cache them — the parent writes to this memory from a
 // different process, which is invisible to the optimizer.
+//
+// The initial buffer contents are generated at runtime from OS-seeded
+// randomness (via std::collections::hash_map::RandomState), so nothing
+// has to be passed in on the command line.
 //
 // Only the Rust stdlib is used, so this remains a standalone single-file
 // `rustc` build with no Cargo workspace, no dependencies, and no
 // crates.io lookups.
 
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 {
-        eprintln!("usage: {} <hex-bytes> <port-file>", args[0]);
-        std::process::exit(1);
+// Pseudo-random byte generation keyed by a fresh RandomState.  Each
+// RandomState is seeded from OS randomness at construction time, so the
+// derived sequence differs on every run.  Not cryptographic, but plenty
+// for a test needle.
+fn gen_random(n: usize) -> Vec<u8> {
+    let rs = RandomState::new();
+    let mut out = Vec::with_capacity(n);
+    let mut counter: u64 = 0;
+    while out.len() < n {
+        let mut h = rs.build_hasher();
+        h.write_u64(counter);
+        let v = h.finish();
+        out.extend_from_slice(&v.to_le_bytes());
+        counter = counter.wrapping_add(1);
     }
-    let hex = &args[1];
-    let port_file = &args[2];
-    if hex.len() % 2 != 0 {
-        eprintln!("hex must have even length");
-        std::process::exit(1);
-    }
+    out.truncate(n);
+    out
+}
 
-    let buf: Box<[u8]> = (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("invalid hex"))
-        .collect::<Vec<u8>>()
-        .into_boxed_slice();
+fn main() {
+    let buf: Box<[u8]> = gen_random(64).into_boxed_slice();
 
     // Closure captures `buf` by reference and re-reads it volatilely on
     // every call, so successive dumps reflect any writes the parent has
@@ -61,8 +74,13 @@ fn main() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("local_addr").port();
 
-    // Writing the port file serves as the "ready" signal for the parent.
-    std::fs::write(port_file, port.to_string()).expect("write port");
+    // Announcing the port on stdout is the parent's "ready" signal.
+    {
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        writeln!(out, "{}", port).expect("write port");
+        out.flush().expect("flush port");
+    }
 
     for conn in listener.incoming() {
         let mut stream = match conn {
