@@ -171,7 +171,7 @@ var memoryModule    = require("./memory")(mechatron, log, assert, waitFor, expec
 
 ////////////////////////////////////////////////////////////////////////////////
 
-function main() {
+async function main() {
 	log("\nMECHATRON TEST SUITE [" + _backendArg.toUpperCase() + " backend]\n");
 	log("------------------------------\n");
 	log("Platform: " + process.platform + " " + process.arch + "\n");
@@ -223,7 +223,7 @@ function main() {
 		var t0 = performance.now();
 		var err = null;
 		try {
-			tests[i][1]();
+			await tests[i][1]();
 		} catch (e) {
 			log("  FAILED: " + tests[i][0] + " - " + e.message + "\n");
 			if (e.stack) log("  " + e.stack.split("\n").slice(0, 3).join("\n  ") + "\n");
@@ -290,4 +290,7 @@ function escapeXml(s) {
 		.replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-process.exitCode = main();
+main().then(function (rc) { process.exitCode = rc; }, function (e) {
+	log("  FATAL: " + (e && e.stack || e) + "\n");
+	process.exitCode = 2;
+});

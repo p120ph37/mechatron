@@ -63,18 +63,6 @@ jobs:
           sleep 1
           # Diagnostic
           sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
-          # Re-sign the node binary with get-task-allow so the memory test can
-          # use task_for_pid() to inspect child processes (the official Node.js
-          # binary has hardened runtime which blocks this even when running as root).
-          ENT=$(mktemp)
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-            '<plist version="1.0"><dict>' \
-            '  <key>com.apple.security.get-task-allow</key><true/>' \
-            '</dict></plist>' > "$ENT"
-          codesign --force --sign - --entitlements "$ENT" "$NODE_BIN"
-          rm "$ENT"
 
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
@@ -140,6 +128,30 @@ jobs:
       - name: Build TypeScript
         run: npx tsc
 
+      - name: Build native memory test helper
+        run: |
+          # Standalone rustc build of test/memory-child.rs — a deliberately
+          # non-hardened Mach-O on macOS, which mechatron can attach to as
+          # any same-user process (mirroring the real-world game-trainer
+          # scenario where the target is a plain compiled binary, not a
+          # hardened-runtime Node).  This sidesteps the need to re-sign
+          # node with com.apple.security.get-task-allow in CI.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            RUSTC_TARGET="--target i686-pc-windows-msvc"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            RUSTC_TARGET="--target x86_64-apple-darwin"
+          else
+            RUSTC_TARGET=""
+          fi
+          rustc -O --edition 2021 $RUSTC_TARGET \
+            test/memory-child.rs -o "test/memory-child$EXT"
+          ls -la "test/memory-child$EXT"
+
       - name: Run tests
         run: |
           JUNIT_DIR="${RUNNER_TEMP}/junit"
@@ -164,16 +176,6 @@ jobs:
             done
             sudo launchctl stop com.apple.tccd 2>/dev/null || true
             sleep 1
-            # Re-sign with get-task-allow for cross-process memory tests
-            ENT=$(mktemp)
-            printf '%s\n' \
-              '<?xml version="1.0" encoding="UTF-8"?>' \
-              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-              '<plist version="1.0"><dict>' \
-              '  <key>com.apple.security.get-task-allow</key><true/>' \
-              '</dict></plist>' > "$ENT"
-            codesign --force --sign - --entitlements "$ENT" "$X64_ABS"
-            rm "$ENT"
             # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
             export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
             run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"

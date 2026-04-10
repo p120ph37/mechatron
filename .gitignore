@@ -12,3 +12,5 @@ dist/
 napi/*/mechatron-*.node
 packages/@mechatronic/*/mechatron-*.node
 coverage/
+test/memory-child
+test/memory-child.exe
