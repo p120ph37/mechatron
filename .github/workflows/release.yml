@@ -181,6 +181,30 @@ jobs:
       - name: Build TypeScript
         run: npx tsc
 
+      - name: Build native memory test helper
+        run: |
+          # Standalone clang build of test/memory-child.c — a deliberately
+          # non-hardened binary on macOS, which mechatron can attach to
+          # as any same-user process (mirroring the real-world
+          # game-trainer scenario where the target is a plain compiled
+          # binary, not a hardened-runtime Node).  clang ships on every
+          # GitHub-hosted runner.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            CLANG_TARGET="--target=i686-pc-windows-msvc"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            CLANG_TARGET="--target=x86_64-apple-darwin"
+          else
+            CLANG_TARGET=""
+          fi
+          clang -O2 $CLANG_TARGET \
+            test/memory-child.c -o "test/memory-child$EXT"
+          ls -la "test/memory-child$EXT"
+
       - name: Run tests
         run: |
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
