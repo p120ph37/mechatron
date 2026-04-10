@@ -1,0 +1,270 @@
+name: Build (reusable)
+
+# Single source of truth for the matrix build job shared by:
+#   - build.yml    (push / PR)
+#   - release.yml  (tagged release from CHANGELOG.md)
+#
+# Both callers reference this via `uses: ./.github/workflows/build-reusable.yml`.
+# Artifacts uploaded here (`prebuilds-*`, `test-results-*`) are visible to
+# subsequent jobs in the caller via `actions/download-artifact`.
+
+on:
+  workflow_call:
+
+env:
+  HOST_NODE_VERSION: "22"
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: macos-14
+            arch: arm64
+          - os: macos-14
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: windows-2022
+            arch: ia32
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.HOST_NODE_VERSION }}
+
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
+
+      - if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Grant macOS TCC permissions
+        if: runner.os == 'macOS'
+        run: |
+          # Grant accessibility, input-event, and screen-capture permissions to
+          # the node binary so tests can exercise CGEventPost, CGWarpMouse, and
+          # CGWindowListCreateImage.  SIP is disabled on GitHub-hosted macOS
+          # runners, which allows direct writes to the system TCC.db.
+          # Ref: actions/runner-images configure-tccdb-macos.sh
+          TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+          SVCS=(kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture)
+          NODE_BIN=$(which node)
+          for SVC in "${SVCS[@]}"; do
+            sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$NODE_BIN',1,2,4,1,0);" 2>/dev/null || true
+          done
+          # Restart TCC daemon so it picks up the new grants
+          sudo launchctl stop com.apple.tccd 2>/dev/null || true
+          sleep 1
+          # Diagnostic
+          sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
+
+      # Cross-compile Rust for ia32 needs i686 target
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.arch == 'ia32'
+        with:
+          targets: i686-pc-windows-msvc
+
+      # Cross-compile Rust for macOS x64 on arm64 runner
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        with:
+          targets: x86_64-apple-darwin
+
+      - run: npm ci --ignore-scripts
+
+      - name: Build Rust napi modules
+        run: |
+          SUBS="keyboard mouse clipboard screen window process memory"
+          cd napi
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            CARGO_TARGET=i686-pc-windows-msvc
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            CARGO_TARGET=x86_64-apple-darwin
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
+          else
+            cargo build --release $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/release"
+          fi
+
+          # Map matrix → napi triple for output naming
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            TRIPLE="linux-${{ matrix.arch }}-gnu"
+            SRC_EXT="so"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            TRIPLE="darwin-${{ matrix.arch }}"
+            SRC_EXT="dylib"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            TRIPLE="win32-${{ matrix.arch }}-msvc"
+            SRC_EXT="dll"; SRC_PREFIX=""
+          fi
+
+          for s in $SUBS; do
+            SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
+            DST_NAME="mechatron-${s}.${TRIPLE}.node"
+            # Copy into napi/<sub>/ (for dev layout & artifact upload)
+            cp "$SRC" "$s/$DST_NAME"
+            # Copy into packages/@mechatronic/napi-<sub>/ (for published layout)
+            cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            # Re-sign macOS binaries (strip="symbols" invalidates ad-hoc signature;
+            # task_for_pid requires a valid signature even when running as root)
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              codesign --force --sign - "$s/$DST_NAME"
+              codesign --force --sign - "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            fi
+          done
+
+      - name: Build TypeScript
+        run: npx tsc
+
+      - name: Build native memory test helper
+        run: |
+          # Standalone clang build of test/memory-child.c — a deliberately
+          # non-hardened binary on macOS, which mechatron can attach to
+          # as any same-user process (mirroring the real-world
+          # game-trainer scenario where the target is a plain compiled
+          # binary, not a hardened-runtime Node).  This sidesteps the
+          # need to re-sign node with com.apple.security.get-task-allow
+          # in CI.  clang ships with the LLVM install that's already
+          # present on every GitHub-hosted runner.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            CLANG_TARGET="--target=i686-pc-windows-msvc"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            CLANG_TARGET="--target=x86_64-apple-darwin"
+          else
+            CLANG_TARGET=""
+          fi
+          clang -O2 $CLANG_TARGET \
+            test/memory-child.c -o "test/memory-child$EXT"
+          ls -la "test/memory-child$EXT"
+
+      - name: Run tests
+        run: |
+          JUNIT_DIR="${RUNNER_TEMP}/junit"
+          mkdir -p "$JUNIT_DIR"
+          TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
+          C8="./node_modules/.bin/c8"
+          C8_ARGS="--reporter text --reporter lcov --reports-dir ${RUNNER_TEMP}/coverage"
+
+          run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            # Cross-compiled x64 on arm64 macOS — download x64 node to run tests
+            NODE_VERSION=$(node -v)
+            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
+            # Grant TCC to this binary too
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            X64_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_ABS',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
+            # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"
+            # Fix ownership of files created under sudo so upload-artifact can read them
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
+            # Generate coverage report from raw V8 data
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
+          elif [ "${{ matrix.arch }}" = "ia32" ]; then
+            NODE_VERSION=$(node -v)
+            curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
+            unzip -q "node-${NODE_VERSION}-win-x86.zip"
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log sudo -E node test/test.js all --junit "$JUNIT_FILE"
+            # Fix ownership of files created under sudo so upload-artifact can read them
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
+          else
+            run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
+          fi
+
+      - name: Run mechatron-robot-js conformance tests
+        run: |
+          # Root package is named "mechatron" but can't itself be a workspace, so
+          # mechatron-robot-js's `"mechatron": "*"` dep resolves from the registry.
+          # Use `npm link` to replace it with the working copy (uses junctions on Windows).
+          npm link
+          npm link mechatron -w mechatron-robot-js
+
+          # Run conformance tests and append result to JUnit XML
+          node -e "
+            const { execFileSync } = require('child_process');
+            const fs = require('fs');
+            const junitFile = process.env.JUNIT_FILE;
+            const start = Date.now();
+            let rc = 0, output = '';
+            try {
+              output = execFileSync(process.execPath,
+                ['packages/mechatron-robot-js/test/conformance.js'],
+                { encoding: 'utf8', stdio: ['pipe','pipe','pipe'] });
+            } catch (e) {
+              rc = e.status || 1;
+              output = (e.stdout || '') + (e.stderr || '');
+            }
+            const elapsed = ((Date.now() - start) / 1000).toFixed(3);
+            process.stdout.write(output);
+            if (fs.existsSync(junitFile)) {
+              const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              let tc;
+              if (rc === 0) {
+                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>';
+              } else {
+                const fails = output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ');
+                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(fails) + '\"/></testcase>';
+              }
+              const xml = fs.readFileSync(junitFile, 'utf8');
+              fs.writeFileSync(junitFile, xml.replace('</testsuite>', tc + '</testsuite>'));
+            }
+            process.exit(rc);
+          "
+        env:
+          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/test-output.txt
+            ${{ runner.temp }}/junit/
+            ${{ runner.temp }}/coverage/
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
+          path: napi/*/mechatron-*.node
+          if-no-files-found: error
