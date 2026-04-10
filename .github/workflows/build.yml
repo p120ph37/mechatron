@@ -67,13 +67,12 @@ jobs:
           # use task_for_pid() to inspect child processes (the official Node.js
           # binary has hardened runtime which blocks this even when running as root).
           ENT=$(mktemp)
-          cat > "$ENT" <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>com.apple.security.get-task-allow</key><true/>
-          </dict></plist>
-          PLIST
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict>' \
+            '  <key>com.apple.security.get-task-allow</key><true/>' \
+            '</dict></plist>' > "$ENT"
           codesign --force --sign - --entitlements "$ENT" "$NODE_BIN"
           rm "$ENT"
 
@@ -167,13 +166,12 @@ jobs:
             sleep 1
             # Re-sign with get-task-allow for cross-process memory tests
             ENT=$(mktemp)
-            cat > "$ENT" <<'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0"><dict>
-              <key>com.apple.security.get-task-allow</key><true/>
-            </dict></plist>
-            PLIST
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict>' \
+              '  <key>com.apple.security.get-task-allow</key><true/>' \
+              '</dict></plist>' > "$ENT"
             codesign --force --sign - --entitlements "$ENT" "$X64_ABS"
             rm "$ENT"
             # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
