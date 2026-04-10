@@ -33,7 +33,10 @@ were used as the initial native layer.  Removed after Rust reached full parity.
 
 ### 1d. CI / Testing
 - GitHub Actions workflow builds and tests all 6 platform/arch combinations
-- `test/test-ci.js` — comprehensive test suite exercising all subsystems
+- `test/test.js` — comprehensive test suite exercising all subsystems,
+  including a cross-process Memory round-trip against a plain non-hardened
+  C helper (`test/memory-child.c`) that stands in for a real-world debug
+  target
 - TCC grants for macOS (accessibility, post-event, screen capture)
 - Platform capability expectations table prevents silent test regressions
 - Mach VM tests enabled on both darwin-arm64 and darwin-x64

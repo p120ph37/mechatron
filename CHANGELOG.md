@@ -37,6 +37,25 @@ All notable changes to this project will be documented in this file.
   (types, keyboard, mouse, process, memory, window, screen) covering
   constructor overloads, TypeError branches, comparison operators, async
   variants, and platform-conditional paths
+- **Cross-process Memory test harness** — `test/memory.js` now exercises
+  full round-trip cross-process writes followed by reads
+  (`writeInt8/16/32/64/Bool/String/Real32/Real64/Ptr/Data`), verified both
+  through the parent's typed reads and through the child's own view of the
+  buffer.  The target is `test/memory-child.c`, a deliberately plain
+  (non-hardened) C program that stands in for a real-world debug target
+  such as a game — mirroring the scenario where a user has disabled SIP
+  or enabled Developer Mode to attach to a same-user third-party process.
+  Built with `clang` in CI (already present on every GitHub-hosted runner)
+  and declares its buffer `volatile` to prevent the optimiser from caching
+  reads across the dump loop.
+
+### Fixed
+- macOS cross-process Memory operations (darwin-arm64 and darwin-x64) —
+  earlier skip logic is removed; the non-hardened C helper is a reliable
+  `mach_vm_write` / `mach_vm_read_overwrite` target that does not require
+  re-signing Node with `com.apple.security.get-task-allow`
+- Windows x64 cross-process Memory write test — scratch-pad `Buffer`
+  placement avoids a crash when writing into the child's address space
 
 ### Changed
 - **`Uppercase<string>` type constraint** on `resolveKeyName` — compile-time

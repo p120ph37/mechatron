@@ -131,7 +131,7 @@ npx tsc                           # compile TypeScript
 npm test
 
 # Full CI test suite (requires desktop session / TCC grants on macOS)
-sudo node test/test-ci.js all
+sudo node test/test.js all
 
 # robot-js conformance suite (320 API surface checks)
 node packages/mechatron-robot-js/test/conformance.js
