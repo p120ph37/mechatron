@@ -269,7 +269,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
 
 		// --- Cross-process memory write verification ---
-		// Spawn a compiled native helper (see test/memory-child.rs) that
+		// Spawn a compiled native helper (see test/memory-child.c) that
 		// allocates a random buffer internally and emits a fresh hex
 		// dump of it on stdout every time the parent writes a newline
 		// to its stdin.  mechatron attaches to the helper's address

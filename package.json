@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build:native": "cd napi && cargo build --release",
-    "build:test-helper": "rustc -O --edition 2021 test/memory-child.rs -o test/memory-child",
+    "build:test-helper": "clang -O2 test/memory-child.c -o test/memory-child",
     "build": "tsc",
     "test": "node test/test.js types timer",
     "test:all": "node test/test.js all"

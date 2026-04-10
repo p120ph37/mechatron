@@ -130,26 +130,28 @@ jobs:
 
       - name: Build native memory test helper
         run: |
-          # Standalone rustc build of test/memory-child.rs — a deliberately
-          # non-hardened Mach-O on macOS, which mechatron can attach to as
-          # any same-user process (mirroring the real-world game-trainer
-          # scenario where the target is a plain compiled binary, not a
-          # hardened-runtime Node).  This sidesteps the need to re-sign
-          # node with com.apple.security.get-task-allow in CI.
+          # Standalone clang build of test/memory-child.c — a deliberately
+          # non-hardened binary on macOS, which mechatron can attach to
+          # as any same-user process (mirroring the real-world
+          # game-trainer scenario where the target is a plain compiled
+          # binary, not a hardened-runtime Node).  This sidesteps the
+          # need to re-sign node with com.apple.security.get-task-allow
+          # in CI.  clang ships with the LLVM install that's already
+          # present on every GitHub-hosted runner.
           if [ "${{ runner.os }}" = "Windows" ]; then
             EXT=".exe"
           else
             EXT=""
           fi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
-            RUSTC_TARGET="--target i686-pc-windows-msvc"
+            CLANG_TARGET="--target=i686-pc-windows-msvc"
           elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            RUSTC_TARGET="--target x86_64-apple-darwin"
+            CLANG_TARGET="--target=x86_64-apple-darwin"
           else
-            RUSTC_TARGET=""
+            CLANG_TARGET=""
           fi
-          rustc -O --edition 2021 $RUSTC_TARGET \
-            test/memory-child.rs -o "test/memory-child$EXT"
+          clang -O2 $CLANG_TARGET \
+            test/memory-child.c -o "test/memory-child$EXT"
           ls -la "test/memory-child$EXT"
 
       - name: Run tests
