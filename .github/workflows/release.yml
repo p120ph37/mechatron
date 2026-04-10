@@ -40,17 +40,13 @@ jobs:
             exit 1
           fi
 
-          # Verify the date is today (UTC +/- 12h to accommodate any timezone)
-          ENTRY_DATE=$(echo "$HEADING" | grep -oP '\d{4}-\d{2}-\d{2}')
-          YESTERDAY=$(date -u -d '-12 hours' +%Y-%m-%d)
-          TODAY=$(date -u +%Y-%m-%d)
-          TOMORROW=$(date -u -d '+12 hours' +%Y-%m-%d)
-          if [[ "$ENTRY_DATE" != "$YESTERDAY" && "$ENTRY_DATE" != "$TODAY" && "$ENTRY_DATE" != "$TOMORROW" ]]; then
-            echo "::error::Changelog date $ENTRY_DATE does not match today — expected $YESTERDAY, $TODAY, or $TOMORROW"
-            exit 1
-          fi
-
-          # Check if this tag already exists on the remote
+          # Check if this tag already exists on the remote.  This must happen
+          # BEFORE the date check below: the grep above picks the first DATED
+          # heading, which for a repo in the normal "drafting the next release"
+          # state will be the previous (already-released) version because the
+          # unreleased draft heading intentionally has no date.  Failing the
+          # date check in that situation would break every push to main until
+          # a new release is cut.
           if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
             echo "Tag $VERSION already exists — skipping release."
             echo "version=" >> "$GITHUB_OUTPUT"
@@ -60,6 +56,16 @@ jobs:
           # Check if a GitHub release already exists
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "::error::GitHub release $VERSION already exists but tag does not — manual cleanup needed"
+            exit 1
+          fi
+
+          # Verify the date is today (UTC +/- 12h to accommodate any timezone)
+          ENTRY_DATE=$(echo "$HEADING" | grep -oP '\d{4}-\d{2}-\d{2}')
+          YESTERDAY=$(date -u -d '-12 hours' +%Y-%m-%d)
+          TODAY=$(date -u +%Y-%m-%d)
+          TOMORROW=$(date -u -d '+12 hours' +%Y-%m-%d)
+          if [[ "$ENTRY_DATE" != "$YESTERDAY" && "$ENTRY_DATE" != "$TODAY" && "$ENTRY_DATE" != "$TOMORROW" ]]; then
+            echo "::error::Changelog date $ENTRY_DATE does not match today — expected $YESTERDAY, $TODAY, or $TOMORROW"
             exit 1
           fi
 
