@@ -1,1686 +1,714 @@
 ////////////////////////////////////////////////////////////////////////////////
 // -------------------------------------------------------------------------- //
 //                                                                            //
-//                       (C) 2010-2018 Robot Developers                       //
-//                       See LICENSE for licensing info                       //
+//                    Mechatron Types + Timer Test Module                      //
+//                                                                            //
+//  Exercises the data-type classes (Range, Point, Size, Bounds, Color,       //
+//  Image, Hash) and the Timer class using the modern mechatron API.          //
 //                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
 
 "use strict";
 
-//----------------------------------------------------------------------------//
-// Exports                                                                    //
-//----------------------------------------------------------------------------//
+module.exports = function (mechatron, log, assert) {
 
-module.exports = function (robot, log, sprintf, getline, assert)
-{
-	//----------------------------------------------------------------------------//
-	// Locals                                                                     //
-	//----------------------------------------------------------------------------//
+	function testTypes() {
+		log("  Types... ");
 
-	////////////////////////////////////////////////////////////////////////////////
+		var Range  = mechatron.Range;
+		var Point  = mechatron.Point;
+		var Size   = mechatron.Size;
+		var Bounds = mechatron.Bounds;
+		var Color  = mechatron.Color;
+		var Image  = mechatron.Image;
 
-	var Hash   = robot.Hash;
-	var Color  = robot.Color;
-	var Image  = robot.Image;
-	var Range  = robot.Range;
-	var Point  = robot.Point;
-	var Size   = robot.Size;
-	var Bounds = robot.Bounds;
+		// Range
+		var r = new Range(10, 20);
+		assert(r.min === 10 && r.max === 20, "Range ctor");
+		assert(r.getRange() === 10, "Range getRange");
+		assert(new Range().eq(0), "Range default eq 0");
+		assert(new Range(5, 15).ne(new Range(5, 16)), "Range ne");
 
+		// Range setRange overloads
+		var rs = new Range();
+		rs.setRange(5, 15);
+		assert(rs.min === 5 && rs.max === 15, "Range setRange(min,max)");
+		rs.setRange(new Range(1, 2));
+		assert(rs.min === 1 && rs.max === 2, "Range setRange(Range)");
+		rs.setRange(7);
+		assert(rs.min === 7 && rs.max === 7, "Range setRange(value)");
+		rs.setRange({ min: 3, max: 9 });
+		assert(rs.min === 3 && rs.max === 9, "Range setRange(obj)");
 
+		// Range contains
+		var rc = new Range(10, 20);
+		assert(rc.contains(15), "Range contains(15) inclusive");
+		assert(rc.contains(10), "Range contains(10) inclusive boundary");
+		assert(rc.contains(20), "Range contains(20) inclusive boundary");
+		assert(!rc.contains(9), "Range !contains(9)");
+		assert(!rc.contains(21), "Range !contains(21)");
+		assert(!rc.contains(10, false), "Range !contains(10) exclusive");
+		assert(rc.contains(15, false), "Range contains(15) exclusive");
 
-	//----------------------------------------------------------------------------//
-	// Functions                                                                  //
-	//----------------------------------------------------------------------------//
+		// Range getRandom
+		var rr = new Range(100, 200);
+		var rand = rr.getRandom();
+		assert(rand >= 100 && rand < 200, "Range getRandom in range");
+		// min >= max returns min
+		var rr2 = new Range(5, 5);
+		assert(rr2.getRandom() === 5, "Range getRandom min=max");
 
-	////////////////////////////////////////////////////////////////////////////////
+		// Range constructor overloads
+		var rObj = new Range({ min: 11, max: 22 });
+		assert(rObj.min === 11 && rObj.max === 22, "Range ctor obj");
+		var rVal = new Range(42);
+		assert(rVal.min === 42 && rVal.max === 42, "Range ctor single value");
 
-	function testClone()
-	{
-		assert (robot.Screen.synchronize());
+		// Range eq with object and two numbers
+		assert(rc.eq({ min: 10, max: 20 }), "Range eq obj");
+		assert(rc.eq(10, 20), "Range eq(min,max)");
 
-		var hash     = robot.Hash   ("Hello ");
-		var color    = robot.Color  (20, 40, 60, 80);
-		var image    = robot.Image  (20, 40);
-		var range    = robot.Range  (20, 40);
-		var point    = robot.Point  (20, 40);
-		var size     = robot.Size   (20, 40);
-		var bounds   = robot.Bounds (20, 40, 60, 80);
+		// Range ne
+		assert(rc.ne({ min: 1, max: 2 }), "Range ne obj");
 
-		var keyboard = robot.Keyboard();
-		var mouse    = robot.Mouse();
-		var proc     = robot.Process.getList()[0];
-		var module   = proc  .getModules ()[0];
-		var segment  = module.getSegments()[0];
-		var memory   = robot.Memory (proc);
-		var stats    = memory.getStats();
-		var region   = memory.getRegions()[0];
-		var window   = robot.Window.getActive();
-		var screen   = robot.Screen.getMain();
-		var timer    = robot.Timer(); timer.start();
+		// Range eq TypeError
+		var rThrew = false;
+		try { rc.eq("bad"); } catch(e) { rThrew = true; }
+		assert(rThrew, "Range eq invalid throws");
 
-		segment = segment || robot.Module.Segment();
+		// Range toString
+		assert(rc.toString() === "[10, 20]", "Range toString");
 
-		//----------------------------------------------------------------------------//
+		// Range clone, normalize
+		var rc2 = rc.clone();
+		assert(rc2.eq(rc), "Range clone eq");
+		var rn = Range.normalize(3, 7);
+		assert(rn.min === 3 && rn.max === 7, "Range normalize");
+		var rn2 = Range.normalize(new Range(1, 2));
+		assert(rn2.min === 1 && rn2.max === 2, "Range normalize(Range)");
+		var rn3 = Range.normalize({ min: 4, max: 8 });
+		assert(rn3.min === 4 && rn3.max === 8, "Range normalize(obj)");
+		var rn4 = Range.normalize(5);
+		assert(rn4.min === 5 && rn4.max === 5, "Range normalize(number)");
+		var rn5 = Range.normalize();
+		assert(rn5.min === 0 && rn5.max === 0, "Range normalize()");
 
-		var eHash     = hash;     var cHash     = hash    .clone();
-		var eColor    = color;    var cColor    = color   .clone();
-		var eImage    = image;    var cImage    = image   .clone();
-		var eRange    = range;    var cRange    = range   .clone();
-		var ePoint    = point;    var cPoint    = point   .clone();
-		var eSize     = size;     var cSize     = size    .clone();
-		var eBounds   = bounds;   var cBounds   = bounds  .clone();
-		var eKeyboard = keyboard; var cKeyboard = keyboard.clone();
-		var eMouse    = mouse;    var cMouse    = mouse   .clone();
-		var eProc     = proc;     var cProc     = proc    .clone();
-		var eModule   = module;   var cModule   = module  .clone();
-		var eSegment  = segment;  var cSegment  = segment .clone();
-		var eMemory   = memory;   var cMemory   = memory  .clone();
-		var eStats    = stats;    var cStats    = stats   .clone();
-		var eRegion   = region;   var cRegion   = region  .clone();
-		var eWindow   = window;   var cWindow   = window  .clone();
-		var eScreen   = screen;   var cScreen   = screen  .clone();
-		var eTimer    = timer;    var cTimer    = timer   .clone();
+		// Point
+		var p = new Point(5, 10);
+		assert(p.x === 5 && p.y === 10, "Point ctor");
+		assert(p.eq(new Point(5, 10)), "Point eq");
+		assert(p.ne(new Point(5, 11)), "Point ne");
+		assert(p.isZero() === false, "Point !isZero");
+		assert(new Point().isZero(), "Point default isZero");
+		var pa = p.add(new Point(1, 2));
+		assert(pa.x === 6 && pa.y === 12, "Point add");
+		var ps = p.sub(new Point(1, 2));
+		assert(ps.x === 4 && ps.y === 8, "Point sub");
+		var pn = p.neg();
+		assert(pn.x === -5 && pn.y === -10, "Point neg");
 
-		assert (cHash     instanceof robot.Hash          );
-		assert (cColor    instanceof robot.Color         );
-		assert (cImage    instanceof robot.Image         );
-		assert (cRange    instanceof robot.Range         );
-		assert (cPoint    instanceof robot.Point         );
-		assert (cSize     instanceof robot.Size          );
-		assert (cBounds   instanceof robot.Bounds        );
-		assert (cKeyboard instanceof robot.Keyboard      );
-		assert (cMouse    instanceof robot.Mouse         );
-		assert (cProc     instanceof robot.Process       );
-		assert (cModule   instanceof robot.Module        );
-		assert (cSegment  instanceof robot.Module.Segment);
-		assert (cMemory   instanceof robot.Memory        );
-		assert (cStats    instanceof robot.Memory.Stats  );
-		assert (cRegion   instanceof robot.Memory.Region );
-		assert (cWindow   instanceof robot.Window        );
-		assert (cScreen   instanceof robot.Screen        );
-		assert (cTimer    instanceof robot.Timer         );
+		// Point constructor overloads
+		var pObj = new Point({ x: 3, y: 7 });
+		assert(pObj.x === 3 && pObj.y === 7, "Point ctor obj");
+		var pVal = new Point(42);
+		assert(pVal.x === 42 && pVal.y === 42, "Point ctor single value");
 
-		//----------------------------------------------------------------------------//
+		// Point eq with object and two numbers
+		assert(p.eq({ x: 5, y: 10 }), "Point eq obj");
+		assert(p.eq(5, 10), "Point eq(x,y)");
 
-		assert (eHash     === hash    ); assert (cHash     !== hash    );
-		assert (eColor    === color   ); assert (cColor    !== color   );
-		assert (eImage    === image   ); assert (cImage    !== image   );
-		assert (eRange    === range   ); assert (cRange    !== range   );
-		assert (ePoint    === point   ); assert (cPoint    !== point   );
-		assert (eSize     === size    ); assert (cSize     !== size    );
-		assert (eBounds   === bounds  ); assert (cBounds   !== bounds  );
-		assert (eKeyboard === keyboard); assert (cKeyboard !== keyboard);
-		assert (eMouse    === mouse   ); assert (cMouse    !== mouse   );
-		assert (eProc     === proc    ); assert (cProc     !== proc    );
-		assert (eModule   === module  ); assert (cModule   !== module  );
-		assert (eSegment  === segment ); assert (cSegment  !== segment );
-		assert (eMemory   === memory  ); assert (cMemory   !== memory  );
-		assert (eStats    === stats   ); assert (cStats    !== stats   );
-		assert (eRegion   === region  ); assert (cRegion   !== region  );
-		assert (eWindow   === window  ); assert (cWindow   !== window  );
-		assert (eScreen   === screen  ); assert (cScreen   !== screen  );
-		assert (eTimer    === timer   ); assert (cTimer    !== timer   );
+		// Point ne with different types
+		assert(p.ne({ x: 1, y: 2 }), "Point ne obj");
 
-		assert (eHash    .eq (hash    )); assert (cHash    .eq (hash    ));
-		assert (eColor   .eq (color   )); assert (cColor   .eq (color   ));
-		assert (eImage   .eq (image   )); assert (cImage   .eq (image   ));
-		assert (eRange   .eq (range   )); assert (cRange   .eq (range   ));
-		assert (ePoint   .eq (point   )); assert (cPoint   .eq (point   ));
-		assert (eSize    .eq (size    )); assert (cSize    .eq (size    ));
-		assert (eBounds  .eq (bounds  )); assert (cBounds  .eq (bounds  ));
-		assert (eProc    .eq (proc    )); assert (cProc    .eq (proc    ));
-		assert (eModule  .eq (module  )); assert (cModule  .eq (module  ));
-		assert (eSegment .eq (segment )); assert (cSegment .eq (segment ));
-		assert (eStats   .eq (stats   )); assert (cStats   .eq (stats   ));
-		assert (eRegion  .eq (region  )); assert (cRegion  .eq (region  ));
-		assert (eWindow  .eq (window  )); assert (cWindow  .eq (window  ));
-		assert (eTimer   .eq (timer   )); assert (cTimer   .eq (timer   ));
+		// Point eq single number (x===a && y===a)
+		var pSame = new Point(7, 7);
+		assert(pSame.eq(7), "Point eq single number");
+		// Point eq TypeError
+		var ptThrew = false;
+		try { p.eq("bad"); } catch(e) { ptThrew = true; }
+		assert(ptThrew, "Point eq invalid throws");
+		// Point add/sub with plain object and single number
+		var paObj = p.add({ x: 1, y: 2 });
+		assert(paObj.x === 6 && paObj.y === 12, "Point add obj");
+		var psNum = p.sub(1);
+		assert(psNum.x === 4 && psNum.y === 9, "Point sub number");
+		// Point toString
+		assert(p.toString() === "[5, 10]", "Point toString");
 
-		assert (eKeyboard.autoDelay  .eq (keyboard.autoDelay  ));
-		assert (cKeyboard.autoDelay  .eq (keyboard.autoDelay  ));
-		assert (eMouse   .autoDelay  .eq (mouse   .autoDelay  ));
-		assert (cMouse   .autoDelay  .eq (mouse   .autoDelay  ));
-		assert (eScreen  .getBounds().eq (screen  .getBounds()));
-		assert (cScreen  .getBounds().eq (screen  .getBounds()));
+		// Point toSize, clone, normalize
+		var pts = p.toSize();
+		assert(pts.w === 5 && pts.h === 10, "Point toSize");
+		var pc = p.clone();
+		assert(pc.eq(p), "Point clone eq");
+		var pnorm = Point.normalize(3, 7);
+		assert(pnorm.x === 3 && pnorm.y === 7, "Point normalize(x,y)");
+		var pnorm2 = Point.normalize(new Point(1, 2));
+		assert(pnorm2.x === 1 && pnorm2.y === 2, "Point normalize(Point)");
+		var pnorm3 = Point.normalize({ x: 4, y: 8 });
+		assert(pnorm3.x === 4 && pnorm3.y === 8, "Point normalize(obj)");
+		var pnorm4 = Point.normalize(5);
+		assert(pnorm4.x === 5 && pnorm4.y === 5, "Point normalize(number)");
+		var pnorm5 = Point.normalize();
+		assert(pnorm5.x === 0 && pnorm5.y === 0, "Point normalize()");
 
-		//----------------------------------------------------------------------------//
+		// Point add/sub with undefined (hits _resolve default branch)
+		var pDef = p.add();
+		assert(pDef.x === 5 && pDef.y === 10, "Point add() default");
+		var psDef = p.sub();
+		assert(psDef.x === 5 && psDef.y === 10, "Point sub() default");
 
-		robot.Timer.sleep (40);
+		// Size
+		var s = new Size(100, 200);
+		assert(s.w === 100 && s.h === 200, "Size ctor");
+		assert(s.isZero() === false, "Size !isZero");
+		assert(new Size().isZero(), "Size default isZero");
+		assert(!s.isEmpty(), "Size !isEmpty");
+		assert(new Size(0, 5).isEmpty(), "Size isEmpty w=0");
+		assert(new Size(5, 0).isEmpty(), "Size isEmpty h=0");
 
-		hash  .append ("Robot!");
-		image .create ( 60,  80);
-		color .r   = 30;
-		range .min = 30;
-		point .x   = 30;
-		size  .w   = 30;
-		bounds.x   = 30;
+		// Size constructor overloads
+		var sObj = new Size({ w: 3, h: 7 });
+		assert(sObj.w === 3 && sObj.h === 7, "Size ctor obj");
+		var sVal = new Size(42);
+		assert(sVal.w === 42 && sVal.h === 42, "Size ctor single value");
 
-		keyboard.autoDelay.min = 0;
-		mouse   .autoDelay.min = 0;
-		proc.open (process.pid);
-		module._base = 0x4815;
-		segment.base = 0x4815;
-		stats .systemReads = 10;
-		region.start = 0x4815;
-		window.setHandle (0x4815);
-		screen._bounds = bounds;
-		timer.start();
+		// Size eq with object and two numbers
+		assert(s.eq({ w: 100, h: 200 }), "Size eq obj");
+		assert(s.eq(100, 200), "Size eq(w,h)");
+		assert(new Size(5, 5).eq(5), "Size eq single number");
 
-		//----------------------------------------------------------------------------//
+		// Size ne
+		assert(s.ne({ w: 1, h: 2 }), "Size ne obj");
+		assert(s.ne(1, 2), "Size ne(w,h)");
 
-		assert (eHash     === hash    ); assert (cHash     !== hash    );
-		assert (eColor    === color   ); assert (cColor    !== color   );
-		assert (eImage    === image   ); assert (cImage    !== image   );
-		assert (eRange    === range   ); assert (cRange    !== range   );
-		assert (ePoint    === point   ); assert (cPoint    !== point   );
-		assert (eSize     === size    ); assert (cSize     !== size    );
-		assert (eBounds   === bounds  ); assert (cBounds   !== bounds  );
-		assert (eKeyboard === keyboard); assert (cKeyboard !== keyboard);
-		assert (eMouse    === mouse   ); assert (cMouse    !== mouse   );
-		assert (eProc     === proc    ); assert (cProc     !== proc    );
-		assert (eModule   === module  ); assert (cModule   !== module  );
-		assert (eSegment  === segment ); assert (cSegment  !== segment );
-		assert (eMemory   === memory  ); assert (cMemory   !== memory  );
-		assert (eStats    === stats   ); assert (cStats    !== stats   );
-		assert (eRegion   === region  ); assert (cRegion   !== region  );
-		assert (eWindow   === window  ); assert (cWindow   !== window  );
-		assert (eScreen   === screen  ); assert (cScreen   !== screen  );
-		assert (eTimer    === timer   ); assert (cTimer    !== timer   );
+		// Size eq TypeError
+		var szThrew = false;
+		try { s.eq("bad"); } catch(e) { szThrew = true; }
+		assert(szThrew, "Size eq invalid throws");
+		// Size add/sub with plain object and single number
+		var saObj = s.add({ w: 5, h: 10 });
+		assert(saObj.w === 105 && saObj.h === 210, "Size add obj");
+		var ssNum = s.sub(10);
+		assert(ssNum.w === 90 && ssNum.h === 190, "Size sub number");
+		// Size toString
+		assert(s.toString() === "[100, 200]", "Size toString");
 
-		assert (eHash    .eq (hash    )); assert (cHash    .ne (hash    ));
-		assert (eColor   .eq (color   )); assert (cColor   .ne (color   ));
-		assert (eImage   .eq (image   )); assert (cImage   .ne (image   ));
-		assert (eRange   .eq (range   )); assert (cRange   .ne (range   ));
-		assert (ePoint   .eq (point   )); assert (cPoint   .ne (point   ));
-		assert (eSize    .eq (size    )); assert (cSize    .ne (size    ));
-		assert (eBounds  .eq (bounds  )); assert (cBounds  .ne (bounds  ));
-		assert (eProc    .eq (proc    )); assert (cProc    .ne (proc    ));
-		assert (eModule  .eq (module  )); assert (cModule  .ne (module  ));
-		assert (eSegment .eq (segment )); assert (cSegment .ne (segment ));
-		assert (eStats   .eq (stats   )); assert (cStats   .ne (stats   ));
-		assert (eRegion  .eq (region  )); assert (cRegion  .ne (region  ));
-		assert (eWindow  .eq (window  )); assert (cWindow  .ne (window  ));
-		assert (eTimer   .eq (timer   )); assert (cTimer   .ne (timer   ));
+		// Size toPoint, add, sub, clone, normalize
+		var sp = s.toPoint();
+		assert(sp.x === 100 && sp.y === 200, "Size toPoint");
+		var sa = s.add(new Size(10, 20));
+		assert(sa.w === 110 && sa.h === 220, "Size add");
+		var ss = s.sub(new Size(10, 20));
+		assert(ss.w === 90 && ss.h === 180, "Size sub");
+		var scl = s.clone();
+		assert(scl.eq(s), "Size clone eq");
+		var snorm = Size.normalize(50, 60);
+		assert(snorm.w === 50 && snorm.h === 60, "Size normalize(w,h)");
+		var snorm2 = Size.normalize(new Size(1, 2));
+		assert(snorm2.w === 1 && snorm2.h === 2, "Size normalize(Size)");
+		var snorm3 = Size.normalize({ w: 3, h: 4 });
+		assert(snorm3.w === 3 && snorm3.h === 4, "Size normalize(obj)");
+		var snorm4 = Size.normalize(7);
+		assert(snorm4.w === 7 && snorm4.h === 7, "Size normalize(number)");
+		var snorm5 = Size.normalize();
+		assert(snorm5.w === 0 && snorm5.h === 0, "Size normalize()");
 
-		assert (eKeyboard.autoDelay  .eq (keyboard.autoDelay  ));
-		assert (cKeyboard.autoDelay  .ne (keyboard.autoDelay  ));
-		assert (eMouse   .autoDelay  .eq (mouse   .autoDelay  ));
-		assert (cMouse   .autoDelay  .ne (mouse   .autoDelay  ));
-		assert (eScreen  .getBounds().eq (screen  .getBounds()));
-		assert (cScreen  .getBounds().ne (screen  .getBounds()));
+		// Size add/sub with undefined (hits _resolve default branch)
+		var saDef = s.add();
+		assert(saDef.w === 100 && saDef.h === 200, "Size add() default");
+		var ssDef = s.sub();
+		assert(ssDef.w === 100 && ssDef.h === 200, "Size sub() default");
 
+		// Bounds
+		var b = new Bounds(10, 20, 100, 200);
+		assert(b.x === 10 && b.y === 20 && b.w === 100 && b.h === 200, "Bounds ctor");
+		assert(b.isValid(), "Bounds valid");
+		assert(new Bounds().isZero(), "Bounds default isZero");
+		assert(b.getPoint().eq(new Point(10, 20)), "Bounds getPoint");
+		assert(b.getSize().eq(new Size(100, 200)), "Bounds getSize");
+		assert(b.getCenter().x === 60 && b.getCenter().y === 120, "Bounds getCenter");
+		assert(b.containsP(50, 50), "Bounds containsP point");
+		assert(!b.containsP(0, 0), "Bounds !containsP outside");
+
+		// Bounds LTRB
+		assert(b.getLeft() === 10, "Bounds getLeft");
+		assert(b.getTop() === 20, "Bounds getTop");
+		assert(b.getRight() === 110, "Bounds getRight");
+		assert(b.getBottom() === 220, "Bounds getBottom");
+		var ltrb = b.getLTRB();
+		assert(ltrb.l === 10 && ltrb.t === 20 && ltrb.r === 110 && ltrb.b === 220, "Bounds getLTRB");
+
+		// Bounds setLeft/Top/Right/Bottom
+		var bs = new Bounds(10, 20, 100, 200);
+		bs.setLeft(5);
+		assert(bs.x === 5, "Bounds setLeft");
+		bs.setTop(15);
+		assert(bs.y === 15, "Bounds setTop");
+		bs.setRight(200);
+		assert(bs.w === 195, "Bounds setRight");
+		bs.setBottom(300);
+		assert(bs.h === 285, "Bounds setBottom");
+
+		// Bounds setLTRB
+		var bs2 = new Bounds();
+		bs2.setLTRB(10, 20, 110, 220);
+		assert(bs2.x === 10 && bs2.y === 20 && bs2.w === 100 && bs2.h === 200, "Bounds setLTRB");
+
+		// Bounds setLTRB TypeError
+		boundsThrew = false;
+		try { bs2.setLTRB("a", 1, 2, 3); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds setLTRB invalid throws");
+
+		// Bounds setPoint/setSize
+		var bs3 = new Bounds(10, 20, 100, 200);
+		bs3.setPoint(new Point(5, 15));
+		assert(bs3.x === 5 && bs3.y === 15, "Bounds setPoint");
+		bs3.setSize(new Size(50, 60));
+		assert(bs3.w === 50 && bs3.h === 60, "Bounds setSize");
+
+		// Bounds normalize (negative dimensions)
+		var bn = new Bounds(100, 200, -50, -60);
+		bn.normalize();
+		assert(bn.x === 50 && bn.y === 140 && bn.w === 50 && bn.h === 60, "Bounds normalize");
+
+		// Bounds containsB
+		var outer = new Bounds(0, 0, 100, 100);
+		var inner = new Bounds(10, 10, 50, 50);
+		assert(outer.containsB(inner), "Bounds containsB inner");
+		assert(!inner.containsB(outer), "Bounds !containsB outer");
+
+		// Bounds intersects
+		var b1 = new Bounds(0, 0, 100, 100);
+		var b2 = new Bounds(50, 50, 100, 100);
+		assert(b1.intersects(b2), "Bounds intersects overlap");
+		var b3 = new Bounds(200, 200, 50, 50);
+		assert(!b1.intersects(b3), "Bounds !intersects disjoint");
+
+		// Bounds unite
+		var u = b1.unite(b2);
+		assert(u.x === 0 && u.y === 0 && u.w === 150 && u.h === 150, "Bounds unite");
+
+		// Bounds intersect
+		var ix = b1.intersect(b2);
+		assert(ix.x === 50 && ix.y === 50 && ix.w === 50 && ix.h === 50, "Bounds intersect");
+		var ix2 = b1.intersect(b3);
+		assert(ix2.isZero(), "Bounds intersect disjoint -> zero");
+
+		// Bounds clone
+		var bcl = b.clone();
+		assert(bcl.eq(b), "Bounds clone eq");
+
+		// Bounds from {x,y,w,h} object (constructor)
+		var bObj = new Bounds({ x: 10, y: 20, w: 100, h: 200 });
+		assert(bObj.x === 10 && bObj.y === 20 && bObj.w === 100 && bObj.h === 200, "Bounds ctor {x,y,w,h} obj");
+
+		// Bounds from LTRB object
+		var blt = new Bounds({ l: 10, t: 20, r: 110, b: 220 });
+		assert(blt.x === 10 && blt.y === 20 && blt.w === 100 && blt.h === 200, "Bounds ctor LTRB obj");
+
+		// Bounds from Point+Size
+		var bps = new Bounds(new Point(5, 10), new Size(50, 60));
+		assert(bps.x === 5 && bps.y === 10 && bps.w === 50 && bps.h === 60, "Bounds ctor Point+Size");
+
+		// Bounds from plain objects (Point-like + Size-like)
+		var bPlain = new Bounds({ x: 1, y: 2 }, { w: 30, h: 40 });
+		assert(bPlain.x === 1 && bPlain.y === 2 && bPlain.w === 30 && bPlain.h === 40, "Bounds ctor plain obj pair");
+
+		// Bounds from single number
+		var bNum = new Bounds(5);
+		assert(bNum.x === 5 && bNum.y === 5 && bNum.w === 5 && bNum.h === 5, "Bounds ctor single number");
+
+		// Bounds from two numbers
+		var bTwo = new Bounds(3, 7);
+		assert(bTwo.x === 3 && bTwo.y === 3 && bTwo.w === 7 && bTwo.h === 7, "Bounds ctor two numbers");
+
+		// Bounds static normalize
+		var bnorm = Bounds.normalize(1, 2, 3, 4);
+		assert(bnorm.x === 1 && bnorm.y === 2 && bnorm.w === 3 && bnorm.h === 4, "Bounds normalize static");
+
+		// Bounds _resolveArgs/validateArgs: {x,y,w,h} object
+		assert(b.eq({ x: 10, y: 20, w: 100, h: 200 }), "Bounds eq {x,y,w,h} obj");
+		// Bounds _resolveArgs: {l,t,r,b} object
+		assert(b.eq({ l: 10, t: 20, r: 110, b: 220 }), "Bounds eq {l,t,r,b} obj");
+		// Bounds _resolveArgs: (Point-like, Size-like) pair
+		assert(b.eq({ x: 10, y: 20 }, { w: 100, h: 200 }), "Bounds eq (Point,Size) pair");
+		// Bounds ne with object
+		assert(b.ne({ x: 1, y: 2, w: 3, h: 4 }), "Bounds ne obj");
+		// Bounds _resolveArgs: single number
+		var bsn = Bounds.normalize(5);
+		assert(bsn.x === 5 && bsn.y === 5 && bsn.w === 5 && bsn.h === 5, "Bounds normalize(number)");
+		// Bounds _resolveArgs: default (no args)
+		var bsd = Bounds.normalize();
+		assert(bsd.x === 0 && bsd.y === 0 && bsd.w === 0 && bsd.h === 0, "Bounds normalize()");
+		// Bounds _validateArgs: TypeError for string
+		var boundsThrew = false;
+		try { b.eq("invalid"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds eq string throws TypeError");
+		// Bounds _validateArgs: TypeError for invalid object
+		boundsThrew = false;
+		try { b.eq({ z: 1 }); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds eq invalid obj throws TypeError");
+		// Bounds _validateArgs: TypeError for non-number non-object
+		boundsThrew = false;
+		try { b.eq(true); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds eq bool throws TypeError");
+		// Bounds toString
+		assert(b.toString() === "[10, 20, 100, 200]", "Bounds toString");
+		// Bounds containsB with {x,y,w,h} object
+		assert(outer.containsB({ x: 10, y: 10, w: 50, h: 50 }), "Bounds containsB obj");
+		// Bounds intersects with {l,t,r,b} object
+		assert(b1.intersects({ l: 50, t: 50, r: 150, b: 150 }), "Bounds intersects ltrb obj");
+
+		// Bounds containsP TypeError
+		boundsThrew = false;
+		try { b.containsP("bad"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds containsP string throws");
+
+		// Bounds setPoint TypeError
+		boundsThrew = false;
+		try { bs3.setPoint("bad"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds setPoint string throws");
+
+		// Bounds setSize TypeError
+		boundsThrew = false;
+		try { bs3.setSize("bad"); } catch(e) { boundsThrew = true; }
+		assert(boundsThrew, "Bounds setSize string throws");
+
+		// Bounds unite with empty bounds
+		var emptyB = new Bounds();
+		var uRes = emptyB.unite(b1);
+		assert(uRes.eq(b1), "Bounds unite empty+b1 = b1");
+		var uRes2 = b1.unite(emptyB);
+		assert(uRes2.eq(b1), "Bounds unite b1+empty = b1");
+
+		// Color
+		var c = new Color(128, 64, 32, 255);
+		assert(c.r === 128 && c.g === 64 && c.b === 32 && c.a === 255, "Color ctor");
+		assert(c.eq(new Color(128, 64, 32, 255)), "Color eq");
+		assert(c.ne(new Color(0, 0, 0, 0)), "Color ne");
+
+		// Color ARGB
+		var argb = c.getARGB();
+		assert(typeof argb === "number", "Color getARGB number");
+		var c2 = new Color();
+		c2.setARGB(argb);
+		assert(c2.r === 128 && c2.g === 64 && c2.b === 32 && c2.a === 255, "Color setARGB round-trip");
+
+		// Color from single ARGB number
+		var c3 = new Color(argb);
+		assert(c3.r === 128 && c3.g === 64 && c3.b === 32 && c3.a === 255, "Color ctor ARGB number");
+
+		// Color from object
+		var c4 = new Color({ r: 10, g: 20, b: 30 });
+		assert(c4.r === 10 && c4.g === 20 && c4.b === 30 && c4.a === 255, "Color ctor obj default a");
+
+		// Color toString
+		assert(typeof c.toString() === "string", "Color toString");
+		assert(c.toString() === "[128, 64, 32, 255]", "Color toString value");
+
+		// Color eq with object
+		assert(c.eq({ r: 128, g: 64, b: 32, a: 255 }), "Color eq obj");
+		// Color eq with ARGB number
+		assert(c.eq(argb), "Color eq ARGB number");
+		// Color ne with object
+		assert(c.ne({ r: 0, g: 0, b: 0, a: 0 }), "Color ne obj");
+
+		// Color eq TypeError
+		var colThrew = false;
+		try { c.eq("bad"); } catch(e) { colThrew = true; }
+		assert(colThrew, "Color eq invalid throws");
+
+		// Color clone, normalize
+		var ccl = c.clone();
+		assert(ccl.eq(c), "Color clone eq");
+		var cnorm = Color.normalize(100, 200, 50, 128);
+		assert(cnorm.r === 100 && cnorm.g === 200 && cnorm.b === 50 && cnorm.a === 128, "Color normalize");
+
+		// Image
+		var img = new Image(10, 10);
+		assert(img.isValid(), "Image valid");
+		assert(img.getWidth() === 10, "Image width");
+		assert(img.getHeight() === 10, "Image height");
+		assert(img.getLength() === 100, "Image length");
+		assert(img.getLimit() >= 100, "Image limit >= length");
+
+		img.setPixel(0, 0, new Color(255, 0, 0, 255));
+		var px = img.getPixel(0, 0);
+		assert(px.r === 255 && px.g === 0 && px.b === 0, "Image pixel set/get");
+
+		// Image setPixel/getPixel with Point
+		img.setPixel(new Point(1, 1), new Color(0, 255, 0, 255));
+		px = img.getPixel(new Point(1, 1));
+		assert(px.g === 255 && px.r === 0, "Image pixel Point set/get");
+
+		img.fill(100, 200, 50);
+		px = img.getPixel(5, 5);
+		assert(px.r === 100 && px.g === 200 && px.b === 50, "Image fill");
+
+		// Image getData
+		var data = img.getData();
+		assert(data !== null && data.length === 100, "Image getData");
+
+		// Image eq/ne
+		var imgA = new Image(4, 4);
+		imgA.fill(255, 0, 0);
+		var imgB = new Image(4, 4);
+		imgB.fill(255, 0, 0);
+		assert(imgA.eq(imgB), "Image eq same content");
+		imgB.setPixel(0, 0, new Color(0, 0, 0, 255));
+		assert(imgA.ne(imgB), "Image ne different content");
+
+		// Image swap channels
+		var imgS = new Image(2, 2);
+		imgS.fill(10, 20, 30, 40);
+		var swapped = imgS.swap("ABGR");
+		assert(swapped === true, "Image swap ABGR");
+		var pxS = imgS.getPixel(0, 0);
+		assert(pxS.r === 30 && pxS.g === 20 && pxS.b === 10, "Image swap pixel values");
+		assert(imgS.swap("XX") === false, "Image swap invalid returns false");
+
+		// Image flip
+		var imgF = new Image(3, 1);
+		imgF.setPixel(0, 0, new Color(255, 0, 0, 255));
+		imgF.setPixel(1, 0, new Color(0, 255, 0, 255));
+		imgF.setPixel(2, 0, new Color(0, 0, 255, 255));
+		imgF.flip(true, false);
+		assert(imgF.getPixel(0, 0).b === 255 && imgF.getPixel(2, 0).r === 255, "Image flipH");
+		imgF.flip(false, true);
+		assert(imgF.getPixel(0, 0).b === 255, "Image flipV (1 row no-op)");
+		imgF.flip(true, true);
+		assert(imgF.getPixel(0, 0).r === 255, "Image flipBoth");
+
+		// Image single-index getPixel/setPixel (diagonal access)
+		var imgIdx = new Image(5, 5);
+		imgIdx.fill(0, 0, 0, 255);
+		imgIdx.setPixel(2, new Color(99, 88, 77, 255));
+		var pxIdx = imgIdx.getPixel(2);
+		assert(pxIdx.r === 99 && pxIdx.g === 88 && pxIdx.b === 77, "Image single-index get/set");
+
+		// Image fill TypeError for invalid object
+		var fillThrew = false;
+		try { img.fill({ z: 1 }); } catch(e) { fillThrew = true; }
+		assert(fillThrew, "Image fill invalid obj throws");
+		fillThrew = false;
+		try { img.fill("red"); } catch(e) { fillThrew = true; }
+		assert(fillThrew, "Image fill string throws");
+
+		// Image flipV with multi-row image
+		var imgFV = new Image(2, 3);
+		imgFV.setPixel(0, 0, new Color(255, 0, 0, 255));
+		imgFV.setPixel(1, 0, new Color(255, 0, 0, 255));
+		imgFV.setPixel(0, 2, new Color(0, 0, 255, 255));
+		imgFV.setPixel(1, 2, new Color(0, 0, 255, 255));
+		imgFV.flip(false, true);
+		assert(imgFV.getPixel(0, 0).b === 255, "Image flipV top row now blue");
+		assert(imgFV.getPixel(0, 2).r === 255, "Image flipV bottom row now red");
+
+		// Image toString
+		assert(typeof img.toString() === "string", "Image toString");
+
+		// Image clone
+		var imgCl = img.clone();
+		assert(imgCl.eq(img), "Image clone eq");
+
+		// Image single-number constructor (creates square image)
+		var imgSq = new Image(3);
+		assert(imgSq.isValid(), "Image single-number ctor valid");
+		assert(imgSq.getWidth() === 3 && imgSq.getHeight() === 3, "Image single-number 3x3");
+
+		// Image create with Size object
+		var imgSz = new Image();
+		var createRes = imgSz.create(new Size(4, 5));
+		assert(createRes === true, "Image create(Size) returns true");
+		assert(imgSz.getWidth() === 4 && imgSz.getHeight() === 5, "Image create(Size) dims");
+
+		// Image create with single number (square)
+		var imgSq2 = new Image();
+		imgSq2.create(6);
+		assert(imgSq2.getWidth() === 6 && imgSq2.getHeight() === 6, "Image create(number) square");
+
+		// Image setPixel TypeError
+		var setPixThrew = false;
+		try { img.setPixel(true, new Color()); } catch(e) { setPixThrew = true; }
+		assert(setPixThrew, "Image setPixel invalid throws");
+
+		// Image create TypeError
+		var createThrew = false;
+		try { img.create("bad"); } catch(e) { createThrew = true; }
+		assert(createThrew, "Image create invalid throws");
+
+		// Image getPixel TypeError
+		var getPixThrew = false;
+		try { img.getPixel("bad"); } catch(e) { getPixThrew = true; }
+		assert(getPixThrew, "Image getPixel invalid throws");
+
+		// Image create/destroy
+		var img2 = new Image();
+		assert(!img2.isValid(), "Image default invalid");
+		img2.create(5, 5);
+		assert(img2.isValid(), "Image create valid");
+		img2.destroy();
+		assert(!img2.isValid(), "Image destroy invalid");
+
+		// Image copy constructor
+		var imgOrig = new Image(3, 3);
+		imgOrig.fill(77, 88, 99);
+		var imgCopy = new Image(imgOrig);
+		assert(imgCopy.eq(imgOrig), "Image copy ctor eq");
+
+		// Hash
+		var Hash = mechatron.Hash;
+		var h1 = new Hash();
+		var h2 = new Hash();
+		assert(h1.result === h2.result, "Hash default eq");
+		h1.append(42);
+		assert(h1.result !== h2.result, "Hash append changes result");
+
+		// Hash ne, clone
+		assert(h1.ne(h2), "Hash ne");
+		assert(h1.ne(0), "Hash ne number");
+		var hc = h1.clone();
+		assert(hc.eq(h1), "Hash clone eq");
+		assert(!hc.ne(h1), "Hash clone !ne");
+
+		// Hash append with different types
+		var h3 = new Hash();
+		h3.append("hello");
+		assert(h3.result !== 0, "Hash append string");
+		var h4 = new Hash();
+		h4.append(Buffer.from([1, 2, 3]));
+		assert(h4.result !== 0, "Hash append Buffer");
+		var h5 = new Hash();
+		h5.append(new Uint8Array([10, 20, 30]));
+		assert(h5.result !== 0, "Hash append Uint8Array");
+		var h6 = new Hash();
+		h6.append([5, 6, 7]);
+		assert(h6.result !== 0, "Hash append Array");
+
+		// Hash constructor with data
+		var h7 = new Hash("test");
+		assert(h7.result !== 0, "Hash ctor with string");
+		var h8 = new Hash(h7);
+		assert(h8.eq(h7), "Hash copy ctor");
+
+		// Hash constructor with number
+		var h9 = new Hash(12345);
+		assert(h9.result === 12345, "Hash ctor number");
+
+		// Hash append with ArrayBuffer
+		var h10 = new Hash();
+		h10.append(new ArrayBuffer(4));
+		assert(typeof h10.result === "number", "Hash append ArrayBuffer");
+
+		// Hash ne TypeError
+		var hashThrew = false;
+		try { h1.ne("invalid"); } catch(e) { hashThrew = true; }
+		assert(hashThrew, "Hash ne invalid throws");
+		hashThrew = false;
+		try { h1.eq("invalid"); } catch(e) { hashThrew = true; }
+		assert(hashThrew, "Hash eq invalid throws");
+
+		// Hash toString
+		var hStr = h1.toString();
+		assert(hStr.indexOf("0x") === 0, "Hash toString starts with 0x");
+		assert(hStr.length === 10, "Hash toString length 10");
+
+		// Hash append with object that has Symbol.toPrimitive
+		var hPrim = new Hash();
+		var primObj = {};
+		primObj[Symbol.toPrimitive] = function() { return "prim"; };
+		hPrim.append(primObj);
+		assert(hPrim.result !== 0, "Hash append toPrimitive obj");
+
+		log("OK\n");
 		return true;
 	}
 
-	////////////////////////////////////////////////////////////////////////////////
+	function testTimer() {
+		log("  Timer... ");
 
-	function testHash()
-	{
-		var h1 = Hash ("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-		var h2 = Hash ("PZNXECYBMOVHUWSGIKRFLAQDTJ");
-		var h3 = Hash ("PZNXECYBMOVHUWSGIKRFLAQDTJ");
-		var h4 = Hash ("MKQYRNCZFBGXLHEIWAOJPSVTUD");
-		var h5 = Hash ("KMQYRNCZFBGXLHEIWAOJPSVTUD");
-		var h6 = Hash ("LSIWNEURFMZAXYJKQBVGHCPTOD");
-		var h7 = Hash ("LSIWNEURFMZAXYJKQBVGHCPTDO");
-		var h8 = Hash ("QHWBMKZRELNYDJAFUPTXICGOSV");
-		var h9 = Hash ("QHWBMKZRELYNDJAFUPTXICGOSV");
+		var Timer = mechatron.Timer;
 
-		assert (h1.eq (0xABF77822));
-		assert (h2.eq (0xB402F824));
-		assert (h3.eq (0xB402F824));
-		assert (h4.eq (0x211B870C));
-		assert (h5.eq (0x751E361B));
-		assert (h6.eq (0x86A920A7));
-		assert (h7.eq (0xF28F20E4));
-		assert (h8.eq (0x94942DD5));
-		assert (h9.eq (0x50297B6B));
+		// Default construction (not started)
+		var t = new Timer();
+		assert(typeof t.getElapsed() === "number", "Timer elapsed is number");
+		assert(!t.hasStarted(), "Timer default !hasStarted");
+		assert(t.getElapsed() === 0, "Timer default elapsed 0");
 
-		assert ( h1.eq (h1));
-		assert (!h1.eq (h2));
-		assert (!h1.ne (h1));
-		assert ( h1.ne (h2));
+		// Start and measure
+		t.start();
+		assert(t.hasStarted(), "Timer hasStarted after start");
+		Timer.sleep(50);
+		var elapsed = t.getElapsed();
+		assert(elapsed >= 40, "Timer sleep ~50ms: got " + elapsed);
 
-		assert (h2.eq (h3));
-		assert (h3.eq (h2));
-		assert (h4.ne (h5));
-		assert (h5.ne (h4));
-		assert (h6.ne (h7));
-		assert (h7.ne (h6));
-		assert (h8.ne (h9));
-		assert (h9.ne (h8));
+		// Reset
+		t.reset();
+		assert(!t.hasStarted(), "Timer !hasStarted after reset");
+		assert(t.getElapsed() === 0, "Timer elapsed 0 after reset");
 
-		h1 = new Hash (Buffer.from (".M:.Ak=-n.~.%^njfb|*-!9+dO3o"    ));
-		h2 = new Hash (Buffer.from ("7J4P67_09;!5=-;55.2_x!533aH7_X"  ));
-		h3 = new Hash (Buffer.from ("ai!.tc_Z-*%x6%3TCb0Yjxh^84D8A"   ));
-		h4 = new Hash (Buffer.from (";e.o;V7F.qut;thwdO^:|^=!3;.!+~H" ));
-		h5 = new Hash (Buffer.from ("q3_!GG:%8z54=%c!!o7~!.^Wwj%=_R"  ));
-		h6 = new Hash (Buffer.from ("b;B7+t=.^^.L*%i9;|*%S++56q.|%~^u"));
-		h7 = new Hash (Buffer.from ("Us*Fki-XgYTp.OVWL|t~GxrQ5G;7xC"  ));
-		h8 = new Hash (Buffer.from ("%e*5aY681;Z0TX_-n~:4~^0W-6_D"    ));
-		h9 = new Hash (Buffer.from ("r73%Q-9dz!YB:j2!9*64B+M%j+O4e"   ));
+		// Restart
+		t.start();
+		Timer.sleep(10);
+		var restarted = t.restart();
+		assert(restarted >= 5, "Timer restart returns elapsed");
+		assert(t.hasStarted(), "Timer hasStarted after restart");
 
-		assert (h1.result === 0x73FECF56);
-		assert (h2.result === 0xA99190FB);
-		assert (h3.result === 0xBC85CDC1);
-		assert (h4.result === 0xC30A3672);
-		assert (h5.result === 0xAF8EEBEA);
-		assert (h6.result === 0x92FDEC2E);
-		assert (h7.result === 0x129F85F3);
-		assert (h8.result === 0xC9671825);
-		assert (h9.result === 0x2221D6E3);
+		// hasExpired
+		t.start();
+		assert(!t.hasExpired(999999), "Timer !hasExpired large");
 
-		h1 = Hash(); assert (h1.result === 0);
+		// Clone
+		var t2 = t.clone();
+		assert(t2.hasStarted(), "cloned timer hasStarted");
+		assert(t.eq(t2), "cloned timer eq");
 
-		h1.append ("z=6x_p2-8F--=IYi%;jZ3*+i"); assert (h1.result === 0x7192FCF6);
-		h1.append ("32Yl1+*%%I_S:5;4.=8805|v"); assert (h1.result === 0x476D1F3A);
-		h1.append ("_3hdn-!nAA!+B~+:l;7Oz..K"); assert (h1.result === 0x28F13959);
-		h1.append ("0+g|1|T324G;=~=.~^.i;aZn"); assert (h1.result === 0xED3A4012);
+		// hasExpired with 0 (need some time to have passed)
+		Timer.sleep(1);
+		assert(t.hasExpired(0), "Timer hasExpired(0)");
 
-		//----------------------------------------------------------------------------//
+		// ne
+		Timer.sleep(5);
+		var tn = new Timer();
+		tn.start();
+		assert(t.ne(tn), "Timer ne different start");
 
-		assert (h1.append, h1, [ ]);
-		assert (h1.eq, h1, ["a"]);
-		assert (h1.ne, h1, ["a"]);
+		// Comparison
+		Timer.sleep(10);
+		var t3 = new Timer();
+		t3.start();
+		assert(t.lt(t3) === false, "earlier timer !lt later");
+		assert(t.gt(t3) === true, "earlier timer gt later");
+		assert(t.le(t3) === false, "earlier timer !le later");
+		assert(t.ge(t3) === true, "earlier timer ge later");
 
-		assert (typeof h1.append ("") === "undefined");
+		// Static compare (including equal)
+		assert(Timer.compare(t, t3) > 0, "Timer.compare earlier>later");
+		var teq1 = new Timer();
+		teq1.start();
+		var teq2 = teq1.clone();
+		assert(Timer.compare(teq1, teq2) === 0, "Timer.compare equal");
 
-		assert (typeof h1.eq (h2) === "boolean");
-		assert (typeof h1.ne (h2) === "boolean");
-		assert (typeof h1.eq (10) === "boolean");
-		assert (typeof h1.ne (10) === "boolean");
+		// Restart on non-started timer
+		var tns = new Timer();
+		assert(tns.restart() === 0, "Timer restart non-started returns 0");
 
+		// Timer.sleep with min,max numbers
+		Timer.sleep(1, 5);
+
+		// Static getCpuTime
+		var c1 = Timer.getCpuTime();
+		Timer.sleep(10);
+		var c2 = Timer.getCpuTime();
+		assert(c2 > c1, "getCpuTime monotonic");
+
+		log("OK\n");
 		return true;
 	}
 
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testColor()
-	{
-		var c1 = Color ();
-		var c2 = Color (0xDC195A);
-		var c3 = Color (0x5A6E2882);
-		var c4 = Color (100, 215, 180);
-		var c5 = Color (110, 40, 130, 90);
-
-		assert (c1.a ===   0 && c1.r ===    0 && c1.g ===   0 && c1.b ===   0);
-		assert (c2.a ===   0 && c2.r ===  220 && c2.g ===  25 && c2.b ===  90);
-		assert (c3.a ===  90 && c3.r ===  110 && c3.g ===  40 && c3.b === 130);
-		assert (c4.a === 255 && c4.r ===  100 && c4.g === 215 && c4.b === 180);
-		assert (c5.a ===  90 && c5.r ===  110 && c5.g ===  40 && c5.b === 130);
-
-		assert (c1.getARGB() === 0         );
-		assert (c2.getARGB() === 0xDC195A  );
-		assert (c3.getARGB() === 0x5A6E2882);
-		assert (c4.getARGB() === 0xFF64D7B4);
-		assert (c5.getARGB() === 0x5A6E2882);
-
-		c2.setARGB (0xFF64D7B4);
-
-		assert ( c1.eq (c1));
-		assert (!c1.eq (c2));
-		assert (!c1.ne (c1));
-		assert ( c1.ne (c2));
-
-		assert (c2.ne (c3));
-		assert (c3.ne (c2));
-		assert (c3.ne (c4));
-		assert (c4.ne (c3));
-		assert (c4.ne (c5));
-		assert (c5.ne (c4));
-		assert (c2.eq (c4));
-		assert (c4.eq (c2));
-		assert (c3.eq (c5));
-		assert (c5.eq (c3));
-
-		//----------------------------------------------------------------------------//
-
-		c2 = Color (c3);
-		c3 = Color ({ r: 180, g: 200, b: 100        });
-		c4 = Color ({ r: 160, g: 180, b: 120, a: 20 });
-		c5 = Color (c3);
-
-		assert (c2.a ===  90 && c2.r ===  110 && c2.g ===  40 && c2.b === 130);
-		assert (c3.a === 255 && c3.r ===  180 && c3.g === 200 && c3.b === 100);
-		assert (c4.a ===  20 && c4.r ===  160 && c4.g === 180 && c4.b === 120);
-		assert (c5.a === 255 && c5.r ===  180 && c5.g === 200 && c5.b === 100);
-
-		assert (c3.ne (  ));
-		assert (c3.eq (c3));
-		assert (c3.eq (0xFFB4C864        ));
-		assert (c3.eq (180, 200, 100, 255));
-		assert (c3.eq (180, 200, 100     ));
-		assert (c3.eq ({ r: 180, g: 200, b: 100, a: 255 }));
-		assert (c3.eq ({ r: 180, g: 200, b: 100         }));
-
-		assert (c4.ne (  ));
-		assert (c4.eq (c4));
-		assert (c4.eq (0x14A0B478       ));
-		assert (c4.eq (160, 180, 120, 20));
-		assert (c4.ne (160, 180, 120    ));
-		assert (c4.eq ({ r: 160, g: 180, b: 120, a: 20 }));
-		assert (c4.ne ({ r: 160, g: 180, b: 120        }));
-
-		assert (c1.setARGB, c1, [   ]);
-		assert (c1.setARGB, c1, ["a"]);
-
-		assert (c1.eq, c1, ["a"]);
-		assert (c1.ne, c1, ["a"]);
-
-		assert (c1.eq, c1, [{ r: 0 }]);
-		assert (c1.ne, c1, [{ g: 0 }]);
-		assert (c1.eq, c1, [{ b: 0 }]);
-		assert (c1.ne, c1, [{ a: 0 }]);
-
-		assert (typeof c1.getARGB ( ) === "number"   );
-		assert (typeof c1.setARGB (0) === "undefined");
-
-		assert (typeof Color.normalize() === "object");
-
-		assert (typeof c1.eq (  ) === "boolean");
-		assert (typeof c1.ne (  ) === "boolean");
-		assert (typeof c1.eq (c2) === "boolean");
-		assert (typeof c1.ne (c2) === "boolean");
-
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testImage1()
-	{
-		var i1 = Image ( );
-		var i2 = Image (0);
-		var i3 = Image (6);
-		var i4 = Image (2, 4);
-		var i5 = Image (0, 4);
-		var i6 = Image (2, 0);
-
-		assert (!i1.isValid());
-		assert (!i2.isValid());
-		assert ( i3.isValid());
-		assert ( i4.isValid());
-		assert (!i5.isValid());
-		assert (!i6.isValid());
-
-		assert (i1.getWidth() === 0); assert (i1.getHeight() === 0);
-		assert (i2.getWidth() === 0); assert (i2.getHeight() === 0);
-		assert (i3.getWidth() === 6); assert (i3.getHeight() === 6);
-		assert (i4.getWidth() === 2); assert (i4.getHeight() === 4);
-		assert (i5.getWidth() === 0); assert (i5.getHeight() === 0);
-		assert (i6.getWidth() === 0); assert (i6.getHeight() === 0);
-
-		assert (i1.getLength() ===  0); assert (!i1.getData());
-		assert (i2.getLength() ===  0); assert (!i2.getData());
-		assert (i3.getLength() === 36); assert ( i3.getData());
-		assert (i4.getLength() ===  8); assert ( i4.getData());
-		assert (i5.getLength() ===  0); assert (!i5.getData());
-		assert (i6.getLength() ===  0); assert (!i6.getData());
-
-		assert ( i3.create (6, 8));
-		assert (!i3.create (6, 0));
-		assert (!i3.create (0, 8));
-		assert (!i3.create (0, 0));
-		assert (!i3.create (0   ));
-
-		assert (i3.isValid() === true);
-		assert (i3.getWidth () ===  6);
-		assert (i3.getHeight() ===  8);
-		assert (i3.getLength() === 48);
-		assert (i3.getLimit () === 48);
-
-		assert (i3.create (4));
-		assert (i4.create (4));
-
-		assert (i3.isValid() === true);
-		assert (i3.getWidth () ===  4);
-		assert (i3.getHeight() ===  4);
-		assert (i3.getLength() === 16);
-		assert (i3.getLimit () === 48);
-
-		assert (i4.isValid() === true);
-		assert (i4.getWidth () ===  4);
-		assert (i4.getHeight() ===  4);
-		assert (i4.getLength() === 16);
-		assert (i4.getLimit () === 16);
-
-		i3.getData()[ 0] = 0x00808080;
-		i3.getData()[ 1] = 0x08808080;
-		i3.getData()[ 2] = 0x80808080;
-		i3.getData()[ 3] = 0xFF808080;
-
-		i3.getData()[ 4] = 0x00FF0000;
-		i3.getData()[ 5] = 0x08FF0000;
-		i3.getData()[ 6] = 0x80FF0000;
-		i3.getData()[ 7] = 0xFFFF0000;
-
-		i3.getData()[ 8] = 0x0000FF00;
-		i3.getData()[ 9] = 0x0800FF00;
-		i3.getData()[10] = 0x8000FF00;
-		i3.getData()[11] = 0xFF00FF00;
-
-		i3.getData()[12] = 0x000000FF;
-		i3.getData()[13] = 0x080000FF;
-		i3.getData()[14] = 0x800000FF;
-		i3.getData()[15] = 0xFF0000FF;
-
-		i4.setPixel (0, 0, Color (0x00808080));
-		i4.setPixel (1, 0, Color (0x08808080));
-		i4.setPixel (2, 0, Color (0x80808080));
-		i4.setPixel (3, 0, Color (0xFF808080));
-
-		i4.setPixel (0, 1, Color (0x00FF0000));
-		i4.setPixel (1, 1, Color (0x08FF0000));
-		i4.setPixel (2, 1, Color (0x80FF0000));
-		i4.setPixel (3, 1, Color (0xFFFF0000));
-
-		i4.setPixel (0, 2, Color (0x0000FF00));
-		i4.setPixel (1, 2, Color (0x0800FF00));
-		i4.setPixel (2, 2, Color (0x8000FF00));
-		i4.setPixel (3, 2, Color (0xFF00FF00));
-
-		i4.setPixel (0, 3, Color (0x000000FF));
-		i4.setPixel (1, 3, Color (0x080000FF));
-		i4.setPixel (2, 3, Color (0x800000FF));
-		i4.setPixel (3, 3, Color (0xFF0000FF));
-
-		assert (i3.getPixel (0).eq (0x00808080));
-		assert (i3.getPixel (1).eq (0x08FF0000));
-		assert (i3.getPixel (2).eq (0x8000FF00));
-		assert (i3.getPixel (3).eq (0xFF0000FF));
-
-		assert (i3.getPixel (3, 0).eq (0xFF808080));
-		assert (i3.getPixel (2, 1).eq (0x80FF0000));
-		assert (i3.getPixel (1, 2).eq (0x0800FF00));
-		assert (i3.getPixel (0, 3).eq (0x000000FF));
-
-		assert (i4.getPixel (0).eq (0x00808080));
-		assert (i4.getPixel (1).eq (0x08FF0000));
-		assert (i4.getPixel (2).eq (0x8000FF00));
-		assert (i4.getPixel (3).eq (0xFF0000FF));
-
-		assert (i4.getPixel (3, 0).eq (0xFF808080));
-		assert (i4.getPixel (2, 1).eq (0x80FF0000));
-		assert (i4.getPixel (1, 2).eq (0x0800FF00));
-		assert (i4.getPixel (0, 3).eq (0x000000FF));
-
-		assert ( i3.eq (i4));
-		assert (!i3.ne (i4));
-
-		var testGetImage = function()
-		{
-			var i = Image (2, 2);
-			i.getData()[0] = 0x00808080;
-			i.getData()[1] = 0x08808080;
-			i.getData()[2] = 0x80808080;
-			i.getData()[3] = 0xFF808080;
-			return i;
-		};
-
-		i2 = Image (i3);
-		i4 = Image (i3);
-		i5 = testGetImage();
-		i6 = Image (i3);
-		i3.destroy (  );
-
-		assert (i4.getPixel (0).eq (0x00808080));
-		assert (i4.getPixel (1).eq (0x08FF0000));
-		assert (i4.getPixel (2).eq (0x8000FF00));
-		assert (i4.getPixel (3).eq (0xFF0000FF));
-
-		assert (i4.getPixel (3, 0).eq (0xFF808080));
-		assert (i4.getPixel (2, 1).eq (0x80FF0000));
-		assert (i4.getPixel (1, 2).eq (0x0800FF00));
-		assert (i4.getPixel (0, 3).eq (0x000000FF));
-
-		assert ( i2.isValid());
-		assert (!i3.isValid());
-		assert ( i4.isValid());
-		assert ( i5.isValid());
-		assert ( i6.isValid());
-
-		assert (i2.getWidth() === 4); assert (i2.getHeight() === 4);
-		assert (i3.getWidth() === 0); assert (i3.getHeight() === 0);
-		assert (i4.getWidth() === 4); assert (i4.getHeight() === 4);
-		assert (i5.getWidth() === 2); assert (i5.getHeight() === 2);
-		assert (i6.getWidth() === 4); assert (i6.getHeight() === 4);
-
-		assert (i2.getLength() === 16); assert ( i2.getData());
-		assert (i3.getLength() ===  0); assert (!i3.getData());
-		assert (i4.getLength() === 16); assert ( i4.getData());
-		assert (i5.getLength() ===  4); assert ( i5.getData());
-		assert (i6.getLength() === 16); assert ( i6.getData());
-
-		assert ( i1.eq (i1));
-		assert (!i1.eq (i2));
-		assert (!i1.ne (i1));
-		assert ( i1.ne (i2));
-
-		assert (i2.ne (i3));
-		assert (i3.ne (i2));
-		assert (i2.eq (i4));
-		assert (i4.eq (i2));
-		assert (i4.ne (i5));
-		assert (i5.ne (i4));
-		assert (i4.eq (i6));
-		assert (i6.eq (i4));
-
-		assert (i4.create (2, 2));
-		assert (i4.eq (i5));
-		assert (i5.eq (i4));
-		i5.destroy();
-		assert (i4.ne (i5));
-		assert (i5.ne (i4));
-
-		var i7 = Image (  );
-		var i8 = Image (  );
-		var i9 = Image (i1);
-		i7 = Image (i1);
-		i8 = Image (i1);
-		i1.destroy (  );
-
-		i2 = Image (i7);
-		i4 = Image (i8);
-
-		i2 = Image (i2);
-		i4 = Image (i4);
-		i4.destroy (  );
-
-		assert (!i2.isValid());
-		assert (!i4.isValid());
-		assert (!i7.isValid());
-		assert (!i8.isValid());
-		assert (!i9.isValid());
-
-		assert (i2.getLength() === 0);
-		assert (i4.getLength() === 0);
-		assert (i7.getLength() === 0);
-		assert (i8.getLength() === 0);
-		assert (i9.getLength() === 0);
-
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testImage2()
-	{
-		var i1 = Image (    );
-		var i2 = Image (2, 3);
-		var data = i2.getData();
-		data[0] = 0x00FF0000;
-		data[1] = 0x0000FF00;
-		data[2] = 0x000000FF;
-		data[3] = 0xFFFF0000;
-		data[4] = 0xFF00FF00;
-		data[5] = 0xFF0000FF;
-
-		assert (!i1.fill (0x00, 0x00, 0x00, 0x00));
-		assert (!i1.swap ("argb"      ));
-		assert (!i1.flip (false, false));
-
-		assert (!i2.swap (""     ));
-		assert (!i2.swap ("gb"   ));
-		assert (!i2.swap ("r"    ));
-		assert (!i2.swap ("agb"  ));
-		assert (!i2.swap ("x"    ));
-		assert (!i2.swap ("airgb"));
-		assert (!i2.swap ("aargb"));
-		assert (!i2.swap ("argbr"));
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.swap ("argb"));
-		assert (data[0] === 0x00FF0000);
-		assert (data[1] === 0x0000FF00);
-		assert (data[2] === 0x000000FF);
-		assert (data[3] === 0xFFFF0000);
-		assert (data[4] === 0xFF00FF00);
-		assert (data[5] === 0xFF0000FF);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.swap ("rgba"));
-		assert (data[0] === 0xFF000000);
-		assert (data[1] === 0x00FF0000);
-		assert (data[2] === 0x0000FF00);
-		assert (data[3] === 0xFF0000FF);
-		assert (data[4] === 0x00FF00FF);
-		assert (data[5] === 0x0000FFFF);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.swap ("abgr"));
-		assert (data[0] === 0x000000FF);
-		assert (data[1] === 0x0000FF00);
-		assert (data[2] === 0x00FF0000);
-		assert (data[3] === 0xFF0000FF);
-		assert (data[4] === 0xFF00FF00);
-		assert (data[5] === 0xFFFF0000);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.swap ("bgra"));
-		assert (data[0] === 0x0000FF00);
-		assert (data[1] === 0x00FF0000);
-		assert (data[2] === 0xFF000000);
-		assert (data[3] === 0x0000FFFF);
-		assert (data[4] === 0x00FF00FF);
-		assert (data[5] === 0xFF0000FF);
-
-		assert (i1.create (2, 2));
-		assert (i1.getLimit() === 6);
-
-		assert (i1.fill (0x00, 0x00, 0x00, 0x00));
-		assert (data[0] === 0x00000000);
-		assert (data[1] === 0x00000000);
-		assert (data[2] === 0x00000000);
-		assert (data[3] === 0x00000000);
-
-		assert (i1.fill (0xFF, 0x00, 0xFF, 0x00));
-		assert (data[0] === 0x00FF00FF);
-		assert (data[1] === 0x00FF00FF);
-		assert (data[2] === 0x00FF00FF);
-		assert (data[3] === 0x00FF00FF);
-
-		assert (i1.fill (0x00, 0xFF, 0x00));
-		assert (data[0] === 0xFF00FF00);
-		assert (data[1] === 0xFF00FF00);
-		assert (data[2] === 0xFF00FF00);
-		assert (data[3] === 0xFF00FF00);
-
-		assert (i1.fill (0x80, 0x08, 0x80, 0x08));
-		assert (data[0] === 0x08800880);
-		assert (data[1] === 0x08800880);
-		assert (data[2] === 0x08800880);
-		assert (data[3] === 0x08800880);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.flip (false, false));
-		assert (data[0] === 0x00FF0000); assert (data[1] === 0x0000FF00);
-		assert (data[2] === 0x000000FF); assert (data[3] === 0xFFFF0000);
-		assert (data[4] === 0xFF00FF00); assert (data[5] === 0xFF0000FF);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.flip (true, false));
-		assert (data[0] === 0x0000FF00); assert (data[1] === 0x00FF0000);
-		assert (data[2] === 0xFFFF0000); assert (data[3] === 0x000000FF);
-		assert (data[4] === 0xFF0000FF); assert (data[5] === 0xFF00FF00);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.flip (false, true));
-		assert (data[0] === 0xFF00FF00); assert (data[1] === 0xFF0000FF);
-		assert (data[2] === 0x000000FF); assert (data[3] === 0xFFFF0000);
-		assert (data[4] === 0x00FF0000); assert (data[5] === 0x0000FF00);
-
-		i1 = Image (i2); data = i1.getData();
-		assert (i1.flip (true, true));
-		assert (data[0] === 0xFF0000FF); assert (data[1] === 0xFF00FF00);
-		assert (data[2] === 0xFFFF0000); assert (data[3] === 0x000000FF);
-		assert (data[4] === 0x0000FF00); assert (data[5] === 0x00FF0000);
-
-		assert (i1.create (1, 5));
-		data = i1.getData();
-		data[0] = 0xFF000000;
-		data[1] = 0x00FF0000;
-		data[2] = 0xFFFFFFFF;
-		data[3] = 0x0000FF00;
-		data[4] = 0x000000FF;
-		assert (i1.flip (true, true));
-		assert (data[0] === 0x000000FF);
-		assert (data[1] === 0x0000FF00);
-		assert (data[2] === 0xFFFFFFFF);
-		assert (data[3] === 0x00FF0000);
-		assert (data[4] === 0xFF000000);
-
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testImage3()
-	{
-		var i1 = Image (2);
-
-		assert (i1.create,   i1, ["a"     ]);
-		assert (i1.create,   i1, [{ w: 0 }]);
-		assert (i1.getPixel, i1, ["a"     ]);
-		assert (i1.getPixel, i1, [{ x: 0 }]);
-		assert (i1.setPixel, i1, ["a"     ]);
-		assert (i1.setPixel, i1, [{ x: 0 }]);
-		assert (i1.setPixel, i1, [ 0,  0  ]);
-		assert (i1.fill,     i1, ["a"     ]);
-		assert (i1.fill,     i1, [{ r: 0 }]);
-		assert (i1.swap,     i1, [        ]);
-		assert (i1.swap,     i1, [ 0      ]);
-		assert (i1.flip,     i1, [        ]);
-		assert (i1.flip,     i1, ["a"     ]);
-		assert (i1.flip,     i1, [ 0      ]);
-		assert (i1.eq,       i1, [        ]);
-		assert (i1.ne,       i1, [        ]);
-		assert (i1.eq,       i1, ["a"     ]);
-		assert (i1.ne,       i1, ["a"     ]);
-
-		assert (typeof i1.destroy   (  ) === "undefined"  );
-		assert (typeof i1.isValid   (  ) === "boolean"    );
-		assert (typeof i1.getWidth  (  ) === "number"     );
-		assert (typeof i1.getHeight (  ) === "number"     );
-		assert (typeof i1.getLength (  ) === "number"     );
-		assert (typeof i1.getLimit  (  ) === "number"     );
-		assert (       i1.getData   (  ) === null         );
-		assert (       i1.getPixel  (0 ) instanceof Color );
-		assert (typeof i1.setPixel  (0 , Color()) === "undefined");
-		assert (typeof i1.fill      (0 ) === "boolean");
-		assert (typeof i1.swap      ("") === "boolean");
-		assert (typeof i1.flip      (false, false) === "boolean" );
-		assert (typeof i1.eq        (i1) === "boolean");
-		assert (typeof i1.ne        (i1) === "boolean");
-
-		assert (typeof i1.create    (2 ) === "boolean");
-		assert (typeof i1.isValid   (  ) === "boolean");
-		assert (typeof i1.getWidth  (  ) === "number" );
-		assert (typeof i1.getHeight (  ) === "number" );
-		assert (typeof i1.getLength (  ) === "number" );
-		assert (typeof i1.getLimit  (  ) === "number" );
-		assert (       i1.getData   (  ) instanceof Uint32Array  );
-		assert (       i1.getPixel  (0 ) instanceof Color        );
-		assert (typeof i1.setPixel  (0 , Color()) === "undefined");
-		assert (typeof i1.fill      (0 ) === "boolean");
-		assert (typeof i1.swap      ("") === "boolean");
-		assert (typeof i1.flip      (false, false) === "boolean" );
-		assert (typeof i1.eq        (i1) === "boolean");
-		assert (typeof i1.ne        (i1) === "boolean");
-
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testRange()
-	{
-		var r1 = Range ();
-		var r2 = Range ( 5    );
-		var r3 = Range ( 2,  8);
-		var r4 = Range ( 7,  3);
-		var r5 = Range (-4,  5);
-		var r6 = Range ( 3, -6);
-		var r7 = Range (-8, -4);
-		var r8 = Range (-3, -7);
-		var r9 = Range (-6, -6);
-
-		assert (r1.min ===  0 && r1.max ===  0);
-		assert (r2.min ===  5 && r2.max ===  5);
-		assert (r3.min ===  2 && r3.max ===  8);
-		assert (r4.min ===  7 && r4.max ===  3);
-		assert (r5.min === -4 && r5.max ===  5);
-		assert (r6.min ===  3 && r6.max === -6);
-		assert (r7.min === -8 && r7.max === -4);
-		assert (r8.min === -3 && r8.max === -7);
-		assert (r9.min === -6 && r9.max === -6);
-
-		assert (r1.getRange() ===  0);
-		assert (r2.getRange() ===  0);
-		assert (r3.getRange() ===  6);
-		assert (r4.getRange() === -4);
-		assert (r5.getRange() ===  9);
-		assert (r6.getRange() === -9);
-		assert (r7.getRange() ===  4);
-		assert (r8.getRange() === -4);
-		assert (r9.getRange() ===  0);
-
-		assert ( r1.contains (0));
-		assert (!r2.contains (4));
-		assert ( r2.contains (5));
-		assert (!r2.contains (6));
-		assert (!r3.contains (1));
-		assert ( r3.contains (2));
-		assert ( r3.contains (3));
-		assert ( r3.contains (7));
-		assert ( r3.contains (8));
-		assert (!r3.contains (9));
-		assert (!r4.contains (6));
-		assert (!r4.contains (7));
-		assert (!r4.contains (8));
-		assert (!r4.contains (2));
-		assert (!r4.contains (3));
-		assert (!r4.contains (4));
-
-		assert (!r1.contains (0, false));
-		assert (!r2.contains (4, false));
-		assert (!r2.contains (5, false));
-		assert (!r2.contains (6, false));
-		assert (!r3.contains (1, false));
-		assert (!r3.contains (2, false));
-		assert ( r3.contains (3, false));
-		assert ( r3.contains (7, false));
-		assert (!r3.contains (8, false));
-		assert (!r3.contains (9, false));
-		assert (!r4.contains (6, false));
-		assert (!r4.contains (7, false));
-		assert (!r4.contains (8, false));
-		assert (!r4.contains (2, false));
-		assert (!r4.contains (3, false));
-		assert (!r4.contains (4, false));
-
-		var min1 = 99; var max1 = -99;
-		var min2 = 99; var max2 = -99;
-		var min3 = 99; var max3 = -99;
-		var min4 = 99; var max4 = -99;
-		var min5 = 99; var max5 = -99;
-		var min6 = 99; var max6 = -99;
-		var min7 = 99; var max7 = -99;
-		var min8 = 99; var max8 = -99;
-		var min9 = 99; var max9 = -99;
-
-		for (var i = 0; i < 99999; ++i)
-		{
-			var rand1 = r1.getRandom();
-			var rand2 = r2.getRandom();
-			var rand3 = r3.getRandom();
-			var rand4 = r4.getRandom();
-			var rand5 = r5.getRandom();
-			var rand6 = r6.getRandom();
-			var rand7 = r7.getRandom();
-			var rand8 = r8.getRandom();
-			var rand9 = r9.getRandom();
-
-			if (min1 > rand1) min1 = rand1; if (max1 < rand1) max1 = rand1;
-			if (min2 > rand2) min2 = rand2; if (max2 < rand2) max2 = rand2;
-			if (min3 > rand3) min3 = rand3; if (max3 < rand3) max3 = rand3;
-			if (min4 > rand4) min4 = rand4; if (max4 < rand4) max4 = rand4;
-			if (min5 > rand5) min5 = rand5; if (max5 < rand5) max5 = rand5;
-			if (min6 > rand6) min6 = rand6; if (max6 < rand6) max6 = rand6;
-			if (min7 > rand7) min7 = rand7; if (max7 < rand7) max7 = rand7;
-			if (min8 > rand8) min8 = rand8; if (max8 < rand8) max8 = rand8;
-			if (min9 > rand9) min9 = rand9; if (max9 < rand9) max9 = rand9;
-		}
-
-		assert (min1 ===  0 && max1 ===  0);
-		assert (min2 ===  5 && max2 ===  5);
-		assert (min3 ===  2 && max3 ===  7);
-		assert (min4 ===  7 && max4 ===  7);
-		assert (min5 === -4 && max5 ===  4);
-		assert (min6 ===  3 && max6 ===  3);
-		assert (min7 === -8 && max7 === -5);
-		assert (min8 === -3 && max8 === -3);
-		assert (min9 === -6 && max9 === -6);
-
-		r6 =  Range (r2   );
-		r7 =  Range (r3   );
-		r2.setRange ( 6   );
-		r3.setRange ( 3, 9);
-		r4.setRange ( 6, 2);
-		r5.setRange (-3, 8);
-		r8 =  Range (r4   );
-		r9.setRange (-3, 8);
-
-		assert (r1.min ===  0 && r1.max === 0);
-		assert (r2.min ===  6 && r2.max === 6);
-		assert (r3.min ===  3 && r3.max === 9);
-		assert (r4.min ===  6 && r4.max === 2);
-		assert (r5.min === -3 && r5.max === 8);
-		assert (r6.min ===  5 && r6.max === 5);
-		assert (r7.min ===  2 && r7.max === 8);
-		assert (r8.min ===  6 && r8.max === 2);
-		assert (r9.min === -3 && r9.max === 8);
-
-		assert ( r1.eq (r1));
-		assert (!r1.eq (r2));
-		assert (!r1.ne (r1));
-		assert ( r1.ne (r2));
-
-		assert (r6.ne (r2));
-		assert (r2.ne (r6));
-		assert (r8.eq (r4));
-		assert (r4.eq (r8));
-		assert (r3.ne (r5));
-		assert (r5.ne (r3));
-		assert (r9.eq (r5));
-		assert (r5.eq (r9));
-
-		//----------------------------------------------------------------------------//
-
-		r2 = Range (r3);
-		r3 = Range ({ min:  2, max:  8 });
-		r4 = Range ({ min: -6, max:  2 });
-		r5 = Range ({ min: -8, max: -6 });
-		r6 = Range (r3);
-		r7.setRange ({ min:  2, max:  8 });
-		r8.setRange ({ min: -8, max: -6 });
-
-		assert (r2.min ===  3 && r2.max ===  9);
-		assert (r3.min ===  2 && r3.max ===  8);
-		assert (r4.min === -6 && r4.max ===  2);
-		assert (r5.min === -8 && r5.max === -6);
-		assert (r6.min ===  2 && r6.max ===  8);
-		assert (r7.min ===  2 && r7.max ===  8);
-		assert (r8.min === -8 && r8.max === -6);
-
-		assert (r3.ne (  ));
-		assert (r3.eq (r3));
-		assert (r3.ne ( 8));
-		assert (r3.eq ( 2, 8));
-		assert (r3.eq ({ min:  2, max: 8 }));
-
-		assert (r4.ne (  ));
-		assert (r4.eq (r4));
-		assert (r4.ne (-6));
-		assert (r4.eq (-6, 2));
-		assert (r4.eq ({ min: -6, max: 2 }));
-
-		assert (r1.contains, r1, [   ]);
-		assert (r1.contains, r1, ["a"]);
-		assert (r1.contains, r1, [ 0, "a"]);
-
-		assert (r1.eq, r1, ["a"]);
-		assert (r1.ne, r1, ["a"]);
-
-		assert (r1.eq, r1, [{ min: 0 }]);
-		assert (r1.ne, r1, [{ max: 0 }]);
-
-		assert (typeof r1.getRange  ( ) === "number"   );
-		assert (typeof r1.setRange  ( ) === "undefined");
-		assert (typeof r1.getRandom ( ) === "number"   );
-		assert (typeof r1.contains  (0) === "boolean"  );
-
-		assert (typeof Range.normalize() === "object");
-
-		assert (typeof r1.eq (  ) === "boolean");
-		assert (typeof r1.ne (  ) === "boolean");
-		assert (typeof r1.eq (r2) === "boolean");
-		assert (typeof r1.ne (r2) === "boolean");
-
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testBounds()
-	{
-		var p1 = Point ();
-		var p2 = Point ( 5    );
-		var p3 = Point ( 0,  8);
-		var p4 = Point (-4,  0);
-		var p5 = Point ( 3, -6);
-		var p6 = Point (-3, -7);
-
-		var s1 = Size ();
-		var s2 = Size ( 5    );
-		var s3 = Size ( 0,  8);
-		var s4 = Size (-4,  0);
-		var s5 = Size ( 3, -6);
-		var s6 = Size (-3, -7);
-
-		var p7 = s2.toPoint();
-		var p8 = s6.toPoint();
-		var p9 = Point (-6);
-
-		var s7 = p2.toSize();
-		var s8 = p6.toSize();
-		var s9 = Size (-6);
-
-		assert (p1.x ===  0 && p1.y ===  0);
-		assert (p2.x ===  5 && p2.y ===  5);
-		assert (p3.x ===  0 && p3.y ===  8);
-		assert (p4.x === -4 && p4.y ===  0);
-		assert (p5.x ===  3 && p5.y === -6);
-		assert (p6.x === -3 && p6.y === -7);
-		assert (p7.x ===  5 && p7.y ===  5);
-		assert (p8.x === -3 && p8.y === -7);
-		assert (p9.x === -6 && p9.y === -6);
-
-		assert (s1.w ===  0 && s1.h ===  0);
-		assert (s2.w ===  5 && s2.h ===  5);
-		assert (s3.w ===  0 && s3.h ===  8);
-		assert (s4.w === -4 && s4.h ===  0);
-		assert (s5.w ===  3 && s5.h === -6);
-		assert (s6.w === -3 && s6.h === -7);
-		assert (s7.w ===  5 && s7.h ===  5);
-		assert (s8.w === -3 && s8.h === -7);
-		assert (s9.w === -6 && s9.h === -6);
-
-		assert ( p1.isZero());
-		assert (!p2.isZero());
-		assert (!p3.isZero());
-		assert (!p4.isZero());
-		assert (!p5.isZero());
-		assert (!p6.isZero());
-		assert (!p7.isZero());
-		assert (!p8.isZero());
-		assert (!p9.isZero());
-
-		assert ( s1.isZero()); assert ( s1.isEmpty());
-		assert (!s2.isZero()); assert (!s2.isEmpty());
-		assert (!s3.isZero()); assert ( s3.isEmpty());
-		assert (!s4.isZero()); assert ( s4.isEmpty());
-		assert (!s5.isZero()); assert (!s5.isEmpty());
-		assert (!s6.isZero()); assert (!s6.isEmpty());
-		assert (!s7.isZero()); assert (!s7.isEmpty());
-		assert (!s8.isZero()); assert (!s8.isEmpty());
-		assert (!s9.isZero()); assert (!s9.isEmpty());
-
-		assert (p1.toSize ().w ===  0 && p1.toSize ().h === 0);
-		assert (p2.toSize ().w ===  5 && p2.toSize ().h === 5);
-		assert (p3.toSize ().w ===  0 && p3.toSize ().h === 8);
-		assert (p4.toSize ().w === -4 && p4.toSize ().h === 0);
-
-		assert (s1.toPoint().x ===  0 && s1.toPoint().y === 0);
-		assert (s2.toPoint().x ===  5 && s2.toPoint().y === 5);
-		assert (s3.toPoint().x ===  0 && s3.toPoint().y === 8);
-		assert (s4.toPoint().x === -4 && s4.toPoint().y === 0);
-
-		p2 = p2.add (p1);
-		p3 = p3.add (p2);
-		p4 = p4.sub (p3);
-		p5 = p5.sub (p4);
-		p6 = p2.add (p3);
-		p7 = p4.add (p5);
-		p8 = p2.sub (p3);
-		p9 = p4.sub (p5);
-
-		s2 = s2.add (s1);
-		s3 = s3.add (s2);
-		s4 = s4.sub (s3);
-		s5 = s5.sub (s4);
-		s6 = s2.add (s3);
-		s7 = s4.add (s5);
-		s8 = s2.sub (s3);
-		s9 = s4.sub (s5);
-
-		assert (p1.x ===   0 && p1.y ===   0);
-		assert (p2.x ===   5 && p2.y ===   5);
-		assert (p3.x ===   5 && p3.y ===  13);
-		assert (p4.x ===  -9 && p4.y === -13);
-		assert (p5.x ===  12 && p5.y ===   7);
-		assert (p6.x ===  10 && p6.y ===  18);
-		assert (p7.x ===   3 && p7.y ===  -6);
-		assert (p8.x ===   0 && p8.y ===  -8);
-		assert (p9.x === -21 && p9.y === -20);
-
-		assert (s1.w ===   0 && s1.h ===   0);
-		assert (s2.w ===   5 && s2.h ===   5);
-		assert (s3.w ===   5 && s3.h ===  13);
-		assert (s4.w ===  -9 && s4.h === -13);
-		assert (s5.w ===  12 && s5.h ===   7);
-		assert (s6.w ===  10 && s6.h ===  18);
-		assert (s7.w ===   3 && s7.h ===  -6);
-		assert (s8.w ===   0 && s8.h ===  -8);
-		assert (s9.w === -21 && s9.h === -20);
-
-		p6 = Point (p2   );
-		p7 = Point (p3   );
-		p2 = Point ( 6   );
-		p3 = Point ( 3, 9);
-		p4 = Point ( 6, 2);
-		p5 = Point (-3, 8);
-		p8 = Point (p4   );
-		p9 = Point (-3, 8);
-
-		s6 = Size (s2   );
-		s7 = Size (s3   );
-		s2 = Size ( 6   );
-		s3 = Size ( 3, 9);
-		s4 = Size ( 6, 2);
-		s5 = Size (-3, 8);
-		s8 = Size (s4   );
-		s9 = Size (-3, 8);
-
-		assert (p1.x ===  0 && p1.y ===  0);
-		assert (p2.x ===  6 && p2.y ===  6);
-		assert (p3.x ===  3 && p3.y ===  9);
-		assert (p4.x ===  6 && p4.y ===  2);
-		assert (p5.x === -3 && p5.y ===  8);
-		assert (p6.x ===  5 && p6.y ===  5);
-		assert (p7.x ===  5 && p7.y === 13);
-		assert (p8.x ===  6 && p8.y ===  2);
-		assert (p9.x === -3 && p9.y ===  8);
-
-		assert (s1.w ===  0 && s1.h ===  0);
-		assert (s2.w ===  6 && s2.h ===  6);
-		assert (s3.w ===  3 && s3.h ===  9);
-		assert (s4.w ===  6 && s4.h ===  2);
-		assert (s5.w === -3 && s5.h ===  8);
-		assert (s6.w ===  5 && s6.h ===  5);
-		assert (s7.w ===  5 && s7.h === 13);
-		assert (s8.w ===  6 && s8.h ===  2);
-		assert (s9.w === -3 && s9.h ===  8);
-
-		assert ( p1.eq (p1));
-		assert (!p1.eq (p2));
-		assert (!p1.ne (p1));
-		assert ( p1.ne (p2));
-
-		assert (p6.ne (p2));
-		assert (p2.ne (p6));
-		assert (p8.eq (p4));
-		assert (p4.eq (p8));
-		assert (p3.ne (p5));
-		assert (p5.ne (p3));
-		assert (p9.eq (p5));
-		assert (p5.eq (p9));
-
-		assert ( s1.eq (s1));
-		assert (!s1.eq (s2));
-		assert (!s1.ne (s1));
-		assert ( s1.ne (s2));
-
-		assert (s6.ne (s2));
-		assert (s2.ne (s6));
-		assert (s8.eq (s4));
-		assert (s4.eq (s8));
-		assert (s3.ne (s5));
-		assert (s5.ne (s3));
-		assert (s9.eq (s5));
-		assert (s5.eq (s9));
-
-		p2 = p2.neg();
-		p3 = p3.neg();
-		p4 = p5.neg();
-		p5 = p4.neg();
-		p6 = Point (4, 8).neg();
-		p7 = s7.toPoint().neg();
-
-		assert (p2.x === -6 && p2.y ===  -6);
-		assert (p3.x === -3 && p3.y ===  -9);
-		assert (p4.x ===  3 && p4.y ===  -8);
-		assert (p5.x === -3 && p5.y ===   8);
-		assert (p6.x === -4 && p6.y ===  -8);
-		assert (p7.x === -5 && p7.y === -13);
-
-		p3 = Point ( 0, 8);
-		p4 = Point (-4, 0);
-		s3 = Size  (-4, 0);
-		s4 = Size  ( 0, 8);
-
-		var b1 = Bounds ();
-		var b2 = Bounds ( 2,  8,  7,  3);
-		var b3 = Bounds (-4,  5,  3, -6);
-		var b4 = Bounds (-8, -4, -3, -7);
-		var b5 = Bounds (p3, s3);
-		var b6 = Bounds (p4, s4);
-		var b7 = Bounds (20    );
-		var b8 = Bounds (20, 40);
-
-		assert (b1.x ===  0 && b1.y ===  0 && b1.w ===  0 && b1.h ===  0);
-		assert (b2.x ===  2 && b2.y ===  8 && b2.w ===  7 && b2.h ===  3);
-		assert (b3.x === -4 && b3.y ===  5 && b3.w ===  3 && b3.h === -6);
-		assert (b4.x === -8 && b4.y === -4 && b4.w === -3 && b4.h === -7);
-		assert (b5.x ===  0 && b5.y ===  8 && b5.w === -4 && b5.h ===  0);
-		assert (b6.x === -4 && b6.y ===  0 && b6.w ===  0 && b6.h ===  8);
-		assert (b7.x === 20 && b7.y === 20 && b7.w === 20 && b7.h === 20);
-		assert (b8.x === 20 && b8.y === 20 && b8.w === 40 && b8.h === 40);
-
-		assert ( b1.isZero()); assert ( b1.isEmpty()); assert (!b1.isValid());
-		assert (!b2.isZero()); assert (!b2.isEmpty()); assert ( b2.isValid());
-		assert (!b3.isZero()); assert (!b3.isEmpty()); assert (!b3.isValid());
-		assert (!b4.isZero()); assert (!b4.isEmpty()); assert (!b4.isValid());
-		assert (!b5.isZero()); assert ( b5.isEmpty()); assert (!b5.isValid());
-		assert (!b6.isZero()); assert ( b6.isEmpty()); assert (!b6.isValid());
-		assert (!b7.isZero()); assert (!b7.isEmpty()); assert ( b7.isValid());
-		assert (!b8.isZero()); assert (!b8.isEmpty()); assert ( b8.isValid());
-
-		assert (b1.getLeft () ===   0); assert (b1.getTop   () ===   0);
-		assert (b1.getRight() ===   0); assert (b1.getBottom() ===   0);
-		assert (b2.getLeft () ===   2); assert (b2.getTop   () ===   8);
-		assert (b2.getRight() ===   9); assert (b2.getBottom() ===  11);
-		assert (b3.getLeft () ===  -4); assert (b3.getTop   () ===   5);
-		assert (b3.getRight() ===  -1); assert (b3.getBottom() ===  -1);
-		assert (b4.getLeft () ===  -8); assert (b4.getTop   () ===  -4);
-		assert (b4.getRight() === -11); assert (b4.getBottom() === -11);
-		assert (b5.getLeft () ===   0); assert (b5.getTop   () ===   8);
-		assert (b5.getRight() ===  -4); assert (b5.getBottom() ===   8);
-		assert (b6.getLeft () ===  -4); assert (b6.getTop   () ===   0);
-		assert (b6.getRight() ===  -4); assert (b6.getBottom() ===   8);
-		assert (b7.getLeft () ===  20); assert (b7.getTop   () ===  20);
-		assert (b7.getRight() ===  40); assert (b7.getBottom() ===  40);
-		assert (b8.getLeft () ===  20); assert (b8.getTop   () ===  20);
-		assert (b8.getRight() ===  60); assert (b8.getBottom() ===  60);
-
-		assert (b1.getCenter().eq ( 0,  0));
-		assert (b2.getCenter().eq ( 5,  9));
-		assert (b3.getCenter().eq (-3,  2));
-		assert (b4.getCenter().eq (-9, -7));
-		assert (b5.getCenter().eq (-2,  8));
-		assert (b6.getCenter().eq (-4,  4));
-		assert (b7.getCenter().eq (30, 30));
-		assert (b8.getCenter().eq (40, 40));
-
-		b7.setLTRB (3,  9, 8, 10);
-		b8.setLTRB (5, 13, 7,  6);
-		assert (!b1.containsB (b7)); assert (!b1.intersects (b7));
-		assert ( b2.containsB (b7)); assert ( b2.intersects (b7));
-		assert (!b4.containsB (b7)); assert (!b4.intersects (b7));
-		assert (!b6.containsB (b7)); assert (!b6.intersects (b7));
-		assert (!b1.containsB (b8)); assert (!b1.intersects (b8));
-		assert (!b2.containsB (b8)); assert ( b2.intersects (b8));
-		assert (!b4.containsB (b8)); assert (!b4.intersects (b8));
-		assert (!b6.containsB (b8)); assert (!b6.intersects (b8));
-
-		assert (b7.unite (b1).eq (  3,   9,  5,  1)); assert (b7.intersect (b1).eq (0, 0, 0, 0));
-		assert (b8.unite (b1).eq (  5,   6,  2,  7)); assert (b8.intersect (b1).eq (0, 0, 0, 0));
-
-		assert (b1.unite (b7).eq (  3,   9,  5,  1)); assert (b1.intersect (b7).eq (0, 0, 0, 0));
-		assert (b2.unite (b7).eq (  2,   8,  7,  3)); assert (b2.intersect (b7).eq (3, 9, 5, 1));
-		assert (b4.unite (b7).eq (-11, -11, 19, 21)); assert (b4.intersect (b7).eq (0, 0, 0, 0));
-		assert (b6.unite (b7).eq ( -4,   0, 12, 10)); assert (b6.intersect (b7).eq (0, 0, 0, 0));
-		assert (b1.unite (b8).eq (  5,   6,  2,  7)); assert (b1.intersect (b8).eq (0, 0, 0, 0));
-		assert (b2.unite (b8).eq (  2,   6,  7,  7)); assert (b2.intersect (b8).eq (5, 8, 2, 3));
-		assert (b4.unite (b8).eq (-11, -11, 18, 24)); assert (b4.intersect (b8).eq (0, 0, 0, 0));
-		assert (b6.unite (b8).eq ( -4,   0, 11, 13)); assert (b6.intersect (b8).eq (0, 0, 0, 0));
-		b7.normalize(); assert (b7.eq (3, 9, 5, 1));
-		b8.normalize(); assert (b8.eq (5, 6, 2, 7));
-		b8 = b8.unite     (b2); assert (b8.eq (2, 6, 7, 7));
-		b7 = b7.intersect (b2); assert (b7.eq (3, 9, 5, 1));
-
-		b7.setLTRB (-2, 10, -2, 6);
-		b8.setLTRB (-6,  2, -2, 2);
-		assert (!b3.containsB (b7)); assert (!b3.intersects (b7));
-		assert (!b4.containsB (b7)); assert (!b4.intersects (b7));
-		assert (!b5.containsB (b7)); assert ( b5.intersects (b7));
-		assert (!b6.containsB (b7)); assert (!b6.intersects (b7));
-		assert (!b3.containsB (b8)); assert ( b3.intersects (b8));
-		assert (!b4.containsB (b8)); assert (!b4.intersects (b8));
-		assert (!b5.containsB (b8)); assert (!b5.intersects (b8));
-		assert (!b6.containsB (b8)); assert ( b6.intersects (b8));
-
-		assert (b3.unite (b7).eq ( -4,  -1, 3, 11)); assert (b3.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b4.unite (b7).eq (-11, -11, 9, 21)); assert (b4.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b5.unite (b7).eq ( -4,   6, 4,  4)); assert (b5.intersect (b7).eq (-2, 8, 0, 0));
-		assert (b6.unite (b7).eq ( -4,   0, 2, 10)); assert (b6.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b3.unite (b8).eq ( -6,  -1, 5,  6)); assert (b3.intersect (b8).eq (-4, 2, 2, 0));
-		assert (b4.unite (b8).eq (-11, -11, 9, 13)); assert (b4.intersect (b8).eq ( 0, 0, 0, 0));
-		assert (b5.unite (b8).eq ( -6,   2, 6,  6)); assert (b5.intersect (b8).eq ( 0, 0, 0, 0));
-		assert (b6.unite (b8).eq ( -6,   0, 4,  8)); assert (b6.intersect (b8).eq (-4, 2, 0, 0));
-		b7.normalize(); assert (b7.eq (-2, 6, 0, 4));
-		b8.normalize(); assert (b8.eq (-6, 2, 4, 0));
-		b7 = b7.unite     (b3); assert (b7.eq (-4, -1, 3, 11));
-		b8 = b8.intersect (b3); assert (b8.eq (-4,  2, 2,  0));
-
-		b7 = Bounds (-2, 1, -1, -1);
-		b8 = Bounds (-3, 3, -2,  1);
-		assert (!b1.containsB (b7)); assert (!b1.intersects (b7));
-		assert (!b2.containsB (b7)); assert (!b2.intersects (b7));
-		assert ( b3.containsB (b7)); assert ( b3.intersects (b7));
-		assert (!b6.containsB (b7)); assert (!b6.intersects (b7));
-		assert (!b1.containsB (b8)); assert (!b1.intersects (b8));
-		assert (!b2.containsB (b8)); assert (!b2.intersects (b8));
-		assert (!b3.containsB (b8)); assert ( b3.intersects (b8));
-		assert (!b6.containsB (b8)); assert ( b6.intersects (b8));
-
-		assert (b1.unite (b7).eq (-3,  0,  1,  1)); assert (b1.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b2.unite (b7).eq (-3,  0, 12, 11)); assert (b2.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b3.unite (b7).eq (-4, -1,  3,  6)); assert (b3.intersect (b7).eq (-3, 0, 1, 1));
-		assert (b6.unite (b7).eq (-4,  0,  2,  8)); assert (b6.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b1.unite (b8).eq (-5,  3,  2,  1)); assert (b1.intersect (b8).eq ( 0, 0, 0, 0));
-		assert (b2.unite (b8).eq (-5,  3, 14,  8)); assert (b2.intersect (b8).eq ( 0, 0, 0, 0));
-		assert (b3.unite (b8).eq (-5, -1,  4,  6)); assert (b3.intersect (b8).eq (-4, 3, 1, 1));
-		assert (b6.unite (b8).eq (-5,  0,  2,  8)); assert (b6.intersect (b8).eq (-4, 3, 0, 1));
-		b7.normalize(); assert (b7.eq (-3, 0, 1, 1));
-		b8.normalize(); assert (b8.eq (-5, 3, 2, 1));
-		b8 = b8.unite     (b3); assert (b8.eq (-5, -1, 4, 6));
-		b7 = b7.intersect (b3); assert (b7.eq (-3,  0, 1, 1));
-
-		b7 = Bounds (-11, -9, 2,  2);
-		b8 = Bounds ( -8, -5, 2, -2);
-		assert ( b4.containsB (b7,  true)); assert ( b4.intersects (b7,  true));
-		assert (!b4.containsB (b8,  true)); assert ( b4.intersects (b8,  true));
-		assert (!b4.containsB (b7, false)); assert ( b4.intersects (b7, false));
-		assert (!b4.containsB (b8, false)); assert (!b4.intersects (b8, false));
-		assert (b4.unite (b7).eq (-11, -11, 3, 7)); assert (b4.intersect (b7).eq (-11, -9, 2, 2));
-		assert (b4.unite (b8).eq (-11, -11, 5, 7)); assert (b4.intersect (b8).eq ( -8, -7, 0, 2));
-		b7.normalize(); assert (b7.eq (-11, -9, 2, 2));
-		b8.normalize(); assert (b8.eq ( -8, -7, 2, 2));
-		b7 = b7.unite     (b4); assert (b7.eq (-11, -11, 3, 7));
-		b8 = b8.intersect (b4); assert (b8.eq ( -8,  -7, 0, 2));
-
-		b7 = Bounds (-8, -10,  0, 1);
-		b8 = Bounds (-9,  -4, -1, 0);
-		assert ( b4.containsB (b7,  true)); assert ( b4.intersects (b7,  true));
-		assert ( b4.containsB (b8,  true)); assert ( b4.intersects (b8,  true));
-		assert (!b4.containsB (b7, false)); assert (!b4.intersects (b7, false));
-		assert (!b4.containsB (b8, false)); assert (!b4.intersects (b8, false));
-		assert (b4.unite (b7).eq (-11, -11, 3, 7)); assert (b4.intersect (b7).eq ( -8, -10, 0, 1));
-		assert (b4.unite (b8).eq (-11, -11, 3, 7)); assert (b4.intersect (b8).eq (-10,  -4, 1, 0));
-		b7.normalize(); assert (b7.eq ( -8, -10, 0, 1));
-		b8.normalize(); assert (b8.eq (-10,  -4, 1, 0));
-		b8 = b8.unite     (b4); assert (b8.eq (-11, -11, 3, 7));
-		b7 = b7.intersect (b4); assert (b7.eq ( -8, -10, 0, 1));
-
-		b7 = Bounds (-1, 8, -1,  0);
-		b8 = Bounds (-4, 8,  0, -2);
-		assert ( b5.containsB (b7,  true)); assert ( b5.intersects (b7,  true));
-		assert (!b6.containsB (b7,  true)); assert (!b6.intersects (b7,  true));
-		assert (!b5.containsB (b8,  true)); assert ( b5.intersects (b8,  true));
-		assert ( b6.containsB (b8,  true)); assert ( b6.intersects (b8,  true));
-		assert (!b5.containsB (b7, false)); assert (!b5.intersects (b7, false));
-		assert (!b6.containsB (b7, false)); assert (!b6.intersects (b7, false));
-		assert (!b5.containsB (b8, false)); assert (!b5.intersects (b8, false));
-		assert (!b6.containsB (b8, false)); assert (!b6.intersects (b8, false));
-		assert (b5.unite (b7).eq (-4, 8, 4, 0)); assert (b5.intersect (b7).eq (-2, 8, 1, 0));
-		assert (b6.unite (b7).eq (-4, 0, 3, 8)); assert (b6.intersect (b7).eq ( 0, 0, 0, 0));
-		assert (b5.unite (b8).eq (-4, 6, 4, 2)); assert (b5.intersect (b8).eq (-4, 8, 0, 0));
-		assert (b6.unite (b8).eq (-4, 0, 0, 8)); assert (b6.intersect (b8).eq (-4, 6, 0, 2));
-		b7.normalize(); assert (b7.eq (-2, 8, 1, 0));
-		b8.normalize(); assert (b8.eq (-4, 6, 0, 2));
-		b7 = b7.unite     (b6); assert (b7.eq (-4, 0, 3, 8));
-		b8 = b8.intersect (b6); assert (b8.eq (-4, 6, 0, 2));
-
-		b1.setLeft (4); b2.setTop (-6); b3.setRight (7); b4.setBottom (-2);
-		b5.setLeft (8); b5.setTop (-2); b6.setRight (6); b6.setBottom (-3);
-
-		assert (b1.x ===  4 && b1.y ===  0 && b1.w ===  0 && b1.h ===  0);
-		assert (b2.x ===  2 && b2.y === -6 && b2.w ===  7 && b2.h ===  3);
-		assert (b3.x === -4 && b3.y ===  5 && b3.w === 11 && b3.h === -6);
-		assert (b4.x === -8 && b4.y === -4 && b4.w === -3 && b4.h ===  2);
-		assert (b5.x ===  8 && b5.y === -2 && b5.w === -4 && b5.h ===  0);
-		assert (b6.x === -4 && b6.y ===  0 && b6.w === 10 && b6.h === -3);
-
-		b1.setLTRB (-6, 8, 4, -2);
-		b2.setLTRB (-5, 9, 3, -3);
-
-		assert (b1.eq (Bounds (b1.getLTRB())));
-		assert (b2.eq (Bounds (b2.getLTRB())));
-		assert (b1.x === -6 && b1.y ===  8 && b1.w === 10 && b1.h === -10);
-		assert (b2.x === -5 && b2.y ===  9 && b2.w ===  8 && b2.h === -12);
-
-		p1 = Point (-6, 12);
-		p2 = Point ( 3,  4);
-		p3 = Point ( 8,  3);
-		p4 = Point (-5,  3);
-		p5 = Point (-2,  8);
-		p6 = Point (-3, -3);
-
-		assert (!b1.containsP (-7,  3));
-		assert ( b1.containsP (-6,  3));
-		assert ( b1.containsP (-5,  3));
-		assert ( b1.containsP ( 3,  3));
-		assert ( b1.containsP ( 4,  3));
-		assert (!b1.containsP ( 5,  3));
-		assert ( b1.containsP ( 0,  7));
-		assert ( b1.containsP ( 0,  8));
-		assert (!b1.containsP ( 0,  9));
-		assert (!b1.containsP ( 0, -3));
-		assert ( b1.containsP ( 0, -2));
-		assert ( b1.containsP ( 0, -1));
-
-		assert (!b2.containsP (p1));
-		assert ( b2.containsP (p2));
-		assert (!b2.containsP (p3));
-		assert ( b2.containsP (p4));
-		assert ( b2.containsP (p5));
-		assert ( b2.containsP (p6));
-
-		assert (!b1.containsP (-7,  3, false));
-		assert (!b1.containsP (-6,  3, false));
-		assert ( b1.containsP (-5,  3, false));
-		assert ( b1.containsP ( 3,  3, false));
-		assert (!b1.containsP ( 4,  3, false));
-		assert (!b1.containsP ( 5,  3, false));
-		assert ( b1.containsP ( 0,  7, false));
-		assert (!b1.containsP ( 0,  8, false));
-		assert (!b1.containsP ( 0,  9, false));
-		assert (!b1.containsP ( 0, -3, false));
-		assert (!b1.containsP ( 0, -2, false));
-		assert ( b1.containsP ( 0, -1, false));
-
-		assert (!b2.containsP (p1, false));
-		assert (!b2.containsP (p2, false));
-		assert (!b2.containsP (p3, false));
-		assert (!b2.containsP (p4, false));
-		assert ( b2.containsP (p5, false));
-		assert (!b2.containsP (p6, false));
-
-		b1.setPoint ( 2,  8);
-		b2.setPoint ( 7,  3);
-		b3.setPoint (-8, -4);
-		b4.setPoint (Point ( 7,  3));
-		b5.setPoint (Point ( 7,  3));
-		b6.setPoint (Point (-3, -7));
-
-		b1.setSize ( 2,  8);
-		b2.setSize ( 3, -6);
-		b3.setSize (-3, -7);
-		b4.setSize (Size ( 2,  8));
-		b5.setSize (Size ( 2,  8));
-		b6.setSize (Size (-8, -4));
-
-		assert (b1.getPoint().x ===  2 && b1.getPoint().y ===  8);
-		assert (b2.getPoint().x ===  7 && b2.getPoint().y ===  3);
-		assert (b3.getPoint().x === -8 && b3.getPoint().y === -4);
-		assert (b4.getPoint().x ===  7 && b4.getPoint().y ===  3);
-		assert (b5.getPoint().x ===  7 && b5.getPoint().y ===  3);
-		assert (b6.getPoint().x === -3 && b6.getPoint().y === -7);
-
-		assert (b1.getSize().w ===  2 && b1.getSize().h ===  8);
-		assert (b2.getSize().w ===  3 && b2.getSize().h === -6);
-		assert (b3.getSize().w === -3 && b3.getSize().h === -7);
-		assert (b4.getSize().w ===  2 && b4.getSize().h ===  8);
-		assert (b5.getSize().w ===  2 && b5.getSize().h ===  8);
-		assert (b6.getSize().w === -8 && b6.getSize().h === -4);
-
-		assert ( b1.eq (b1));
-		assert (!b1.eq (b2));
-		assert (!b1.ne (b1));
-		assert ( b1.ne (b2));
-
-		assert (b6.ne (b2));
-		assert (b2.ne (b6));
-		assert (b4.eq (b5));
-		assert (b5.eq (b4));
-		assert (b4.ne (b2));
-		assert (b2.ne (b4));
-		assert (b5.ne (b1));
-		assert (b1.ne (b5));
-
-		//----------------------------------------------------------------------------//
-
-		p2 = Point (p3);
-		p3 = Point ({ x:  2, y:  8 });
-		p4 = Point ({ x: -6, y: -4 });
-		p5 = Point (p3);
-
-		assert (p2.x ===  8 && p2.y ===  3);
-		assert (p3.x ===  2 && p3.y ===  8);
-		assert (p4.x === -6 && p4.y === -4);
-		assert (p5.x ===  2 && p5.y ===  8);
-
-		assert (p3.ne (  ));
-		assert (p3.eq (p3));
-		assert (p3.ne ( 2));
-		assert (p3.eq ( 2, 8));
-		assert (p3.eq ({ x:  2, y:  8 }));
-
-		assert (p4.ne (  ));
-		assert (p4.eq (p4));
-		assert (p4.ne (-4));
-		assert (p4.eq (-6, -4));
-		assert (p4.eq ({ x: -6, y: -4 }));
-
-		assert (p1.eq, p1, ["a"]);
-		assert (p1.ne, p1, ["a"]);
-
-		assert (p1.eq, p1, [{ x: 0 }]);
-		assert (p1.ne, p1, [{ y: 0 }]);
-
-		s2 = Size (s3);
-		s3 = Size ({ w:  2, h:  8 });
-		s4 = Size ({ w: -6, h: -4 });
-		s5 = Size (s3);
-
-		assert (s2.w === -4 && s2.h ===  0);
-		assert (s3.w ===  2 && s3.h ===  8);
-		assert (s4.w === -6 && s4.h === -4);
-		assert (s5.w ===  2 && s5.h ===  8);
-
-		assert (s3.ne (  ));
-		assert (s3.eq (s3));
-		assert (s3.ne ( 2));
-		assert (s3.eq ( 2, 8));
-		assert (s3.eq ({ w:  2, h:  8 }));
-
-		assert (s4.ne (  ));
-		assert (s4.eq (s4));
-		assert (s4.ne (-4));
-		assert (s4.eq (-6, -4));
-		assert (s4.eq ({ w: -6, h: -4 }));
-
-		assert (s1.eq, s1, ["a"]);
-		assert (s1.ne, s1, ["a"]);
-
-		assert (s1.eq, s1, [{ w: 0 }]);
-		assert (s1.ne, s1, [{ h: 0 }]);
-
-		b2 = Bounds (b3);
-		b3 = Bounds ({ l: 2, t: 4,     r: 6, b: 8 });
-		b4 = Bounds ({ x: 8, y: 6 }, { w: 4, h: 2 });
-		b5 = Bounds ({ x: 2, y: 4,     w: 6, h: 8 });
-		b6 = Bounds (b3);
-
-		assert (b2.x === -8 && b2.y === -4 && b2.w === -3 && b2.h === -7);
-		assert (b3.x ===  2 && b3.y ===  4 && b3.w ===  4 && b3.h ===  4);
-		assert (b4.x ===  8 && b4.y ===  6 && b4.w ===  4 && b4.h ===  2);
-		assert (b5.x ===  2 && b5.y ===  4 && b5.w ===  6 && b5.h ===  8);
-		assert (b6.x ===  2 && b6.y ===  4 && b6.w ===  4 && b6.h ===  4);
-
-		p1 = Point (2, 4);
-		s1 = Size  (4, 4);
-		assert (b3.ne (  ));
-		assert (b3.eq (b3));
-		assert (b3.ne ( 2));
-		assert (b3.ne ( 2,  4));
-		assert (b3.eq (p1, s1));
-		assert (b3.eq (     2,    4,        4,    4  ));
-		assert (b3.eq ({ l: 2, t: 4,     r: 6, b: 8 }));
-		assert (b3.eq ({ x: 2, y: 4 }, { w: 4, h: 4 }));
-		assert (b3.eq ({ x: 2, y: 4,     w: 4, h: 4 }));
-
-		p1 = Point (8, 6);
-		s1 = Size  (4, 2);
-		assert (b4.ne (  ));
-		assert (b4.eq (b4));
-		assert (b4.ne ( 8));
-		assert (b4.ne ( 8,  2));
-		assert (b4.eq (p1, s1));
-		assert (b4.eq (     8,    6,         4,    2  ));
-		assert (b4.eq ({ l: 8, t: 6,     r: 12, b: 8 }));
-		assert (b4.eq ({ x: 8, y: 6 }, { w:  4, h: 2 }));
-		assert (b4.eq ({ x: 8, y: 6,     w:  4, h: 2 }));
-
-		assert (b1.setLeft,   b1, [   ]);
-		assert (b1.setLeft,   b1, ["a"]);
-		assert (b1.setTop,    b1, [   ]);
-		assert (b1.setTop,    b1, ["a"]);
-		assert (b1.setRight,  b1, [   ]);
-		assert (b1.setRight,  b1, ["a"]);
-		assert (b1.setBottom, b1, [   ]);
-		assert (b1.setBottom, b1, ["a"]);
-		assert (b1.setLTRB,   b1, [   ]);
-		assert (b1.setLTRB,   b1, ["a"]);
-		assert (b1.setLTRB,   b1, [100, "a"]);
-
-		assert (b1.containsP,  b1, ["a"]);
-		assert (b1.containsB,  b1, ["a"]);
-		assert (b1.intersects, b1, ["a"]);
-		assert (b1.setPoint,   b1, ["a"]);
-		assert (b1.setSize,    b1, ["a"]);
-		assert (b1.unite,      b1, ["a"]);
-		assert (b1.intersect,  b1, ["a"]);
-
-		assert (b1.containsP,  b1, [{ x: 0 }]);
-		assert (b1.containsB,  b1, [{ x: 0 }]);
-		assert (b1.intersects, b1, [{ x: 0 }]);
-		assert (b1.setPoint,   b1, [{ x: 0 }]);
-		assert (b1.setSize,    b1, [{ w: 0 }]);
-		assert (b1.unite,      b1, [{ x: 0 }]);
-		assert (b1.intersect,  b1, [{ x: 0 }]);
-
-		assert (b1.eq, b1, ["a"]);
-		assert (b1.ne, b1, ["a"]);
-
-		assert (b1.eq, b1, [{ x: 0 }]);
-		assert (b1.ne, b1, [{ y: 0 }]);
-		assert (b1.eq, b1, [{ w: 0 }]);
-		assert (b1.ne, b1, [{ h: 0 }]);
-
-		assert (typeof p1.isZero() === "boolean"  );
-		assert (       p1.toSize() instanceof Size);
-
-		assert (typeof Point.normalize() === "object");
-
-		assert (       p1.add (  ) instanceof Point);
-		assert (       p1.sub (  ) instanceof Point);
-		assert (typeof p1.eq  (  ) === "boolean"   );
-		assert (typeof p1.ne  (  ) === "boolean"   );
-		assert (typeof p1.eq  (p2) === "boolean"   );
-		assert (typeof p1.ne  (p2) === "boolean"   );
-		assert (       p1.neg (  ) instanceof Point);
-
-		assert (typeof s1.isZero () === "boolean"   );
-		assert (typeof s1.isEmpty() === "boolean"   );
-		assert (       s1.toPoint() instanceof Point);
-
-		assert (typeof Size.normalize() === "object");
-
-		assert (       s1.add (  ) instanceof Size);
-		assert (       s1.sub (  ) instanceof Size);
-		assert (typeof s1.eq  (  ) === "boolean"  );
-		assert (typeof s1.ne  (  ) === "boolean"  );
-		assert (typeof s1.eq  (s2) === "boolean"  );
-		assert (typeof s1.ne  (s2) === "boolean"  );
-
-		assert (typeof b1.isZero     (       ) === "boolean"    );
-		assert (typeof b1.isEmpty    (       ) === "boolean"    );
-		assert (typeof b1.isValid    (       ) === "boolean"    );
-		assert (typeof b1.getLeft    (       ) === "number"     );
-		assert (typeof b1.getTop     (       ) === "number"     );
-		assert (typeof b1.getRight   (       ) === "number"     );
-		assert (typeof b1.getBottom  (       ) === "number"     );
-		assert (typeof b1.setLeft    (0      ) === "undefined"  );
-		assert (typeof b1.setTop     (0      ) === "undefined"  );
-		assert (typeof b1.setRight   (0      ) === "undefined"  );
-		assert (typeof b1.setBottom  (0      ) === "undefined"  );
-		assert (typeof b1.getLTRB    (       ) === "object"     );
-		assert (typeof b1.setLTRB    (0,0,0,0) === "undefined"  );
-		assert (typeof b1.normalize  (       ) === "undefined"  );
-		assert (typeof b1.containsP  (       ) === "boolean"    );
-		assert (typeof b1.containsB  (       ) === "boolean"    );
-		assert (typeof b1.intersects (       ) === "boolean"    );
-		assert (       b1.getPoint   (       ) instanceof Point );
-		assert (typeof b1.setPoint   (       ) === "undefined"  );
-		assert (       b1.getSize    (       ) instanceof Size  );
-		assert (typeof b1.setSize    (       ) === "undefined"  );
-		assert (       b1.getCenter  (       ) instanceof Point );
-		assert (       b1.unite      (       ) instanceof Bounds);
-		assert (       b1.intersect  (       ) instanceof Bounds);
-
-		assert (typeof Bounds.normalize() === "object");
-
-		assert (typeof b1.eq (  ) === "boolean");
-		assert (typeof b1.ne (  ) === "boolean");
-		assert (typeof b1.eq (b2) === "boolean");
-		assert (typeof b1.ne (b2) === "boolean");
-
-		return true;
-	}
-
-
-
-	//----------------------------------------------------------------------------//
-	// Main                                                                       //
-	//----------------------------------------------------------------------------//
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	return function()
-	{
-		log ("BEGIN TYPES TESTING\n------------------------------\n");
-//		if (!testClone ()) { log (">> Clone Failed \n\n"); return false; }
-		if (!testHash  ()) { log (">> Hash Failed  \n\n"); return false; }
-		if (!testColor ()) { log (">> Color Failed \n\n"); return false; }
-		if (!testImage1()) { log (">> Image1 Failed\n\n"); return false; }
-		if (!testImage2()) { log (">> Image2 Failed\n\n"); return false; }
-		if (!testImage3()) { log (">> Image3 Failed\n\n"); return false; }
-		if (!testRange ()) { log (">> Range Failed \n\n"); return false; }
-		if (!testBounds()) { log (">> Bounds Failed\n\n"); return false; }
-		log (">> Success\n\n"); return true;
+	return {
+		testTypes: testTypes,
+		testTimer: testTimer,
 	};
 };

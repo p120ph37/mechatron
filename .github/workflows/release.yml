@@ -15,7 +15,7 @@ jobs:
       version: ${{ steps.parse.outputs.version }}
       prerelease: ${{ steps.parse.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-tags: true
 
@@ -97,9 +97,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
@@ -121,10 +121,6 @@ jobs:
           sudo launchctl stop com.apple.tccd 2>/dev/null || true
           sleep 1
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
 
@@ -140,31 +136,44 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      - name: Build Rust napi module
+      - name: Build Rust napi modules
         run: |
-          cd native-rs
+          SUBS="keyboard mouse clipboard screen window process memory"
+          cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
-            cargo build --release --target i686-pc-windows-msvc
-            cp target/i686-pc-windows-msvc/release/mechatron_native.dll mechatron-native.win32-ia32-msvc.node
+            CARGO_TARGET=i686-pc-windows-msvc
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
           elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            cargo build --release --target x86_64-apple-darwin
-            cp target/x86_64-apple-darwin/release/libmechatron_native.dylib mechatron-native.darwin-x64.node
+            CARGO_TARGET=x86_64-apple-darwin
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
           else
-            npm run build
-            if [ "${{ runner.os }}" = "Linux" ]; then
-              cp target/release/libmechatron_native.so mechatron-native.linux-${{ matrix.arch }}-gnu.node
-            elif [ "${{ runner.os }}" = "macOS" ]; then
-              cp target/release/libmechatron_native.dylib mechatron-native.darwin-${{ matrix.arch }}.node
-            elif [ "${{ runner.os }}" = "Windows" ]; then
-              cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
-            fi
-          fi
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
+            cargo build --release $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/release"
           fi
 
-      - name: Bundle TypeScript
-        run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            TRIPLE="linux-${{ matrix.arch }}-gnu"; SRC_EXT="so"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            TRIPLE="darwin-${{ matrix.arch }}"; SRC_EXT="dylib"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            TRIPLE="win32-${{ matrix.arch }}-msvc"; SRC_EXT="dll"; SRC_PREFIX=""
+          fi
+
+          for s in $SUBS; do
+            SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
+            DST_NAME="mechatron-${s}.${TRIPLE}.node"
+            cp "$SRC" "$s/$DST_NAME"
+            cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              codesign --force --sign - "$s/$DST_NAME"
+              codesign --force --sign - "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            fi
+          done
+
+      - name: Build TypeScript
+        run: npx tsc
 
       - name: Run tests
         run: |
@@ -179,24 +188,30 @@ jobs:
             done
             sudo launchctl stop com.apple.tccd 2>/dev/null || true
             sleep 1
-            sudo "$X64_ABS" test/test-ci.js all
+            sudo "$X64_ABS" test/test.js all
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
+            ./node-${NODE_VERSION}-win-x86/node test/test.js all
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run --auto-servernum node test/test-ci.js all
+            xvfb-run --auto-servernum node test/test.js all
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            sudo node test/test-ci.js all
+            sudo node test/test.js all
           else
-            node test/test-ci.js all
+            node test/test.js all
           fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Run mechatron-robot-js conformance tests
+        run: |
+          npm link
+          npm link mechatron -w mechatron-robot-js
+          node packages/mechatron-robot-js/test/conformance.js
+
+      - uses: actions/upload-artifact@v7
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: native-rs/mechatron-native.*.node
+          path: napi/*/mechatron-*.node
           if-no-files-found: error
 
   release:
@@ -206,20 +221,52 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.RELEASE_PAT }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: prebuilds-*
           merge-multiple: true
-          path: native-rs
+          path: napi
 
-      - name: Set package version
+      - name: Distribute native modules to packages
+        run: |
+          for sub in keyboard mouse clipboard screen window process memory; do
+            cp napi/$sub/mechatron-$sub.*.node packages/@mechatronic/napi-$sub/ 2>/dev/null || true
+          done
+
+      - name: Set package versions (all workspaces)
         run: |
           VERSION="${{ needs.detect-release.outputs.version }}"
-          npm version "${VERSION#v}" --no-git-tag-version
+          SEMVER="${VERSION#v}"
+          # Root package
+          npm version "$SEMVER" --no-git-tag-version
+          # Native packages + robot-js shim
+          for pkg in packages/@mechatronic/napi-keyboard packages/@mechatronic/napi-mouse \
+                     packages/@mechatronic/napi-clipboard packages/@mechatronic/napi-screen \
+                     packages/@mechatronic/napi-window packages/@mechatronic/napi-process \
+                     packages/@mechatronic/napi-memory packages/mechatron-robot-js; do
+            (cd "$pkg" && npm version "$SEMVER" --no-git-tag-version)
+          done
+          # Pin optionalDependencies and robot-js dep to exact version
+          node -e "
+            const fs = require('fs');
+            const V = '$SEMVER';
+            const root = JSON.parse(fs.readFileSync('package.json'));
+            for (const k of Object.keys(root.optionalDependencies || {})) {
+              if (k.startsWith('@mechatronic/')) root.optionalDependencies[k] = V;
+            }
+            fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
+            // Pin mechatron dep in robot-js
+            const rjp = 'packages/mechatron-robot-js/package.json';
+            const rj = JSON.parse(fs.readFileSync(rjp));
+            for (const k of Object.keys(rj.dependencies || {})) {
+              if (k === 'mechatron') rj.dependencies[k] = V;
+            }
+            fs.writeFileSync(rjp, JSON.stringify(rj, null, 2) + '\n');
+          "
 
       - name: Extract changelog entry
         id: changelog
@@ -248,16 +295,27 @@ jobs:
             --notes-file /tmp/release-body.md \
             $FLAGS
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Publish to npm
+      - name: Install dependencies and build
         run: |
           npm ci --ignore-scripts
+          npx tsc
+
+      - name: Publish all packages to npm
+        run: |
           TAG="latest"
           if [ "${{ needs.detect-release.outputs.prerelease }}" = "true" ]; then
             TAG="next"
           fi
+          # Publish native packages first, then main package, then shim
+          for sub in keyboard mouse clipboard screen window process memory; do
+            (cd "packages/@mechatronic/napi-$sub" && npm publish --access public --tag "$TAG")
+          done
+          # Main package (all TS)
           npm publish --access public --tag "$TAG"
+          # Compatibility shim
+          (cd packages/mechatron-robot-js && npm publish --access public --tag "$TAG")

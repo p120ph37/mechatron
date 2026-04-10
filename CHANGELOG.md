@@ -2,6 +2,91 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.4]
+
+### Added
+- **Segmented native packages** — native NAPI binaries are delivered via
+  `@mechatronic/napi-keyboard`, `napi-mouse`, `napi-clipboard`, `napi-screen`,
+  `napi-window`, `napi-process`, `napi-memory` as `optionalDependencies`.
+  Users can omit specific subsystems (e.g. memory) to avoid AV false positives,
+  or skip all native modules for future Bun FFI support
+- **Unified native loader** (`lib/napi.ts`) — `getNative("keyboard")` /
+  `isAvailable("keyboard")` resolves native binaries from `@mechatronic/napi-*`
+  packages and returns a clear error when absent
+- **Async API variants** — `*Async` Promise-returning methods for operations
+  that may block: `Screen.grabScreenAsync`/`synchronizeAsync`,
+  `Process.getListAsync`/`getModulesAsync`, `Window.getListAsync`,
+  `Clipboard.{get,set}{Text,Image}Async`, `Memory.{getRegions,readData,
+  writeData,find}Async` (currently `queueMicrotask`-wrapped; can migrate to
+  true `napi::Task` worker threads without changing the public surface)
+- **`KEYS` record** — typed `Readonly<KeyTable>` (replaces flattened `KEY_*`
+  top-level globals)
+- **`mechatron-robot-js` compatibility shim** — full legacy robot-js 2.2.0
+  surface: `callableClass()` Proxy wrapping (constructor-without-`new`),
+  `ROBOT_VERSION` constants, top-level `sleep`/`clock`, `getNativeBackend`/
+  `setNativeBackend` stubs, `Module.Segment`/`Memory.Stats`/`Memory.Region`
+  nested references, flattened `KEY_*` and `BUTTON_*` constants
+- **Conformance test suite** — 320 API-surface checks validating the robot-js
+  shim against the documented robot-js 2.2.0 behaviour
+- **Modern test suite** (`test/`) — modular per-subsystem tests exercising the
+  modern mechatron API including async variants; original robot-js interactive
+  test suite preserved in `packages/mechatron-robot-js/test/`
+- **CI test details and code coverage** — JUnit XML test results and c8/V8 line
+  coverage reported per platform in GitHub Actions step summaries
+- **99% line coverage** — comprehensive test expansion across all subsystems
+  (types, keyboard, mouse, process, memory, window, screen) covering
+  constructor overloads, TypeError branches, comparison operators, async
+  variants, and platform-conditional paths
+- **Cross-process Memory test harness** — `test/memory.js` now exercises
+  full round-trip cross-process writes followed by reads
+  (`writeInt8/16/32/64/Bool/String/Real32/Real64/Ptr/Data`), verified both
+  through the parent's typed reads and through the child's own view of the
+  buffer.  The target is `test/memory-child.c`, a deliberately plain
+  (non-hardened) C program that stands in for a real-world debug target
+  such as a game — mirroring the scenario where a user has disabled SIP
+  or enabled Developer Mode to attach to a same-user third-party process.
+  Built with `clang` in CI (already present on every GitHub-hosted runner)
+  and declares its buffer `volatile` to prevent the optimiser from caching
+  reads across the dump loop.
+
+### Fixed
+- macOS cross-process Memory operations (darwin-arm64 and darwin-x64) —
+  earlier skip logic is removed; the non-hardened C helper is a reliable
+  `mach_vm_write` / `mach_vm_read_overwrite` target that does not require
+  re-signing Node with `com.apple.security.get-task-allow`
+- Windows x64 cross-process Memory write test — scratch-pad `Buffer`
+  placement avoids a crash when writing into the child's address space
+
+### Changed
+- **`Uppercase<string>` type constraint** on `resolveKeyName` — compile-time
+  enforcement that key name arguments are uppercased; literal violations are
+  caught by TypeScript and dynamic strings require explicit
+  `as Uppercase<string>` casts after `toUpperCase()`
+- **TypeScript reorganised into subsystem subdirectories** — `lib/` now has
+  `types/`, `keyboard/`, `mouse/`, `clipboard/`, `screen/`, `window/`,
+  `process/`, `memory/` subdirectories; `tsc` compiles into `dist/`
+- **Modern API surface** — `mechatron` exports plain typed ES class constructors
+  via named exports; `callableClass()` Proxy wrapping, flattened `KEY_*`
+  globals, top-level `sleep`/`clock`, `Module.Segment`/`Memory.Stats`/
+  `Memory.Region` nesting, and `get/setNativeBackend` stubs are removed from
+  the modern surface (available via `mechatron-robot-js` for legacy consumers)
+- **Cargo workspace split** — `native-rs/` renamed to `napi/` with one
+  `cdylib` crate per subsystem plus a shared helper crate, producing separate
+  `.node` binaries per subsystem
+- `Process.getModules()` performs Module-wrapping and `_proc` attachment
+  internally instead of via monkey-patching from the entry point
+- Typed raw-payload interfaces replace ad-hoc `any` parameters (`RawRegion`,
+  `RawRect`, `RawScreen`, `WindowLike`)
+
+### Removed
+- Committed `dist/` output — now generated on demand by `tsc`
+- `lib/native.ts` monolithic native backend interface — replaced by
+  `lib/napi.ts` unified per-subsystem loader
+- Dead `instanceof` constructor guard in `Segment` — unreachable in ES classes
+  where the engine enforces `new`
+- Dead single-character fallback branch in `resolveKeyName` — all callers
+  already call `toUpperCase()` before passing arguments
+
 ## [v0.0.3] - 2026-04-06
 
 ### Removed
@@ -38,7 +123,7 @@ All notable changes to this project will be documented in this file.
   `keyboard_getKeyState(keycode)`, TS iterates the platform key list
 - Rust native layer reduced to minimal FFI: thin `#[napi]` wrappers over
   platform syscalls, no business logic
-- Shared macOS Mach helpers extracted into `native-rs/src/mach.rs` —
+- Shared macOS Mach helpers extracted into `napi/src/mach.rs` —
   deduplicates `get_task`, `process_exists`, and Mach extern declarations
   previously copy-pasted across `process.rs` and `memory.rs`
 - `Keyboard.ts` modifier key handling: 4 copy-paste switch cases replaced with
@@ -53,7 +138,7 @@ All notable changes to this project will be documented in this file.
 ## [v0.0.2] - 2026-04-03
 
 ### Added
-- Rust native backend (`native-rs/`) via napi-rs, replacing C++ as the default
+- Rust native backend (`napi/`) via napi-rs, replacing C++ as the default
   native layer while maintaining full behavioral parity with the robot-js
   documented APIs
 - Prebuilt Rust `.node` binaries for all 6 platform/arch targets (linux-x64,
@@ -81,7 +166,7 @@ All notable changes to this project will be documented in this file.
 - Rust is now the default native backend; C++ is retained as fallback
 - `Clipboard.getImage()` defers `image.destroy()` until after the native read
   succeeds, preserving the existing image on failure (per Robot documentation)
-- `package.json` `files` field includes `native-rs/*.node` for prebuilt Rust
+- `package.json` `files` field includes `napi/*.node` for prebuilt Rust
   binaries
 
 ### Not Implemented (intentional)

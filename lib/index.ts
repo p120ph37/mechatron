@@ -1,114 +1,50 @@
-// mechatron - TypeScript API layer
-// Pure data types (zero native dependency)
-import { Range } from "./Range";
-import { Point } from "./Point";
-import { Size } from "./Size";
-import { Bounds } from "./Bounds";
-import { Color } from "./Color";
-import { Hash } from "./Hash";
-import { Image } from "./Image";
-import { Timer } from "./Timer";
+/**
+ * mechatron — modern desktop automation API.
+ *
+ * All subsystem TypeScript lives in this package.  Native binaries are
+ * delivered via optional `@mechatronic/napi-*` packages — install only the
+ * subsystems you need, or omit AV-sensitive ones like `napi-memory`.
+ *
+ * Legacy robot-js 2.2.0 callers should use `mechatron-robot-js`, which
+ * layers the historical shape on top of this module.
+ */
 
-// Native-backed types
-import { Keyboard } from "./Keyboard";
-import { Mouse } from "./Mouse";
-import { Clipboard } from "./Clipboard";
-import { Screen } from "./Screen";
-import { Window } from "./Window";
-import { Process } from "./Process";
-import { Module, Segment } from "./Module";
-import { Memory, Stats, Region } from "./Memory";
+// Data types
+export { Point, Size, Bounds, Color, Range, Hash, Image, Timer } from "./types";
 
-// Native backend management
-import { getNativeBackend, setNativeBackend } from "./native";
-import { getAllConstants } from "./constants";
+// Keyboard
+export { Keyboard, KEYS, getAllKeys, getKeyNames, getAllKeyConstants } from "./keyboard";
+export type { KeyTable } from "./keyboard";
 
-// Version constants
-const ROBOT_VERSION = 0x020200;
-const ROBOT_VERSION_STR = "2.2.0 (0.0.0)";
-const ADDON_VERSION = 0x000000;
-const ADDON_VERSION_STR = "0.0.0";
+// Mouse
+export {
+  Mouse,
+  BUTTON_LEFT, BUTTON_MID, BUTTON_MIDDLE, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2,
+} from "./mouse";
 
-// Wrap ES6 classes so they can be called without `new` (matching C++ NAPI OnCalledAsFunction behavior)
-function callableClass<T extends new (...args: any[]) => any>(Cls: T): T {
-  return new Proxy(Cls, {
-    apply(_target, _thisArg, args) {
-      return new Cls(...args);
-    },
-  }) as T;
-}
+// Clipboard
+export { Clipboard } from "./clipboard";
 
-// Top-level sleep/clock functions matching original API
-function sleep(a: Range | number, b?: number): void {
-  Timer.sleep(a as any, b as any);
-}
+// Screen
+export { Screen } from "./screen";
+export type { WindowLike } from "./screen";
 
-function clock(): number {
-  return Timer.getCpuTime();
-}
+// Window
+export { Window } from "./window";
 
-// Wrap sub-classes for callable-without-new
-const CallableSegment = callableClass(Segment);
-const CallableStats = callableClass(Stats);
-const CallableRegion = callableClass(Region);
+// Process / Module
+export { Process, Module, Segment } from "./process";
+export type { ModuleData } from "./process";
 
-// Attach Segment to Module (matches original: mRobot.Module.Segment = Segment)
-(Module as any).Segment = CallableSegment;
+// Memory
+export {
+  Memory, Stats, Region,
+  MEMORY_DEFAULT, MEMORY_SKIP_ERRORS, MEMORY_AUTO_ACCESS,
+} from "./memory";
 
-// Attach Stats and Region to Memory
-(Memory as any).Stats = CallableStats;
-(Memory as any).Region = CallableRegion;
+// Native availability checking
+export { isAvailable } from "./napi";
+export type { Subsystem } from "./napi";
 
-// Hook Process.prototype.getModules to set _proc on returned modules
-const _origGetModules = Process.prototype.getModules;
-Process.prototype.getModules = function(this: Process, regex?: string) {
-  const rawModules = _origGetModules.call(this, regex);
-  return rawModules.map((m: any) => {
-    const mod = new Module(m);
-    mod._segments = null;
-    mod._proc = this;
-    return mod;
-  });
-} as any;
-
-// Platform-specific key/button constants (now from TS constants module)
-const _nativeConstants = getAllConstants();
-
-const mRobot = {
-  // Version info
-  ROBOT_VERSION,
-  ROBOT_VERSION_STR,
-  ADDON_VERSION,
-  ADDON_VERSION_STR,
-
-  // Top-level functions
-  sleep,
-  clock,
-
-  // Classes (wrapped for constructor-without-new compatibility)
-  Bounds: callableClass(Bounds),
-  Clipboard,
-  Color: callableClass(Color),
-  Hash: callableClass(Hash),
-  Image: callableClass(Image),
-  Keyboard: callableClass(Keyboard),
-  Memory: callableClass(Memory),
-  Module: callableClass(Module),
-  Mouse: callableClass(Mouse),
-  Point: callableClass(Point),
-  Process: callableClass(Process),
-  Range: callableClass(Range),
-  Screen: callableClass(Screen),
-  Size: callableClass(Size),
-  Timer: callableClass(Timer),
-  Window: callableClass(Window),
-
-  // Key and button constants from native addon (platform-specific)
-  ..._nativeConstants,
-
-  // Backend management
-  getNativeBackend,
-  setNativeBackend,
-};
-
-export = mRobot;
+/** Version of the mechatron meta-package. */
+export const VERSION = "0.0.0";

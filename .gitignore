@@ -5,5 +5,12 @@ prebuilds/
 build-*/
 node_modules/
 .DS_STORE
-native-rs/target/
-native-rs/*.node
+napi/target/
+napi/*.node
+dist/
+*.tsbuildinfo
+napi/*/mechatron-*.node
+packages/@mechatronic/*/mechatron-*.node
+coverage/
+test/memory-child
+test/memory-child.exe

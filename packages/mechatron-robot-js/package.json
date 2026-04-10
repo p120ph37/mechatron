@@ -1,0 +1,42 @@
+{
+  "name": "mechatron-robot-js",
+  "version": "0.0.0",
+  "description": "Drop-in robot-js replacement backed by mechatron",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "test": "node test/conformance.js",
+    "test:interactive": "node test/interactive.js"
+  },
+  "keywords": [
+    "robot-js",
+    "mechatron",
+    "desktop-automation",
+    "keyboard",
+    "mouse",
+    "screen",
+    "clipboard",
+    "window",
+    "process",
+    "memory"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p120ph37/mechatron.git",
+    "directory": "packages/mechatron-robot-js"
+  },
+  "author": "Aaron Meriwether",
+  "license": "MIT",
+  "dependencies": {
+    "mechatron": "*"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ]
+}

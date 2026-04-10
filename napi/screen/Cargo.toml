@@ -1,0 +1,29 @@
+[package]
+name = "mechatron-screen"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi4"] }
+napi-derive = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mechatron-shared = { path = "../shared" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSScreen"] }
+core-graphics = "0.24"
+foreign-types = "0.5"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+] }
+
+[build-dependencies]
+napi-build = "2"

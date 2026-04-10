@@ -20,63 +20,108 @@ Prebuilt binaries are included for:
 ## Install
 
 ```sh
-npm install mechatron
+npm install mechatron   # all subsystems (native modules are optionalDependencies)
 ```
+
+To omit specific native subsystems (e.g. to avoid AV false positives from the
+memory-inspection binary):
+
+```sh
+npm install mechatron --omit=optional                 # skip all native modules
+npm install mechatron @mechatronic/napi-keyboard       # only keyboard native
+npm install mechatron @mechatronic/napi-{keyboard,mouse,screen}  # pick and choose
+```
+
+### Native Packages
+
+All TypeScript lives in `mechatron`.  Native NAPI binaries are split into
+separately-installable optional packages under `@mechatronic/`:
+
+| Package | Subsystem |
+|---------|-----------|
+| `@mechatronic/napi-keyboard` | Keyboard simulation and state |
+| `@mechatronic/napi-mouse` | Mouse simulation and state |
+| `@mechatronic/napi-clipboard` | Clipboard read/write (text + image) |
+| `@mechatronic/napi-screen` | Screen enumeration and capture |
+| `@mechatronic/napi-window` | Window enumeration and management |
+| `@mechatronic/napi-process` | Process enumeration and inspection |
+| `@mechatronic/napi-memory` | Process memory read/write/search |
+| **`mechatron-robot-js`** | Drop-in robot-js 2.2.0 replacement (legacy API) |
 
 ## Usage
 
 ```js
-var mechatron = require("mechatron");
+const {
+  Keyboard, KEYS, Mouse, BUTTON_LEFT,
+  Clipboard, Screen, Image, Window, Process, Memory,
+} = require("mechatron");
 
 // Keyboard
-var kb = mechatron.Keyboard();
-kb.click(mechatron.KEY_A);
-console.log(mechatron.Keyboard.getState(mechatron.KEY_SHIFT));
+const kb = new Keyboard();
+kb.click(KEYS.KEY_A);
+console.log(Keyboard.getState(KEYS.KEY_SHIFT));
 
 // Mouse
-var mouse = mechatron.Mouse();
-mouse.click(mechatron.BUTTON_LEFT);
-var pos = mechatron.Mouse.getPos();
-mechatron.Mouse.setPos(100, 200);
+const mouse = new Mouse();
+mouse.click(BUTTON_LEFT);
+const pos = Mouse.getPos();
+Mouse.setPos(100, 200);
 
 // Clipboard
-mechatron.Clipboard.setText("hello");
-console.log(mechatron.Clipboard.getText());
+Clipboard.setText("hello");
+console.log(Clipboard.getText());
+const text = await Clipboard.getTextAsync();   // async variant
 
 // Screen
-mechatron.Screen.synchronize();
-var screens = mechatron.Screen.getList();
-var img = mechatron.Image();
-mechatron.Screen.grabScreen(img, 0, 0, 100, 100);
+Screen.synchronize();
+const screens = Screen.getList();
+const img = new Image();
+Screen.grabScreen(img, 0, 0, 100, 100);
+await Screen.grabScreenAsync(img, 0, 0, 100, 100);  // async variant
 
 // Window
-var windows = mechatron.Window.getList();
-var active = mechatron.Window.getActive();
+const windows = Window.getList();
+const active = Window.getActive();
 
 // Process
-var procs = mechatron.Process.getList();
-var curr = mechatron.Process.getCurrent();
+const procs = Process.getList();
+const curr = Process.getCurrent();
+const mods = curr.getModules();
+const modsAsync = await curr.getModulesAsync();  // async variant
 
 // Memory
-var mem = mechatron.Memory(curr);
-var regions = mem.getRegions();
+const mem = new Memory(curr);
+const regions = mem.getRegions();
 ```
+
+### robot-js migration
+
+Existing robot-js applications can switch with zero code changes:
+
+```sh
+npm install robot-js@npm:mechatron-robot-js
+```
+
+Or depend on `mechatron-robot-js` directly — it provides the full robot-js
+2.2.0 surface (`callableClass` constructors, `KEY_*` globals, `sleep`/`clock`,
+`Module.Segment`, etc.) backed by the modern mechatron native layer.
 
 ## Architecture
 
-The native backend is implemented in Rust (`native-rs/`) using napi-rs, exposing
-minimal FFI functions — platform syscall wrappers with no business logic.  The
-TypeScript layer (`lib/`) owns all API logic: argument validation, key constants,
-keyboard compile, and state iteration.  `tsc` compiles `lib/` to individual CJS
-modules in `dist/`.
+All TypeScript lives in the root `mechatron` package under `lib/`.  The native
+backend is a Cargo workspace (`napi/`) of seven per-subsystem `cdylib` crates
+built with napi-rs, each exposing minimal FFI — platform syscall wrappers with
+no business logic.  At runtime, `lib/napi.ts` resolves each subsystem's
+`.node` binary from its `@mechatronic/napi-*` optional dependency (workspace
+symlinks provide resolution during development).
 
 ## Build from Source
 
 Requires: Rust toolchain, Node.js 18+
 
 ```sh
-cd native-rs
-npm run build   # or: cargo build --release
+cd napi && cargo build --release  # build all native crates
+npx tsc                           # compile TypeScript
 ```
 
 ## Test
@@ -86,7 +131,10 @@ npm run build   # or: cargo build --release
 npm test
 
 # Full CI test suite (requires desktop session / TCC grants on macOS)
-sudo node test/test-ci.js all
+sudo node test/test.js all
+
+# robot-js conformance suite (320 API surface checks)
+node packages/mechatron-robot-js/test/conformance.js
 ```
 
 ## License

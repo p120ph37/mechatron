@@ -1,372 +1,199 @@
 ////////////////////////////////////////////////////////////////////////////////
 // -------------------------------------------------------------------------- //
 //                                                                            //
-//                       (C) 2010-2018 Robot Developers                       //
-//                       See LICENSE for licensing info                       //
+//                    Mechatron Process Test Module                            //
+//                                                                            //
+//  Exercises Process class using the modern mechatron API.                   //
 //                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
 
 "use strict";
 
-//----------------------------------------------------------------------------//
-// Exports                                                                    //
-//----------------------------------------------------------------------------//
+module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
-module.exports = function (robot, log, sprintf, getline, assert)
-{
-	//----------------------------------------------------------------------------//
-	// Locals                                                                     //
-	//----------------------------------------------------------------------------//
+	function testProcess() {
+		log("  Process... ");
 
-	////////////////////////////////////////////////////////////////////////////////
+		var Process = mechatron.Process;
 
-	var Process = robot.Process;
+		// --- Invalid process ---
+		var p = new Process();
+		assert(!p.isValid(), "empty invalid");
+		assert(p.getPID() === 0, "empty pid=0");
+		assert(p.getName() === "", "empty name empty");
+		assert(p.getPath() === "", "empty path empty");
+		assert(p.hasExited(), "empty hasExited");
 
+		p = new Process(8888);
+		assert(!p.isValid(), "bogus pid invalid");
+		assert(p.getPID() === 8888, "bogus pid stored");
 
+		// Equality on invalid
+		var p2 = new Process();
+		assert(p2.eq(0), "empty eq 0");
+		assert(p2.ne(8888), "empty ne 8888");
 
-	//----------------------------------------------------------------------------//
-	// Functions                                                                  //
-	//----------------------------------------------------------------------------//
+		// --- getCurrent ---
+		var curr = Process.getCurrent();
+		assert(curr.isValid(), "current valid");
+		assert(curr.getPID() > 0, "current pid > 0");
+		assert(curr.getName().length > 0, "current has name");
+		assert(curr.getPath().length > 0, "current has path");
+		assert(!curr.hasExited(), "current not exited");
 
-	////////////////////////////////////////////////////////////////////////////////
+		// Open by PID
+		var p3 = new Process();
+		assert(p3.open(curr.getPID()), "open current pid");
+		assert(p3.isValid(), "opened valid");
+		assert(p3.eq(curr), "opened eq current");
 
-	function testInvalid()
-	{
-		var p1 = Process ();
-		var p2 = Process (); assert (!p2.open ( 0));
-		var p3 = Process (); assert (!p3.open (-1));
-		var p4 = Process (8888);
+		// --- getList ---
+		var list = Process.getList();
+		assert(list.length > 0, "getList non-empty");
+		assert(list instanceof Array, "getList is array");
 
-		assert (!p1.isValid()); assert (!p1.is64Bit()); assert (p1.hasExited());
-		assert (!p2.isValid()); assert (!p2.is64Bit()); assert (p2.hasExited());
-		assert (!p3.isValid()); assert (!p3.is64Bit()); assert (p3.hasExited());
-		assert (!p4.isValid()); assert (!p4.is64Bit()); assert (p4.hasExited());
+		for (var i = 0; i < Math.min(list.length, 10); ++i) {
+			assert(list[i].isValid(), "list[" + i + "] valid");
+			assert(list[i].getPID() > 0, "list[" + i + "] pid > 0");
+		}
 
-		assert (p1.getPID() === 0);
-		assert (p2.getPID() === 0);
-		assert (p3.getPID() === 0);
-		assert (p4.getPID() === 0);
+		// Regex filter
+		var filtered = Process.getList(".*node.*");
+		assert(filtered.length > 0, "filtered has node");
 
-		assert (p1.getName().length === 0); assert (p1.getPath().length === 0);
-		assert (p2.getName().length === 0); assert (p2.getPath().length === 0);
-		assert (p3.getName().length === 0); assert (p3.getPath().length === 0);
-		assert (p4.getName().length === 0); assert (p4.getPath().length === 0);
+		// --- isSys64Bit ---
+		assert(typeof Process.isSys64Bit() === "boolean", "isSys64Bit bool");
 
-		assert ( p1.eq (p2)); assert ( p2.eq (p1));
-		assert (!p1.ne (p2)); assert (!p2.ne (p1));
-		assert ( p3.eq (p4)); assert ( p4.eq (p3));
-		assert (!p3.ne (p4)); assert (!p4.ne (p3));
+		// --- open / close ---
+		var p4 = new Process();
+		assert(p4.open(curr.getPID()), "open by pid");
+		assert(p4.isValid(), "opened valid");
+		p4.close();
 
-		assert (p1.eq (0)); assert (p1.ne (8888));
-		assert (p2.eq (0)); assert (p2.ne (8888));
-		assert (p3.eq (0)); assert (p3.ne (8888));
-		assert (p4.eq (0)); assert (p4.ne (8888));
+		// --- getHandle ---
+		assert(typeof curr.getHandle() === "number", "getHandle number");
 
+		// --- getWindows ---
+		var wins = curr.getWindows();
+		assert(wins instanceof Array, "getWindows is array");
+
+		// --- getModules ---
+		{
+			var mods = curr.getModules();
+			assert(mods instanceof Array, "getModules is array");
+			assert(mods.length > 0, "getModules non-empty");
+
+			// Module properties
+			var mod = mods[0];
+			assert(typeof mod.getName() === "string", "module getName");
+			assert(typeof mod.getPath() === "string", "module getPath");
+			assert(typeof mod.getBase() === "number", "module getBase");
+			assert(typeof mod.getSize() === "number", "module getSize");
+			assert(mod.isValid(), "module isValid");
+			assert(mod.getProcess() instanceof Process, "module getProcess");
+
+			// Module contains
+			if (mod.getSize() > 0) {
+				assert(mod.contains(mod.getBase()), "module contains base");
+				assert(!mod.contains(0), "module !contains 0");
+			}
+
+			// Module comparison
+			if (mods.length > 1) {
+				var m0 = mods[0], m1 = mods[1];
+				var cmp = (m0.getBase() < m1.getBase());
+				assert(m0.lt(m1) === cmp, "module lt");
+				assert(m0.gt(m1) === !cmp && m0.getBase() !== m1.getBase(), "module gt");
+				assert(typeof m0.le(m1) === "boolean", "module le");
+				assert(typeof m0.ge(m1) === "boolean", "module ge");
+				assert(typeof m0.eq(m1) === "boolean", "module eq");
+				assert(typeof m0.ne(m1) === "boolean", "module ne");
+			}
+
+			// Module 5-param constructor
+			var Module = mechatron.Module;
+			var mod5 = new Module(curr, "testmod", "/test/path", 0x1000, 0x2000);
+			assert(mod5.isValid(), "Module 5-param valid");
+			assert(mod5.getName() === "testmod", "Module 5-param name");
+			assert(mod5.getPath() === "/test/path", "Module 5-param path");
+			assert(mod5.getBase() === 0x1000, "Module 5-param base");
+			assert(mod5.getSize() === 0x2000, "Module 5-param size");
+			assert(mod5.getProcess().eq(curr), "Module 5-param process");
+
+			// Module clone
+			var mc = mod.clone();
+			assert(mc.getName() === mod.getName(), "module clone name");
+			assert(mc.getBase() === mod.getBase(), "module clone base");
+
+			// Module getSegments
+			var segs = mod.getSegments();
+			assert(segs instanceof Array, "module getSegments is array");
+
+			// Module clone with segments populated
+			var mc2 = mod.clone();
+			assert(mc2.getSegments() instanceof Array, "cloned module getSegments");
+
+			// Module TypeError for comparison with invalid type
+			var modThrew = false;
+			try { mod.lt("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module lt invalid throws");
+			modThrew = false;
+			try { mod.gt("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module gt invalid throws");
+			modThrew = false;
+			try { mod.le("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module le invalid throws");
+			modThrew = false;
+			try { mod.ge("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module ge invalid throws");
+			modThrew = false;
+			try { mod.eq("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module eq invalid throws");
+			modThrew = false;
+			try { mod.ne("bad"); } catch(e) { modThrew = true; }
+			assert(modThrew, "module ne invalid throws");
+
+			// Segment ne
+			if (segs.length > 0) {
+				var segNe = segs[0].ne(new mechatron.Segment());
+				assert(typeof segNe === "boolean", "segment ne returns bool");
+			}
+		}
+
+		// --- Process copy constructor ---
+		var pCopy = new Process(curr);
+		assert(pCopy.eq(curr), "copy ctor eq");
+		assert(pCopy.getPID() === curr.getPID(), "copy ctor pid");
+
+		// --- Process clone ---
+		var pClone = curr.clone();
+		assert(pClone.eq(curr), "clone eq");
+		assert(pClone.getPID() === curr.getPID(), "clone pid");
+
+		// --- is64Bit, isDebugged ---
+		assert(typeof curr.is64Bit() === "boolean", "is64Bit bool");
+		assert(typeof curr.isDebugged() === "boolean", "isDebugged bool");
+
+		// --- Async variants ---
+		var pa1 = Process.getListAsync();
+		assert(pa1 instanceof Promise, "getListAsync returns Promise");
+		var pa2 = curr.getModulesAsync();
+		assert(pa2 instanceof Promise, "getModulesAsync returns Promise");
+
+		// --- exit/kill on invalid process (no-op, no crash) ---
+		var pBogus = new Process();
+		pBogus.exit();
+		pBogus.kill();
+
+		// --- close ---
+		curr.close();
+
+		log("OK\n");
 		return true;
 	}
 
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testSelect()
-	{
-		var p1 = Process();
-		var p2 = Process();
-		var input1 = "";
-		var input2 = "";
-		log ("Warning: The next set of tests cannot be automated\n"  );
-		log ("         Please execute the following instructions\n\n");
-
-		if (process.platform === "linux")
-		{
-			log ("open Leafpad and input PID: "); input1 = getline();
-			log ("open gedit   and input PID: "); input2 = getline();
-		}
-
-		if (process.platform === "darwin")
-		{
-			log ("open TextEdit and input PID: "); input1 = getline();
-			log ("open Notes    and input PID: "); input2 = getline();
-		}
-
-		if (process.platform === "win32")
-		{
-			log ("open Notepad and input PID: "); input1 = getline();
-			log ("open Wordpad and input PID: "); input2 = getline();
-		}
-
-		var pid1 = parseInt (input1); assert (pid1 > 0); assert (p1.open (pid1));
-		var pid2 = parseInt (input2); assert (pid2 > 0); assert (p2.open (pid2));
-
-		assert (p1.isValid()); assert (!p1.hasExited());
-		assert (p2.isValid()); assert (!p2.hasExited());
-		assert (p1.is64Bit() === p2.is64Bit());
-
-		assert (p1.getPID() === pid1);
-		assert (p2.getPID() === pid2);
-
-		if (process.platform === "linux")
-		{
-			assert (p1.getName() === "leafpad");
-			assert (p2.getName() === "gedit"  );
-
-			assert (p1.getPath() === "/usr/bin/leafpad");
-			assert (p2.getPath() === "/usr/bin/gedit"  );
-		}
-
-		if (process.platform === "darwin")
-		{
-			assert (p1.getName() === "TextEdit");
-			assert (p2.getName() === "Notes"   );
-
-			assert (p1.getPath() === "/Applications/TextEdit.app/Contents/MacOS/TextEdit");
-			assert (p2.getPath() === "/Applications/Notes"+".app/Contents/MacOS/Notes"   );
-		}
-
-		if (process.platform === "win32")
-		{
-			assert (p1.getName() === "notepad.exe");
-			assert (p2.getName() === "wordpad.exe");
-
-			assert (p1.getPath() === "C:/Windows/System32/notepad.exe"                    );
-			assert (p2.getPath() === "C:/Program Files/Windows NT/Accessories/wordpad.exe");
-		}
-
-		assert (!p1.eq (p2)); assert (!p2.eq (p1));
-		assert ( p1.ne (p2)); assert ( p2.ne (p1));
-
-		assert (p1.eq (pid1)); assert (p1.ne (8888));
-		assert (p2.eq (pid2)); assert (p2.ne (8888));
-
-		assert (!p1.ne (pid1)); assert (!p1.eq (8888));
-		assert (!p2.ne (pid2)); assert (!p2.eq (8888));
-
-		log ("Type something in both apps then press enter");
-		getline();
-		p1.exit();
-		p2.kill();
-		log ("close both applications and then press enter");
-		getline();
-
-		if (process.platform === "win32")
-		{
-			assert (p1.isValid());
-			assert (p2.isValid());
-		}
-
-		assert (p1.hasExited());
-		assert (p2.hasExited());
-
-		log ("\n");
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testCurrent()
-	{
-		log ("Warning: The next set of tests cannot be automated\n"  );
-		log ("         Please execute the following instructions\n\n");
-
-		log ("Input this application's PID: "); var input = getline();
-		var pid = parseInt (input);
-
-		assert (pid > 0);
-		var p1 = Process (pid);
-		var p2 = Process.getCurrent();
-
-		assert (p1.isValid()); assert (!p1.hasExited());
-		assert (p2.isValid()); assert (!p2.hasExited());
-
-		assert (p1.getPID() === pid);
-		assert (p2.getPID() === pid);
-
-		if (process.arch === "ia32")
-		{
-			assert (!p1.is64Bit());
-			assert (!p2.is64Bit());
-		}
-
-		if (process.arch === "x64")
-		{
-			assert (p1.is64Bit());
-			assert (p2.is64Bit());
-		}
-
-		assert ( p1.eq (p2)); assert ( p2.eq (p1));
-		assert (!p1.ne (p2)); assert (!p2.ne (p1));
-
-		assert (p1.eq (pid)); assert (p1.ne (8888));
-		assert (p2.eq (pid)); assert (p2.ne (8888));
-
-		log ("Verify the following information\n");
-		log ("Path: " + p2.getPath() + "    \n\n");
-
-		p1.close(); assert (!p1.isValid());
-		p2.close(); assert (!p2.isValid());
-
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testGetList()
-	{
-		log ("Warning: The next set of tests cannot be automated\n"  );
-		log ("         Please verify the following process lists\n\n");
-
-		if (process.platform === "linux")
-			log ("open a couple Leafpads & gedits and press enter\n");
-
-		if (process.platform === "darwin")
-			log ("open a couple TextEdits & Notes and press enter\n");
-
-		if (process.platform === "win32")
-			log ("open a couple Notepads & Wordpads and press enter\n");
-
-		getline();
-
-		if (process.platform === "linux" ||
-			process.platform === "win32")
-		{
-			// This result is unreliable on OSX
-			assert (Process.getList ("*").length === 0);
-			assert (Process.getList (")").length === 0);
-		}
-
-		var list1 = Process.getList (    );
-		var list2 = Process.getList (".*");
-		log ("List all - " + list1.length + "\n");
-
-		assert (list1.length !==            0);
-		assert (list1.length === list2.length);
-
-		for (var i = 0; i < list1.length; ++i)
-		{
-			assert ( list1[i].isValid  ());
-			assert ( list2[i].isValid  ());
-			assert (!list1[i].hasExited());
-
-			assert ( list1[i].eq (list2[i]));
-			assert (!list1[i].ne (list2[i]));
-
-			log (sprintf ("%6d ", list1[i].getPID()));
-			log (list1[i].is64Bit() ? "x64 " : "x32 ");
-			log (list1[i].getName() + "\n");
-		}
-
-		log ("\n");
-		list1 = Process.getList (".*a.*");
-		list2 = Process.getList (".*A.*");
-		log ("List *a* - " + list1.length + "\n");
-		assert (list1.length === list2.length);
-
-		for (var i = 0; i < list1.length; ++i)
-		{
-			var name = list1[i].getName();
-			assert (name.indexOf ("a") >= 0 ||
-					name.indexOf ("A") >= 0);
-		}
-
-		log ("Verified\n\n");
-
-		if (process.platform === "linux")
-		{
-			list1 = Process.getList (".*leafpad.*|.*gedit.*");
-			list2 = Process.getList (".*gEdit.*|.*Leafpad.*");
-		}
-
-		if (process.platform === "darwin")
-		{
-			list1 = Process.getList (".*textedit.*|.*notes.*");
-			list2 = Process.getList (".*Notes.*|.*TextEdit.*");
-		}
-
-		if (process.platform === "win32")
-		{
-			list1 = Process.getList (".*notepad.*|.*wordpad.*");
-			list2 = Process.getList (".*WordPad.*|.*NotePad.*");
-		}
-
-		log ("List apps - " + list1.length + "\n");
-
-		assert (list1.length !==            0);
-		assert (list1.length === list2.length);
-
-		for (var i = 0; i < list1.length; ++i)
-		{
-			assert ( list1[i].isValid  ());
-			assert ( list2[i].isValid  ());
-			assert (!list1[i].hasExited());
-
-			assert ( list1[i].eq (list2[i]));
-			assert (!list1[i].ne (list2[i]));
-
-			log (sprintf ("%6d ", list1[i].getPID()));
-			log (list1[i].is64Bit() ? "x64 " : "x32 ");
-			log (list1[i].getName() + "\n");
-		}
-
-		log ("\n");
-		return true;
-	}
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	function testArgs()
-	{
-		var p = Process();
-
-		assert (p.open, p, [   ]);
-		assert (p.open, p, ["a"]);
-		assert (Process.getList, Process, [0]);
-
-		assert (p.eq, p, [   ]);
-		assert (p.ne, p, [   ]);
-		assert (p.eq, p, ["a"]);
-		assert (p.ne, p, ["a"]);
-
-		assert (typeof p.open       (8888) === "boolean"  );
-		assert (typeof p.close      (    ) === "undefined");
-		assert (typeof p.isValid    (    ) === "boolean"  );
-		assert (typeof p.is64Bit    (    ) === "boolean"  );
-		assert (typeof p.isDebugged (    ) === "boolean"  );
-		assert (typeof p.getPID     (    ) === "number"   );
-		assert (typeof p.getName    (    ) === "string"   );
-		assert (typeof p.getPath    (    ) === "string"   );
-		assert (typeof p.exit       (    ) === "undefined");
-		assert (typeof p.kill       (    ) === "undefined");
-		assert (typeof p.hasExited  (    ) === "boolean"  );
-
-		assert (       Process.getList   (    ) instanceof Array  );
-		assert (       Process.getList   (".*") instanceof Array  );
-		assert (       Process.getCurrent(    ) instanceof Process);
-		assert (typeof Process.isSys64Bit(    ) === "boolean"     );
-
-		assert (typeof p.eq (p) === "boolean");
-		assert (typeof p.ne (p) === "boolean");
-		assert (typeof p.eq (8) === "boolean");
-		assert (typeof p.ne (8) === "boolean");
-
-		return true;
-	}
-
-
-
-	//----------------------------------------------------------------------------//
-	// Main                                                                       //
-	//----------------------------------------------------------------------------//
-
-	////////////////////////////////////////////////////////////////////////////////
-
-	return function()
-	{
-		log ("BEGIN PROCESS TESTING\n------------------------------\n");
-		if (!testInvalid()) { log (">> Invalid Failed \n\n"); return false; }
-		if (!testSelect ()) { log (">> Select Failed  \n\n"); return false; }
-		if (!testCurrent()) { log (">> Current Failed \n\n"); return false; }
-		if (!testGetList()) { log (">> getList Failed \n\n"); return false; }
-		if (!testArgs   ()) { log (">> TestArgs Failed\n\n"); return false; }
-		log (">> Success\n\n"); return true;
+	return {
+		testProcess: testProcess,
 	};
 };

@@ -6,6 +6,9 @@ on:
     branches: [main]
 env:
   HOST_NODE_VERSION: "22"
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   build:
     strategy:
@@ -29,9 +32,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
@@ -61,10 +64,6 @@ jobs:
           # Diagnostic
           sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
 
@@ -82,38 +81,90 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
-      - name: Build Rust napi module
+      - name: Build Rust napi modules
         run: |
-          cd native-rs
+          SUBS="keyboard mouse clipboard screen window process memory"
+          cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
-            cargo build --release --target i686-pc-windows-msvc
-            cp target/i686-pc-windows-msvc/release/mechatron_native.dll mechatron-native.win32-ia32-msvc.node
+            CARGO_TARGET=i686-pc-windows-msvc
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
           elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            cargo build --release --target x86_64-apple-darwin
-            cp target/x86_64-apple-darwin/release/libmechatron_native.dylib mechatron-native.darwin-x64.node
+            CARGO_TARGET=x86_64-apple-darwin
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
           else
-            npm run build
-            if [ "${{ runner.os }}" = "Linux" ]; then
-              cp target/release/libmechatron_native.so mechatron-native.linux-${{ matrix.arch }}-gnu.node
-            elif [ "${{ runner.os }}" = "macOS" ]; then
-              cp target/release/libmechatron_native.dylib mechatron-native.darwin-${{ matrix.arch }}.node
-            elif [ "${{ runner.os }}" = "Windows" ]; then
-              cp target/release/mechatron_native.dll mechatron-native.win32-${{ matrix.arch }}-msvc.node
-            fi
-          fi
-          # Re-sign macOS binaries (strip="symbols" in Cargo.toml invalidates the ad-hoc signature;
-          # task_for_pid requires a valid signature even when running as root)
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            codesign --force --sign - mechatron-native.darwin-${{ matrix.arch }}.node
+            cargo build --release $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/release"
           fi
 
-      - name: Bundle TypeScript
-        run: bun build lib/index.ts --outdir dist --target node --format cjs --external node-gyp-build --external path
+          # Map matrix → napi triple for output naming
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            TRIPLE="linux-${{ matrix.arch }}-gnu"
+            SRC_EXT="so"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            TRIPLE="darwin-${{ matrix.arch }}"
+            SRC_EXT="dylib"; SRC_PREFIX="lib"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            TRIPLE="win32-${{ matrix.arch }}-msvc"
+            SRC_EXT="dll"; SRC_PREFIX=""
+          fi
+
+          for s in $SUBS; do
+            SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
+            DST_NAME="mechatron-${s}.${TRIPLE}.node"
+            # Copy into napi/<sub>/ (for dev layout & artifact upload)
+            cp "$SRC" "$s/$DST_NAME"
+            # Copy into packages/@mechatronic/napi-<sub>/ (for published layout)
+            cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            # Re-sign macOS binaries (strip="symbols" invalidates ad-hoc signature;
+            # task_for_pid requires a valid signature even when running as root)
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              codesign --force --sign - "$s/$DST_NAME"
+              codesign --force --sign - "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            fi
+          done
+
+      - name: Build TypeScript
+        run: npx tsc
+
+      - name: Build native memory test helper
+        run: |
+          # Standalone clang build of test/memory-child.c — a deliberately
+          # non-hardened binary on macOS, which mechatron can attach to
+          # as any same-user process (mirroring the real-world
+          # game-trainer scenario where the target is a plain compiled
+          # binary, not a hardened-runtime Node).  This sidesteps the
+          # need to re-sign node with com.apple.security.get-task-allow
+          # in CI.  clang ships with the LLVM install that's already
+          # present on every GitHub-hosted runner.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            CLANG_TARGET="--target=i686-pc-windows-msvc"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            CLANG_TARGET="--target=x86_64-apple-darwin"
+          else
+            CLANG_TARGET=""
+          fi
+          clang -O2 $CLANG_TARGET \
+            test/memory-child.c -o "test/memory-child$EXT"
+          ls -la "test/memory-child$EXT"
 
       - name: Run tests
         run: |
+          JUNIT_DIR="${RUNNER_TEMP}/junit"
+          mkdir -p "$JUNIT_DIR"
           TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
+          C8="./node_modules/.bin/c8"
+          C8_ARGS="--reporter text --reporter lcov --reports-dir ${RUNNER_TEMP}/coverage"
+
           run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
             # Cross-compiled x64 on arm64 macOS — download x64 node to run tests
             NODE_VERSION=$(node -v)
@@ -127,29 +178,216 @@ jobs:
             done
             sudo launchctl stop com.apple.tccd 2>/dev/null || true
             sleep 1
-            run_and_log sudo "$X64_ABS" test/test-ci.js all
+            # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"
+            # Fix ownership of files created under sudo so upload-artifact can read them
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
+            # Generate coverage report from raw V8 data
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
           elif [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test-ci.js all
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            run_and_log xvfb-run --auto-servernum node test/test-ci.js all
+            run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            run_and_log sudo node test/test-ci.js all
+            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            run_and_log sudo -E node test/test.js all --junit "$JUNIT_FILE"
+            # Fix ownership of files created under sudo so upload-artifact can read them
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
+            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
           else
-            run_and_log node test/test-ci.js all
+            run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Run mechatron-robot-js conformance tests
+        run: |
+          # Root package is named "mechatron" but can't itself be a workspace, so
+          # mechatron-robot-js's `"mechatron": "*"` dep resolves from the registry.
+          # Use `npm link` to replace it with the working copy (uses junctions on Windows).
+          npm link
+          npm link mechatron -w mechatron-robot-js
+
+          # Run conformance tests and append result to JUnit XML
+          node -e "
+            const { execFileSync } = require('child_process');
+            const fs = require('fs');
+            const junitFile = process.env.JUNIT_FILE;
+            const start = Date.now();
+            let rc = 0, output = '';
+            try {
+              output = execFileSync(process.execPath,
+                ['packages/mechatron-robot-js/test/conformance.js'],
+                { encoding: 'utf8', stdio: ['pipe','pipe','pipe'] });
+            } catch (e) {
+              rc = e.status || 1;
+              output = (e.stdout || '') + (e.stderr || '');
+            }
+            const elapsed = ((Date.now() - start) / 1000).toFixed(3);
+            process.stdout.write(output);
+            if (fs.existsSync(junitFile)) {
+              const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              let tc;
+              if (rc === 0) {
+                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>';
+              } else {
+                const fails = output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ');
+                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(fails) + '\"/></testcase>';
+              }
+              const xml = fs.readFileSync(junitFile, 'utf8');
+              fs.writeFileSync(junitFile, xml.replace('</testsuite>', tc + '</testsuite>'));
+            }
+            process.exit(rc);
+          "
+        env:
+          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml
+
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: test-log-${{ matrix.os }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/test-output.txt
+          name: test-results-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/test-output.txt
+            ${{ runner.temp }}/junit/
+            ${{ runner.temp }}/coverage/
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
-          path: native-rs/mechatron-native.*.node
+          path: napi/*/mechatron-*.node
           if-no-files-found: error
+
+  test-summary:
+    if: always()
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-*
+          path: results
+
+      - name: Build comment body
+        run: |
+          cat <<'SCRIPT' > summary.js
+          const fs = require("fs"), path = require("path");
+          const resultsDir = "results";
+
+          let comment = "";
+          let allPassed = true;
+          let anyResults = false;
+
+          const dirs = fs.readdirSync(resultsDir).filter(d =>
+            d.startsWith("test-results-") && fs.statSync(path.join(resultsDir, d)).isDirectory()
+          ).sort();
+
+          for (const dir of dirs) {
+            const platform = dir.replace("test-results-", "").replace(/-(?=[^-]*$)/, " / ");
+            const junitDir = path.join(resultsDir, dir, "junit");
+            const covDir = path.join(resultsDir, dir, "coverage");
+
+            // Parse JUnit
+            let pass = 0, fail = 0, skip = 0;
+            const rows = [];
+            try {
+              const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith(".xml"));
+              for (const xf of xmlFiles) {
+                const xml = fs.readFileSync(path.join(junitDir, xf), "utf8");
+                const re = /<testcase name="([^"]+)"[^>]*time="([^"]+)"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
+                let m;
+                while ((m = re.exec(xml)) !== null) {
+                  const name = m[1], time = m[2], body = m[3];
+                  const skipped = body.includes("<skipped");
+                  const failed = body.includes("<failure");
+                  if (failed) { fail++; allPassed = false; }
+                  else if (skipped) { skip++; }
+                  else { pass++; }
+                  const icon = failed ? ":x:" : skipped ? ":fast_forward:" : ":white_check_mark:";
+                  rows.push(`| ${name} | ${icon} | ${time}s |`);
+                }
+              }
+            } catch (_) {}
+
+            // Parse coverage percentage
+            let covPct = "";
+            try {
+              const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
+              let hit = 0, total = 0;
+              for (const line of lcov.split("\n")) {
+                if (line.startsWith("DA:")) { total++; if (!line.endsWith(",0")) hit++; }
+              }
+              if (total > 0) covPct = (100 * hit / total).toFixed(1) + "%";
+            } catch (_) {}
+
+            const total = pass + fail + skip;
+            if (total === 0) continue;
+            anyResults = true;
+
+            const status = fail > 0 ? ":x:" : ":white_check_mark:";
+            const covStr = covPct ? ` · ${covPct} coverage` : "";
+            const skipStr = skip > 0 ? `, ${skip} skipped` : "";
+            const failStr = fail > 0 ? `, ${fail} failed` : "";
+            comment += `<details>\n`;
+            comment += `<summary>${status} <b>${platform}</b> — ${pass}/${total} passed${failStr}${skipStr}${covStr}</summary>\n\n`;
+            comment += `| Test | Status | Time |\n|------|--------|------|\n`;
+            comment += rows.join("\n") + "\n";
+
+            // Per-file coverage table
+            if (covPct) {
+              try {
+                const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
+                const files = {};
+                let cur = null;
+                for (const line of lcov.split("\n")) {
+                  if (line.startsWith("SF:")) {
+                    cur = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
+                    files[cur] = { hit: 0, total: 0 };
+                  } else if (line.startsWith("DA:") && cur) {
+                    files[cur].total++;
+                    if (!line.endsWith(",0")) files[cur].hit++;
+                  }
+                }
+                comment += `\n| File | Lines | Coverage |\n|------|------:|----------|\n`;
+                let tH = 0, tL = 0;
+                for (const [f, s] of Object.entries(files).sort()) {
+                  if (s.total === 0) continue;
+                  comment += `| ${f} | ${s.hit}/${s.total} | ${(100*s.hit/s.total).toFixed(1)}% |\n`;
+                  tH += s.hit; tL += s.total;
+                }
+                comment += `| **Total** | **${tH}/${tL}** | **${tL > 0 ? (100*tH/tL).toFixed(1) : "0"}%** |\n`;
+              } catch (_) {}
+            }
+
+            comment += `\n</details>\n\n`;
+          }
+
+          if (!anyResults) {
+            comment += "_No test results found in artifacts._\n";
+          }
+
+          const heading = allPassed && anyResults
+            ? ":white_check_mark: All tests passed"
+            : ":x: Some tests failed";
+          comment = `## ${heading}\n\n${comment}`;
+
+          fs.writeFileSync("comment-body.md", comment);
+          // Also write to workflow summary page
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, comment);
+          SCRIPT
+          node summary.js
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Update existing bot comment or create a new one
+          gh pr comment "$PR_NUMBER" --body-file comment-body.md --edit-last 2>/dev/null \
+            || gh pr comment "$PR_NUMBER" --body-file comment-body.md
