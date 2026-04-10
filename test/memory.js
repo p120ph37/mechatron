@@ -270,11 +270,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- Cross-process memory write verification ---
 		// Spawn a compiled native helper (see test/memory-child.rs) that
-		// allocates a random buffer internally and serves a fresh hex
-		// dump of it on every HTTP GET.  mechatron attaches to the
-		// helper's address space via the Memory API and performs
-		// round-trip writes/reads; the child's own view is verified by
-		// HTTP-querying it after each round of writes.
+		// allocates a random buffer internally and emits a fresh hex
+		// dump of it on stdout every time the parent writes a newline
+		// to its stdin.  mechatron attaches to the helper's address
+		// space via the Memory API and performs round-trip writes/reads;
+		// the child's own view is verified by prompting it to re-dump
+		// the buffer after each round of writes.
 		//
 		// Rationale for using a native binary (not `node`) as the target:
 		// on macOS, the official Node.js binary ships with the hardened
@@ -288,89 +289,61 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// non-hardened binary.
 		var _cp = require("child_process");
 		var _path = require("path");
-		var _http = require("http");
 
 		var _helperExt = process.platform === "win32" ? ".exe" : "";
 		var _helper = _path.join(__dirname, "memory-child" + _helperExt);
 
-		// stdout: pipe (we use the first line as the readiness signal
-		// carrying the bound TCP port).  stderr: inherit so any helper
-		// panics surface directly in the test log.
+		// stdin/stdout: piped line protocol.  stderr: inherited so any
+		// helper panics surface directly in the test log.
 		var _child = _cp.spawn(_helper, [],
-			{ stdio: ["ignore", "pipe", "inherit"] });
+			{ stdio: ["pipe", "pipe", "inherit"] });
 
-		function _waitForPort() {
+		// Line-oriented reader over the child's stdout.  In normal
+		// lockstep use, there is at most one outstanding waiter and the
+		// child emits exactly one line per newline we write — but any
+		// extra lines are queued defensively so nothing is silently
+		// dropped.
+		var _lineQueue = [];
+		var _lineWaiter = null;
+		var _childClosed = false;
+		var _stdoutBuf = "";
+		_child.stdout.setEncoding("utf8");
+		_child.stdout.on("data", function (chunk) {
+			_stdoutBuf += chunk;
+			var nl;
+			while ((nl = _stdoutBuf.indexOf("\n")) >= 0) {
+				var line = _stdoutBuf.slice(0, nl).replace(/\r$/, "");
+				_stdoutBuf = _stdoutBuf.slice(nl + 1);
+				if (_lineWaiter) {
+					var w = _lineWaiter; _lineWaiter = null;
+					w(line);
+				} else {
+					_lineQueue.push(line);
+				}
+			}
+		});
+		_child.on("exit", function () { _childClosed = true; });
+
+		function _queryChild() {
 			return new Promise(function (resolve, reject) {
-				var buf = "";
-				var settled = false;
-				var onData = function (chunk) {
-					if (settled) return;
-					buf += chunk.toString("utf8");
-					var nl = buf.indexOf("\n");
-					if (nl < 0) return;
-					settled = true;
-					clearTimeout(t);
-					_child.stdout.removeListener("data", onData);
-					_child.stdout.removeListener("error", onErr);
-					var line = buf.slice(0, nl).replace(/\r$/, "");
-					var n = parseInt(line, 10);
-					if (isNaN(n) || n <= 0 || n > 65535) {
-						reject(new Error("bad port line from child: " + line));
-					} else {
-						resolve(n);
-					}
-				};
-				var onErr = function (e) {
-					if (settled) return;
-					settled = true;
-					clearTimeout(t);
-					_child.stdout.removeListener("data", onData);
-					_child.stdout.removeListener("error", onErr);
-					reject(e);
-				};
+				if (_lineQueue.length > 0) return resolve(_lineQueue.shift());
+				if (_childClosed) return reject(new Error("child closed"));
 				var t = setTimeout(function () {
-					if (settled) return;
-					settled = true;
-					_child.stdout.removeListener("data", onData);
-					_child.stdout.removeListener("error", onErr);
-					reject(new Error("timeout waiting for child port"));
+					_lineWaiter = null;
+					reject(new Error("child stdout read timeout"));
 				}, 5000);
-				_child.stdout.on("data", onData);
-				_child.stdout.on("error", onErr);
-			});
-		}
-
-		function _queryChild(port) {
-			return new Promise(function (resolve, reject) {
-				var req = _http.get({
-					host: "127.0.0.1",
-					port: port,
-					path: "/",
-					agent: false,
-				}, function (res) {
-					var data = "";
-					res.setEncoding("utf8");
-					res.on("data", function (c) { data += c; });
-					res.on("end", function () { resolve(data); });
-				});
-				req.on("error", reject);
-				req.setTimeout(5000, function () {
-					req.destroy(new Error("query timeout"));
-				});
+				_lineWaiter = function (line) {
+					clearTimeout(t);
+					resolve(line);
+				};
+				_child.stdin.write("\n");
 			});
 		}
 
 		try {
-			var _port = await _waitForPort();
-			// Drain any further stdout so the pipe doesn't back-pressure
-			// the child if it were to print more.  (It won't — the port
-			// line is the only thing the helper emits — but it's cheap.)
-			_child.stdout.on("data", function () {});
-
-			// The child generates its own initial buffer; the parent
-			// learns it via a first HTTP query and uses that as the
-			// search needle.
-			var _initialHex = await _queryChild(_port);
+			// First query doubles as the readiness probe and returns
+			// the child's self-generated initial buffer contents.
+			var _initialHex = await _queryChild();
 			assert(/^[0-9a-f]{128}$/.test(_initialHex),
 				"native helper emitted 64-byte hex dump");
 
@@ -432,7 +405,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			// Belt-and-suspenders: ask the child to re-dump its buffer.
 			// The child uses volatile reads so the values we see here are
 			// the actual bytes in its address space, not a stale cache.
-			var _hex = await _queryChild(_port);
+			var _hex = await _queryChild();
 			assert(_hex.substring(0, 2) === "42",
 				"cross-process writeInt8 visible");
 			assert(_hex.substring(4, 8) === "3412",
@@ -468,7 +441,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 				"cross-process readInt64 negative");
 
 			// Verify the same via child's own view
-			_hex = await _queryChild(_port);
+			_hex = await _queryChild();
 			assert(_hex.substring(0, 2) === "ff",
 				"cross-process writeInt8 negative visible");
 			assert(_hex.substring(4, 8) === "feff",
@@ -480,12 +453,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 			// Restore original fill
 			childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
-			_hex = await _queryChild(_port);
+			_hex = await _queryChild();
 			assert(_hex.substring(0, 2) === "a5",
 				"cross-process writeData restore visible");
 
 			childProc.close();
 		} finally {
+			// Closing stdin is the child's cue to exit cleanly on EOF.
+			try { _child.stdin.end(); } catch (_) {}
 			try { _child.kill(); } catch (_) {}
 		}
 

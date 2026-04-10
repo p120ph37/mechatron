@@ -10,15 +10,15 @@
 // debugging third-party apps).
 //
 // Protocol:
-//   argv      (none)
-//   stdout    On startup, prints the bound TCP port as a single line,
-//             which is the parent's readiness signal.
-//   HTTP GET  Responds with a fresh hex dump of the helper's internal
-//             64-byte buffer.  The parent learns the initial contents
-//             by making a first HTTP request, locates the buffer in
-//             the helper's address space by using that value as a
-//             needle, then cross-process-writes to it and re-queries
-//             to verify.
+//   argv     (none)
+//   stdin    Each newline triggers a fresh hex dump on stdout.  EOF or
+//            a closed pipe causes the helper to exit cleanly.
+//   stdout   For every newline received on stdin, prints the current
+//            hex dump of the helper's internal 64-byte buffer as a
+//            single line.  The parent uses the first dump both as the
+//            readiness signal and to learn the initial buffer contents,
+//            so it can locate the buffer in the helper's address space
+//            via Memory.find().
 //
 // Reads go through std::ptr::read_volatile on every dump so the compiler
 // cannot hoist or cache them — the parent writes to this memory from a
@@ -34,8 +34,7 @@
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
+use std::io::{BufRead, Write};
 
 // Pseudo-random byte generation keyed by a fresh RandomState.  Each
 // RandomState is seeded from OS randomness at construction time, so the
@@ -71,52 +70,16 @@ fn main() {
         s
     };
 
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("local_addr").port();
-
-    // Announcing the port on stdout is the parent's "ready" signal.
-    {
-        let stdout = std::io::stdout();
-        let mut out = stdout.lock();
-        writeln!(out, "{}", port).expect("write port");
-        out.flush().expect("flush port");
-    }
-
-    for conn in listener.incoming() {
-        let mut stream = match conn {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        // Consume the HTTP request up to the blank line separator.
-        {
-            let mut reader = BufReader::new(&mut stream);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) => break,
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
-                if line == "\r\n" || line == "\n" {
-                    break;
-                }
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        match line {
+            Ok(_) => {
+                writeln!(out, "{}", dump()).expect("write dump");
+                out.flush().expect("flush dump");
             }
+            Err(_) => break,
         }
-
-        let body = dump();
-        let resp = format!(
-            "HTTP/1.1 200 OK\r\n\
-             Content-Type: text/plain\r\n\
-             Content-Length: {}\r\n\
-             Connection: close\r\n\
-             \r\n\
-             {}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(resp.as_bytes());
-        let _ = stream.flush();
     }
 }
