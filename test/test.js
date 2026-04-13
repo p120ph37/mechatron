@@ -53,9 +53,16 @@ if (!_backendArg) {
 
 	function _which(bin) {
 		var paths = (process.env.PATH || "").split(_path.delimiter);
+		// On Windows, search with PATHEXT extensions (.EXE, .CMD, ...) so we
+		// find e.g. bun.exe even when the lookup name is "bun".
+		var exts = process.platform === "win32"
+			? (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";").map(function (e) { return e.toLowerCase(); })
+			: [""];
 		for (var i = 0; i < paths.length; ++i) {
-			var p = _path.join(paths[i], bin);
-			try { _fs.accessSync(p, _fs.constants.X_OK); return p; } catch (_) {}
+			for (var j = 0; j < exts.length; ++j) {
+				var p = _path.join(paths[i], bin + exts[j]);
+				try { _fs.accessSync(p, _fs.constants.X_OK); return p; } catch (_) {}
+			}
 		}
 		return null;
 	}

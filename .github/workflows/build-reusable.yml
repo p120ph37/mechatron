@@ -48,7 +48,13 @@ jobs:
       # Install Bun so the test runner exercises the bun-napi engine on all
       # platforms and the bun-ffi engine on Linux/Windows (FFI is not yet
       # implemented on macOS, where the test runner skips that engine).
+      # Skip on cross-compile entries (host arch != target arch) since
+      # setup-bun installs the host-arch binary, which can't load
+      # cross-compiled native modules.
       - uses: oven-sh/setup-bun@v2
+        if: |
+          !((matrix.arch == 'ia32' && runner.os == 'Windows') ||
+            (matrix.arch == 'x64' && runner.os == 'macOS' && runner.arch == 'ARM64'))
         with:
           bun-version: latest
 
