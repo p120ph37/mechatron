@@ -25,18 +25,10 @@
     "packages/@mechatronic/napi-window",
     "packages/@mechatronic/napi-process",
     "packages/@mechatronic/napi-memory",
-    "packages/@mechatronic/ffi-keyboard",
-    "packages/@mechatronic/ffi-mouse",
-    "packages/@mechatronic/ffi-clipboard",
-    "packages/@mechatronic/ffi-screen",
-    "packages/@mechatronic/ffi-window",
-    "packages/@mechatronic/ffi-process",
-    "packages/@mechatronic/ffi-memory",
     "packages/mechatron-robot-js"
   ],
   "scripts": {
     "build:native": "cd napi && cargo build --release",
-    "build:ffi": "cd ffi && cargo build --release",
     "build:test-helper": "clang -O2 test/memory-child.c -o test/memory-child",
     "build": "tsc",
     "test": "node test/test.js types timer",
@@ -64,14 +56,7 @@
     "@mechatronic/napi-mouse": "*",
     "@mechatronic/napi-process": "*",
     "@mechatronic/napi-screen": "*",
-    "@mechatronic/napi-window": "*",
-    "@mechatronic/ffi-clipboard": "*",
-    "@mechatronic/ffi-keyboard": "*",
-    "@mechatronic/ffi-memory": "*",
-    "@mechatronic/ffi-mouse": "*",
-    "@mechatronic/ffi-process": "*",
-    "@mechatronic/ffi-screen": "*",
-    "@mechatronic/ffi-window": "*"
+    "@mechatronic/napi-window": "*"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

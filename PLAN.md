@@ -241,6 +241,88 @@ Phase 4 is executed in two parts:
 
 ---
 
+---
+
+## Phase 5: Bun FFI Backend (IN PROGRESS)
+
+A second native backend that uses `bun:ffi` to dlopen the underlying
+**system libraries directly** (libX11/libXtst on Linux, user32.dll on
+Windows, eventually CoreGraphics on macOS).
+
+### Design
+
+- **No native build artifact ships for FFI.**  The entire FFI implementation
+  lives in TypeScript under `lib/ffi/` and is loaded by Bun directly via the
+  `"bun"` exports condition in `package.json`.  A Bun consumer needs nothing
+  beyond `bun install mechatron` — no `.node`, `.so`, `.dll`, or `.dylib`
+  is downloaded for Bun runtime use.
+- A first attempt scaffolded a parallel Rust workspace (`ffi/`) producing
+  `cdylib`s loaded via `bun:ffi`.  That was reverted: the Rust shim was
+  effectively the same code as the existing napi crates, so loading it via
+  FFI instead of napi gained nothing.
+- The mechatron core API (`lib/keyboard/Keyboard.ts`, etc.) is unchanged.
+  It calls `getNative("keyboard")` which goes through `lib/napi.ts` (the
+  unified loader) and gets either a napi `.node` module or a TypeScript
+  module from `lib/ffi/<sub>.ts`.
+
+### Native TypeScript Entrypoint
+
+`package.json` adds an `exports` map with a `"bun"` condition pointing at
+`./lib/index.ts`.  Bun runs the TypeScript directly (no transpile required);
+Node.js continues to load the compiled `./dist/index.js`.  The npm package
+ships **both** `dist/` and `lib/` so engines can pick whichever is best
+suited — there is no standard for engine-conditional downloads.
+
+### Backend Selection
+
+`lib/napi.ts` (the unified loader) picks per-subsystem:
+
+- **Node.js**: only `napi` is considered.
+- **Bun**: tries `ffi` first (loading `lib/ffi/<sub>.ts`); falls back to
+  `napi` if that subsystem hasn't been ported to pure FFI yet.
+- `MECHATRON_BACKEND=napi|ffi` env var forces a specific backend.
+
+A new `getBackend(subsystem)` API reports which backend is in use.
+
+### Implementation Status
+
+| Subsystem | FFI | Notes |
+|-----------|-----|-------|
+| keyboard  | Linux, Windows | macOS deferred (Objective-C runtime via FFI) |
+| mouse     | Linux, Windows | macOS deferred |
+| clipboard | —    | needs string/image marshalling design |
+| screen    | —    | needs ARGB capture marshalling design |
+| window    | —    | needs string/handle list marshalling |
+| process   | —    | needs Linux /proc + Win32 toolhelp marshalling |
+| memory    | —    | needs region/read/write buffer design |
+
+Subsystems without an FFI implementation transparently fall back to napi
+under Bun.  Forcing `MECHATRON_BACKEND=ffi` makes them unavailable so
+their tests are skipped by the runner.
+
+### Test Runner
+
+`test/test.js` now runs the suite under up to three engines:
+
+- `node-napi`: Node.js + napi backend (always probed)
+- `bun-ffi`:  Bun + forced FFI backend (probed if `bun` is in PATH)
+- `bun-napi`: Bun + forced napi backend (probed if `bun` is in PATH)
+
+Each engine runs as a child process with `MECHATRON_BACKEND` set
+appropriately.  Subsystems not yet implemented in pure FFI are skipped
+under the `bun-ffi` engine.
+
+### Roadmap (Phase 5)
+
+- [x] `lib/ffi/{keyboard,mouse}.ts` for Linux + Windows
+- [x] Unified loader with backend selection
+- [x] Dual-engine test runner
+- [ ] FFI port of remaining 5 subsystems (clipboard, screen, window, process, memory)
+- [ ] macOS FFI (Objective-C bridge or libffi struct passing)
+- [ ] Remove napi dependency for Bun-only deployments
+
+---
+
 ## Roadmap Summary
 
 | Phase | Status | Description |
@@ -250,3 +332,4 @@ Phase 4 is executed in two parts:
 | 3 | **Complete** | mechatron-robot-js compatibility shim |
 | 4a | **Complete** | Segmented native packages (`@mechatronic/napi-*` as optionalDependencies) |
 | 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |
+| 5 | **In Progress** | Bun FFI backend: pure-TS `bun:ffi` to system libs, no native binary needed under Bun |
