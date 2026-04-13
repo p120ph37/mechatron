@@ -34,6 +34,12 @@ jobs:
           let allPassed = true;
           let anyResults = false;
 
+          // Aggregate per-line hit counts across all cells.  Each line is
+          // counted as covered in the combined view if any cell covered it,
+          // so cross-platform files (e.g. lib/ffi/clipboard.ts) get credit
+          // for both their Linux and Windows halves.
+          const combined = {}; // sf -> { ln -> hits }
+
           const dirs = fs.readdirSync(resultsDir).filter(d =>
             d.startsWith("test-results-") && fs.statSync(path.join(resultsDir, d)).isDirectory()
           ).sort();
@@ -89,19 +95,25 @@ jobs:
             comment += `| Test | Status | Time |\n|------|--------|------|\n`;
             comment += rows.join("\n") + "\n";
 
-            // Per-file coverage table
+            // Per-file coverage table; also feed into the combined aggregate.
             if (covPct) {
               try {
                 const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
                 const files = {};
-                let cur = null;
+                let cur = null, curNorm = null;
                 for (const line of lcov.split("\n")) {
                   if (line.startsWith("SF:")) {
-                    cur = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
+                    curNorm = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
+                    cur = curNorm;
                     files[cur] = { hit: 0, total: 0 };
+                    if (!combined[curNorm]) combined[curNorm] = {};
                   } else if (line.startsWith("DA:") && cur) {
+                    const [ln, hits] = line.slice(3).split(",").map(Number);
                     files[cur].total++;
-                    if (!line.endsWith(",0")) files[cur].hit++;
+                    if (hits > 0) files[cur].hit++;
+                    combined[curNorm][ln] = (combined[curNorm][ln] || 0) + (hits || 0);
+                  } else if (line === "end_of_record") {
+                    cur = null; curNorm = null;
                   }
                 }
                 comment += `\n| File | Lines | Coverage |\n|------|------:|----------|\n`;
@@ -115,6 +127,34 @@ jobs:
               } catch (_) {}
             }
 
+            comment += `\n</details>\n\n`;
+          }
+
+          // ── Combined "all platforms" coverage view ────────────────────
+          // Union the per-line hits from every cell so a line counts as
+          // covered if any platform exercised it.  This gives a single
+          // headline number that isn't dragged down by opposite-OS code
+          // in cross-platform files.
+          const combinedFiles = Object.entries(combined).filter(([, lines]) => Object.keys(lines).length > 0);
+          if (anyResults && combinedFiles.length > 0) {
+            let tH = 0, tL = 0;
+            const rows = [];
+            for (const [f, lines] of combinedFiles.sort()) {
+              let hit = 0, total = 0;
+              for (const ln of Object.keys(lines)) {
+                total++;
+                if (lines[ln] > 0) hit++;
+              }
+              if (total === 0) continue;
+              rows.push(`| ${f} | ${hit}/${total} | ${(100*hit/total).toFixed(1)}% |`);
+              tH += hit; tL += total;
+            }
+            const pct = tL > 0 ? (100*tH/tL).toFixed(1) : "0";
+            comment += `<details>\n`;
+            comment += `<summary>:bar_chart: <b>All platforms (combined)</b> — ${pct}% coverage (${tH}/${tL} lines hit on at least one platform)</summary>\n\n`;
+            comment += `| File | Lines | Coverage |\n|------|------:|----------|\n`;
+            comment += rows.join("\n") + "\n";
+            comment += `| **Total** | **${tH}/${tL}** | **${pct}%** |\n`;
             comment += `\n</details>\n\n`;
           }
 
