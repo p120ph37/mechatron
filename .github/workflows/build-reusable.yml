@@ -286,6 +286,8 @@ jobs:
               for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
                 if (line.startsWith('SF:')) {
                   sf = line.slice(3);
+                  // Skip test files — we don't measure coverage of test code itself.
+                  if (/(^|[\/\\])test[\/\\]/.test(sf)) { sf = null; continue; }
                   if (!files[sf]) files[sf] = { da: {}, fn: [], fnda: {}, brda: [] };
                 } else if (sf === null) continue;
                 else if (line.startsWith('DA:')) {

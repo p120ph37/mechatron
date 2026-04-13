@@ -71,13 +71,20 @@ jobs:
               }
             } catch (_) {}
 
-            // Parse coverage percentage
+            // Parse coverage percentage (skip test files — we don't measure them)
             let covPct = "";
             try {
               const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
               let hit = 0, total = 0;
+              let skipRecord = false;
               for (const line of lcov.split("\n")) {
-                if (line.startsWith("DA:")) { total++; if (!line.endsWith(",0")) hit++; }
+                if (line.startsWith("SF:")) {
+                  skipRecord = /(^|[\/\\])test[\/\\]/.test(line.slice(3));
+                } else if (line === "end_of_record") {
+                  skipRecord = false;
+                } else if (!skipRecord && line.startsWith("DA:")) {
+                  total++; if (!line.endsWith(",0")) hit++;
+                }
               }
               if (total > 0) covPct = (100 * hit / total).toFixed(1) + "%";
             } catch (_) {}
@@ -103,7 +110,10 @@ jobs:
                 let cur = null, curNorm = null;
                 for (const line of lcov.split("\n")) {
                   if (line.startsWith("SF:")) {
-                    curNorm = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
+                    const raw = line.slice(3);
+                    // Skip test files — we don't measure coverage of test code itself.
+                    if (/(^|[\/\\])test[\/\\]/.test(raw)) { cur = null; curNorm = null; continue; }
+                    curNorm = raw.replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
                     cur = curNorm;
                     files[cur] = { hit: 0, total: 0 };
                     if (!combined[curNorm]) combined[curNorm] = {};
