@@ -45,6 +45,13 @@ jobs:
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
+      # Install Bun so the test runner exercises the bun-napi engine on all
+      # platforms and the bun-ffi engine on Linux/Windows (FFI is not yet
+      # implemented on macOS, where the test runner skips that engine).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
 

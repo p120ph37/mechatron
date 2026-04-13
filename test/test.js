@@ -73,9 +73,13 @@ if (!_backendArg) {
 		process.stdout.write("  [skip] node-napi not available (" + _e.message + ")\n");
 	}
 
-	// Probe Bun + ffi (only if bun is installed)
+	// Probe Bun + ffi (only if bun is installed; FFI not yet implemented on macOS)
 	if (_bunPath) {
-		_engines.push({ name: "bun-ffi", cmd: _bunPath, env: { MECHATRON_BACKEND: "ffi" }, backend: "ffi" });
+		if (process.platform !== "darwin") {
+			_engines.push({ name: "bun-ffi", cmd: _bunPath, env: { MECHATRON_BACKEND: "ffi" }, backend: "ffi" });
+		} else {
+			process.stdout.write("  [skip] bun-ffi not available (FFI backend not implemented on macOS)\n");
+		}
 		_engines.push({ name: "bun-napi", cmd: _bunPath, env: { MECHATRON_BACKEND: "napi" }, backend: "napi" });
 	} else {
 		process.stdout.write("  [skip] bun engines not available (bun not in PATH)\n");
