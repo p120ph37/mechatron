@@ -104,6 +104,23 @@ jobs:
             cp napi/$sub/mechatron-$sub.*.node packages/@mechatronic/napi-$sub/ 2>/dev/null || true
           done
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies and build
+        # Run against the UNMODIFIED package*.json files so `npm ci` can
+        # verify the lockfile.  The "Set package versions" step below
+        # edits package.json (including pinning mechatron-robot-js's
+        # dependency on mechatron to an exact version that doesn't exist
+        # on the registry yet), which would make `npm ci` fail with
+        # ETARGET.  `npm publish` reads package.json directly at publish
+        # time, so the edits still apply to the published artifacts.
+        run: |
+          npm ci --ignore-scripts
+          npx tsc
+
       - name: Set package versions (all workspaces)
         run: |
           VERSION="${{ needs.detect-release.outputs.version }}"
@@ -161,16 +178,6 @@ jobs:
             --title "$VERSION" \
             --notes-file /tmp/release-body.md \
             $FLAGS
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies and build
-        run: |
-          npm ci --ignore-scripts
-          npx tsc
 
       - name: Publish all packages to npm
         run: |
