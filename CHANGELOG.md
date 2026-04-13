@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.0.4] - 2026-04-10
+## [v0.0.4] - 2026-04-13
 
 ### Added
 - **Segmented native packages** — native NAPI binaries are delivered via
