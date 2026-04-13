@@ -1,8 +1,11 @@
 /**
  * Linux/X11 FFI helpers shared between subsystems.
  *
- * Opens libX11 and libXtst once per process, caches the Display* and the
- * XTest extension availability check.
+ * Opens libX11 (and optionally libXtst, libXinerama) once per process,
+ * caches the Display* and the XTest extension availability check.
+ *
+ * Keep all X11 symbols used by any subsystem in this single shared dlopen so
+ * they all reference the same Display.
  */
 
 import { getBunFFI, cstr, type BunFFI, type Pointer } from "./bun";
@@ -14,6 +17,11 @@ interface X11 {
   XQueryKeymap: (display: Pointer, keys: Pointer) => number;
   XScreenCount: (display: Pointer) => number;
   XDefaultRootWindow: (display: Pointer) => bigint;
+  XDefaultScreen: (display: Pointer) => number;
+  XScreenOfDisplay: (display: Pointer, screen: number) => Pointer;
+  XWidthOfScreen: (screen: Pointer) => number;
+  XHeightOfScreen: (screen: Pointer) => number;
+  XScreenNumberOfScreen: (screen: Pointer) => number;
   XRootWindow: (display: Pointer, screen: number) => bigint;
   XQueryPointer: (
     display: Pointer, w: bigint,
@@ -28,6 +36,55 @@ interface X11 {
     srcWidth: number, srcHeight: number,
     destX: number, destY: number,
   ) => number;
+  // Atoms / properties
+  XInternAtom: (display: Pointer, name: Pointer, onlyIfExists: number) => bigint;
+  XGetWindowProperty: (
+    display: Pointer, w: bigint, prop: bigint,
+    long_offset: bigint, long_length: bigint, del: number, req_type: bigint,
+    actual_type_ret: Pointer, actual_format_ret: Pointer,
+    nitems_ret: Pointer, bytes_after_ret: Pointer,
+    prop_ret: Pointer,
+  ) => number;
+  XChangeProperty: (
+    display: Pointer, w: bigint, prop: bigint, type: bigint,
+    format: number, mode: number, data: Pointer, nelements: number,
+  ) => number;
+  XFree: (data: Pointer) => number;
+  // Window tree / attributes
+  XQueryTree: (
+    display: Pointer, w: bigint,
+    root_ret: Pointer, parent_ret: Pointer,
+    children_ret: Pointer, nchildren_ret: Pointer,
+  ) => number;
+  XGetWindowAttributes: (display: Pointer, w: bigint, attrs_ret: Pointer) => number;
+  // Window manipulation
+  XStoreName: (display: Pointer, w: bigint, name: Pointer) => number;
+  XDestroyWindow: (display: Pointer, w: bigint) => number;
+  XMapWindow: (display: Pointer, w: bigint) => number;
+  XRaiseWindow: (display: Pointer, w: bigint) => number;
+  XIconifyWindow: (display: Pointer, w: bigint, screen: number) => number;
+  XMoveResizeWindow: (
+    display: Pointer, w: bigint, x: number, y: number, width: number, height: number,
+  ) => number;
+  XSendEvent: (
+    display: Pointer, w: bigint, propagate: number, event_mask: bigint, event: Pointer,
+  ) => number;
+  XTranslateCoordinates: (
+    display: Pointer, src: bigint, dest: bigint,
+    src_x: number, src_y: number,
+    dest_x_ret: Pointer, dest_y_ret: Pointer,
+    child_ret: Pointer,
+  ) => number;
+  // Image (screen capture)
+  XGetImage: (
+    display: Pointer, drawable: bigint,
+    x: number, y: number, width: number, height: number,
+    plane_mask: bigint, format: number,
+  ) => Pointer;
+  XDestroyImage: (img: Pointer) => number;
+  XGetPixel: (img: Pointer, x: number, y: number) => bigint;
+  // Error handler suppression
+  XSetErrorHandler: (handler: Pointer) => Pointer;
 }
 
 interface XTest {
@@ -44,12 +101,19 @@ interface XTest {
   ) => number;
 }
 
+interface Xinerama {
+  XineramaIsActive: (display: Pointer) => number;
+  XineramaQueryScreens: (display: Pointer, num_ret: Pointer) => Pointer;
+}
+
 let _opened = false;
 let _ffi: BunFFI | null = null;
 let _x11: X11 | null = null;
 let _xtest: XTest | null = null;
+let _xinerama: Xinerama | null = null;
 let _display: Pointer = null;
 let _xtestAvailable = false;
+let _xineramaAvailable = false;
 
 function tryDlopen(): void {
   if (_opened) return;
@@ -60,21 +124,66 @@ function tryDlopen(): void {
 
   try {
     const x11 = _ffi.dlopen<X11>("libX11.so.6", {
-      XOpenDisplay:       { args: [T.cstring], returns: T.ptr },
-      XSync:              { args: [T.ptr, T.i32], returns: T.i32 },
-      XKeysymToKeycode:   { args: [T.ptr, T.u64], returns: T.u8 },
-      XQueryKeymap:       { args: [T.ptr, T.ptr], returns: T.i32 },
-      XScreenCount:       { args: [T.ptr], returns: T.i32 },
-      XDefaultRootWindow: { args: [T.ptr], returns: T.u64 },
-      XRootWindow:        { args: [T.ptr, T.i32], returns: T.u64 },
-      XQueryPointer:      {
+      XOpenDisplay:           { args: [T.cstring], returns: T.ptr },
+      XSync:                  { args: [T.ptr, T.i32], returns: T.i32 },
+      XKeysymToKeycode:       { args: [T.ptr, T.u64], returns: T.u8 },
+      XQueryKeymap:           { args: [T.ptr, T.ptr], returns: T.i32 },
+      XScreenCount:           { args: [T.ptr], returns: T.i32 },
+      XDefaultRootWindow:     { args: [T.ptr], returns: T.u64 },
+      XDefaultScreen:         { args: [T.ptr], returns: T.i32 },
+      XScreenOfDisplay:       { args: [T.ptr, T.i32], returns: T.ptr },
+      XWidthOfScreen:         { args: [T.ptr], returns: T.i32 },
+      XHeightOfScreen:        { args: [T.ptr], returns: T.i32 },
+      XScreenNumberOfScreen:  { args: [T.ptr], returns: T.i32 },
+      XRootWindow:            { args: [T.ptr, T.i32], returns: T.u64 },
+      XQueryPointer:          {
         args: [T.ptr, T.u64, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr],
         returns: T.i32,
       },
-      XWarpPointer:       {
+      XWarpPointer:           {
         args: [T.ptr, T.u64, T.u64, T.i32, T.i32, T.u32, T.u32, T.i32, T.i32],
         returns: T.i32,
       },
+      XInternAtom:            { args: [T.ptr, T.ptr, T.i32], returns: T.u64 },
+      XGetWindowProperty:     {
+        args: [T.ptr, T.u64, T.u64, T.i64, T.i64, T.i32, T.u64,
+               T.ptr, T.ptr, T.ptr, T.ptr, T.ptr],
+        returns: T.i32,
+      },
+      XChangeProperty:        {
+        args: [T.ptr, T.u64, T.u64, T.u64, T.i32, T.i32, T.ptr, T.i32],
+        returns: T.i32,
+      },
+      XFree:                  { args: [T.ptr], returns: T.i32 },
+      XQueryTree:             {
+        args: [T.ptr, T.u64, T.ptr, T.ptr, T.ptr, T.ptr],
+        returns: T.i32,
+      },
+      XGetWindowAttributes:   { args: [T.ptr, T.u64, T.ptr], returns: T.i32 },
+      XStoreName:             { args: [T.ptr, T.u64, T.ptr], returns: T.i32 },
+      XDestroyWindow:         { args: [T.ptr, T.u64], returns: T.i32 },
+      XMapWindow:             { args: [T.ptr, T.u64], returns: T.i32 },
+      XRaiseWindow:           { args: [T.ptr, T.u64], returns: T.i32 },
+      XIconifyWindow:         { args: [T.ptr, T.u64, T.i32], returns: T.i32 },
+      XMoveResizeWindow:      {
+        args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32],
+        returns: T.i32,
+      },
+      XSendEvent:             {
+        args: [T.ptr, T.u64, T.i32, T.i64, T.ptr],
+        returns: T.i32,
+      },
+      XTranslateCoordinates:  {
+        args: [T.ptr, T.u64, T.u64, T.i32, T.i32, T.ptr, T.ptr, T.ptr],
+        returns: T.i32,
+      },
+      XGetImage:              {
+        args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32, T.u64, T.i32],
+        returns: T.ptr,
+      },
+      XDestroyImage:          { args: [T.ptr], returns: T.i32 },
+      XGetPixel:              { args: [T.ptr, T.i32, T.i32], returns: T.u64 },
+      XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
     });
     _x11 = x11.symbols;
   } catch (_) {
@@ -93,6 +202,18 @@ function tryDlopen(): void {
     _xtest = xtest.symbols;
   } catch (_) {
     _xtest = null;
+  }
+
+  try {
+    const xine = _ffi.dlopen<Xinerama>("libXinerama.so.1", {
+      XineramaIsActive:     { args: [T.ptr], returns: T.i32 },
+      XineramaQueryScreens: { args: [T.ptr, T.ptr], returns: T.ptr },
+    });
+    _xinerama = xine.symbols;
+    _xineramaAvailable = true;
+  } catch (_) {
+    _xinerama = null;
+    _xineramaAvailable = false;
   }
 
   _display = _x11.XOpenDisplay(_ffi.ptr(cstr("")));
@@ -121,6 +242,11 @@ export function isXTestAvailable(): boolean {
   return _xtestAvailable;
 }
 
+export function isXineramaAvailable(): boolean {
+  tryDlopen();
+  return _xineramaAvailable;
+}
+
 export function x11(): X11 | null {
   tryDlopen();
   return _x11;
@@ -131,6 +257,11 @@ export function xtest(): XTest | null {
   return _xtest;
 }
 
+export function xinerama(): Xinerama | null {
+  tryDlopen();
+  return _xinerama;
+}
+
 export function ffi(): BunFFI | null {
   tryDlopen();
   return _ffi;
@@ -139,3 +270,182 @@ export function ffi(): BunFFI | null {
 export const True = 1;
 export const False = 0;
 export const CurrentTime = 0n;
+
+// XGetImage formats / planes
+export const ZPixmap = 2;
+export const AllPlanes = 0xFFFFFFFFFFFFFFFFn;
+
+// Window attribute map_state values
+export const IsViewable = 2;
+
+// Property modes
+export const PropModeReplace = 0;
+
+// Event types
+export const ClientMessage = 33;
+
+// Property type Atoms (predefined)
+export const XA_CARDINAL = 6n;
+export const AnyPropertyType = 0n;
+
+// Event mask bits
+export const SubstructureNotifyMask = (1 << 19);
+export const SubstructureRedirectMask = (1 << 20);
+
+/**
+ * Helper: intern an atom by name, with caching.  Returns 0 if the display
+ * is not open.
+ */
+const _atomCache = new Map<string, bigint>();
+export function atom(name: string, onlyIfExists = true): bigint {
+  if (_atomCache.has(name)) return _atomCache.get(name)!;
+  const X = x11();
+  const F = ffi();
+  const d = getDisplay();
+  if (!X || !F || !d) return 0n;
+  const buf = cstr(name);
+  const a = X.XInternAtom(d, F.ptr(buf), onlyIfExists ? True : False);
+  _atomCache.set(name, a);
+  return a;
+}
+
+/**
+ * Helper: read an entire X11 window property (concatenating the long-offset
+ * pages).  Returns the raw pointer to the property data plus its length and
+ * format, or null if the property isn't set / read failed.
+ *
+ * Caller is responsible for calling XFree() on the returned pointer.
+ *
+ * For typical use (single 32-bit value or short list) one call with
+ * length=1024 longs is enough — Robot's C++ code does the same.
+ */
+export interface PropResult {
+  data: Pointer;       // raw pointer; XFree to release
+  type: bigint;        // actual_type_return
+  format: number;      // 8/16/32
+  nitems: bigint;      // number of items
+}
+
+export function getWindowProperty(
+  win: bigint, prop: bigint, reqType: bigint = AnyPropertyType,
+): PropResult | null {
+  const X = x11();
+  const F = ffi();
+  const d = getDisplay();
+  if (!X || !F || !d || prop === 0n) return null;
+
+  const actual_type = new BigUint64Array(1);
+  const actual_format = new Int32Array(1);
+  const nitems = new BigUint64Array(1);
+  const bytes_after = new BigUint64Array(1);
+  const prop_ret = new BigUint64Array(1);
+
+  const status = X.XGetWindowProperty(
+    d, win, prop, 0n, 1024n, False, reqType,
+    F.ptr(actual_type), F.ptr(actual_format),
+    F.ptr(nitems), F.ptr(bytes_after),
+    F.ptr(prop_ret),
+  );
+  if (status !== 0) return null;
+  const dataPtr = prop_ret[0];
+  if (dataPtr === 0n) return null;
+  return {
+    data: dataPtr,
+    type: actual_type[0],
+    format: actual_format[0],
+    nitems: nitems[0],
+  };
+}
+
+/**
+ * XWindowAttributes layout (offsets are stable across glibc x86_64/arm64):
+ *   int  x, y;                  // 0,4
+ *   int  width, height;         // 8,12
+ *   int  border_width;          // 16
+ *   int  depth;                 // 20
+ *   Visual *visual;             // 24
+ *   Window root;                // 32
+ *   int  class;                 // 40
+ *   int  bit_gravity;           // 44
+ *   int  win_gravity;           // 48
+ *   int  backing_store;         // 52
+ *   ulong backing_planes;       // 56
+ *   ulong backing_pixel;        // 64
+ *   Bool save_under;            // 72
+ *   Colormap colormap;          // 80
+ *   Bool map_installed;         // 88
+ *   int  map_state;             // 92
+ *   long all_event_masks;       // 96
+ *   long your_event_mask;       // 104
+ *   long do_not_propagate_mask; // 112
+ *   Bool override_redirect;     // 120
+ *   Screen *screen;             // 128
+ * Total: 136 bytes.  Pad to 144 for alignment safety.
+ */
+export const SIZEOF_XWindowAttributes = 144;
+
+export interface WindowAttrs {
+  x: number; y: number;
+  width: number; height: number;
+  map_state: number;
+  screen: bigint; // pointer to Screen
+}
+
+export function getWindowAttributes(win: bigint): WindowAttrs | null {
+  const X = x11();
+  const F = ffi();
+  const d = getDisplay();
+  if (!X || !F || !d) return null;
+  const buf = new ArrayBuffer(SIZEOF_XWindowAttributes);
+  const v = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  if (X.XGetWindowAttributes(d, win, F.ptr(u8)) === 0) return null;
+  return {
+    x:         v.getInt32(0, true),
+    y:         v.getInt32(4, true),
+    width:     v.getInt32(8, true),
+    height:    v.getInt32(12, true),
+    map_state: v.getInt32(92, true),
+    screen:    v.getBigUint64(128, true),
+  };
+}
+
+/**
+ * Send an EWMH _NET_WM_STATE / _NET_ACTIVE_WINDOW client-message event.
+ *
+ * XClientMessageEvent layout (relevant fields, x86_64):
+ *   int    type;          // 0
+ *   ulong  serial;        // 8
+ *   Bool   send_event;    // 16
+ *   Display *display;     // 24
+ *   Window window;        // 32
+ *   Atom   message_type;  // 40
+ *   int    format;        // 48
+ *   union { char b[20]; short s[10]; long l[5]; } data;  // 56  (40 bytes)
+ * Total ~96 bytes.  Pad to 96.
+ */
+export const SIZEOF_XEvent = 96;
+
+export function sendClientMessage(
+  rootScreen: number, win: bigint, messageType: bigint, longs: bigint[],
+): void {
+  const X = x11();
+  const F = ffi();
+  const d = getDisplay();
+  if (!X || !F || !d) return;
+  const buf = new ArrayBuffer(SIZEOF_XEvent);
+  const v = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  v.setInt32(0, ClientMessage, true);
+  v.setBigUint64(24, BigInt(d as any), true);
+  v.setBigUint64(32, win, true);
+  v.setBigUint64(40, messageType, true);
+  v.setInt32(48, 32, true);
+  for (let i = 0; i < 5; i++) {
+    v.setBigInt64(56 + i * 8, longs[i] || 0n, true);
+  }
+  const root = X.XRootWindow(d, rootScreen);
+  X.XSendEvent(d, root, False,
+    BigInt(SubstructureNotifyMask | SubstructureRedirectMask),
+    F.ptr(u8));
+}

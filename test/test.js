@@ -249,25 +249,6 @@ async function main() {
 		});
 	}
 
-	// Pure-FFI backend currently implements keyboard + mouse only.
-	// The remaining subsystems would require more involved FFI marshaling
-	// (clipboard text/image, screen capture, window/process enumeration,
-	// memory regions); they fall back to napi when MECHATRON_BACKEND is
-	// not forced.  When MECHATRON_BACKEND=ffi is set explicitly (as the
-	// test runner does to validate the FFI path), they're skipped.
-	if (_backendArg === "ffi") {
-		var ffiSupported = { types: 1, timer: 1, keyboard: 1, mouse: 1 };
-		var dropped = [];
-		tests = tests.filter(function (t) {
-			if (ffiSupported[t[0]]) return true;
-			dropped.push(t[0]);
-			return false;
-		});
-		if (dropped.length > 0) {
-			log("  [ffi] skipping subsystems not yet ported to pure-FFI: " + dropped.join(", ") + "\n");
-		}
-	}
-
 	var failed = false;
 	var results = [];
 	for (var i = 0; i < tests.length; ++i) {

@@ -243,7 +243,7 @@ Phase 4 is executed in two parts:
 
 ---
 
-## Phase 5: Bun FFI Backend (IN PROGRESS)
+## Phase 5: Bun FFI Backend
 
 A second native backend that uses `bun:ffi` to dlopen the underlying
 **system libraries directly** (libX11/libXtst on Linux, user32.dll on
@@ -290,15 +290,14 @@ A new `getBackend(subsystem)` API reports which backend is in use.
 |-----------|-----|-------|
 | keyboard  | Linux, Windows | macOS deferred (Objective-C runtime via FFI) |
 | mouse     | Linux, Windows | macOS deferred |
-| clipboard | —    | needs string/image marshalling design |
-| screen    | —    | needs ARGB capture marshalling design |
-| window    | —    | needs string/handle list marshalling |
-| process   | —    | needs Linux /proc + Win32 toolhelp marshalling |
-| memory    | —    | needs region/read/write buffer design |
+| clipboard | Linux (stubs), Windows | Linux X11 has no clipboard manager — mirrors napi stubs |
+| screen    | Linux, Windows | Xinerama + XGetImage on Linux; BitBlt + GetDIBits on Windows |
+| window    | Linux, Windows (stubs) | Linux full EWMH/Motif; Windows mirrors napi stubs |
+| process   | Linux, Windows | /proc on Linux; toolhelp + psapi on Windows |
+| memory    | Linux, Windows | process_vm_readv/writev on Linux; RPM/WPM/VirtualQueryEx on Windows |
 
-Subsystems without an FFI implementation transparently fall back to napi
-under Bun.  Forcing `MECHATRON_BACKEND=ffi` makes them unavailable so
-their tests are skipped by the runner.
+All subsystems are now FFI-implemented on Linux and Windows (matching the
+napi backend's coverage).  macOS remains deferred for both backends.
 
 ### Test Runner
 
@@ -309,15 +308,14 @@ their tests are skipped by the runner.
 - `bun-napi`: Bun + forced napi backend (probed if `bun` is in PATH)
 
 Each engine runs as a child process with `MECHATRON_BACKEND` set
-appropriately.  Subsystems not yet implemented in pure FFI are skipped
-under the `bun-ffi` engine.
+appropriately.  All subsystems run under all three engines.
 
 ### Roadmap (Phase 5)
 
 - [x] `lib/ffi/{keyboard,mouse}.ts` for Linux + Windows
 - [x] Unified loader with backend selection
 - [x] Dual-engine test runner
-- [ ] FFI port of remaining 5 subsystems (clipboard, screen, window, process, memory)
+- [x] FFI port of remaining 5 subsystems (clipboard, screen, window, process, memory)
 - [ ] macOS FFI (Objective-C bridge or libffi struct passing)
 - [ ] Remove napi dependency for Bun-only deployments
 
@@ -332,4 +330,4 @@ under the `bun-ffi` engine.
 | 3 | **Complete** | mechatron-robot-js compatibility shim |
 | 4a | **Complete** | Segmented native packages (`@mechatronic/napi-*` as optionalDependencies) |
 | 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |
-| 5 | **In Progress** | Bun FFI backend: pure-TS `bun:ffi` to system libs, no native binary needed under Bun |
+| 5 | **Complete** | Bun FFI backend: pure-TS `bun:ffi` to system libs, no native binary needed under Bun (Linux + Windows) |
