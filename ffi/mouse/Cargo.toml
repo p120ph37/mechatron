@@ -1,0 +1,18 @@
+[package]
+name = "mechatron-ffi-mouse"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+name = "mechatron_ffi_mouse"
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mechatron-ffi-shared = { path = "../shared" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

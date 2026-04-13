@@ -43,8 +43,8 @@ export {
 } from "./memory";
 
 // Native availability checking
-export { isAvailable } from "./napi";
-export type { Subsystem } from "./napi";
+export { isAvailable, getBackend } from "./napi";
+export type { Subsystem, Backend } from "./napi";
 
 /** Version of the mechatron meta-package. */
 export const VERSION = "0.0.0";

@@ -1,0 +1,11 @@
+[package]
+name = "mechatron-ffi-memory"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+name = "mechatron_ffi_memory"
+crate-type = ["cdylib"]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

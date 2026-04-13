@@ -1,0 +1,8 @@
+[package]
+name = "mechatron-ffi-process"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+name = "mechatron_ffi_process"
+crate-type = ["cdylib"]

@@ -37,59 +37,88 @@ var _j = extractFlag(_b.rest, "--junit");
 var _junitPath = _j.value;
 var _testArgs = _j.rest;
 
-// When no --backend specified, run as dual-backend coordinator
+// When no --backend specified, run as dual-engine coordinator
+//
+// Each "engine" is a (runtime, backend) pair:
+//   - node-napi: Node.js + napi-rs prebuilt .node modules
+//   - bun-napi:  Bun     + napi-rs prebuilt .node modules (Bun supports n-api)
+//   - bun-ffi:   Bun     + bun:ffi loaded shared libraries
+//
+// Test files load mechatron via require("..") and exercise the same TS API
+// regardless of backend; the loader in lib/napi.ts picks the native impl.
 if (!_backendArg) {
 	var _child_process = require("child_process");
 	var _path = require("path");
+	var _fs = require("fs");
 
-	var _backends = [];
+	function _which(bin) {
+		var paths = (process.env.PATH || "").split(_path.delimiter);
+		for (var i = 0; i < paths.length; ++i) {
+			var p = _path.join(paths[i], bin);
+			try { _fs.accessSync(p, _fs.constants.X_OK); return p; } catch (_) {}
+		}
+		return null;
+	}
 
-	// Probe Rust backend
+	var _bunPath = _which("bun");
+
+	var _engines = [];
+
+	// Probe Node + napi
 	try {
 		var _probe = require(_path.resolve(__dirname, ".."));
 		new _probe.Keyboard();
-		_backends.push("rust");
+		_engines.push({ name: "node-napi", cmd: process.execPath, env: { MECHATRON_BACKEND: "napi" }, backend: "napi" });
 	} catch (_e) {
-		process.stdout.write("  [skip] Rust backend not available (" + _e.message + ")\n");
+		process.stdout.write("  [skip] node-napi not available (" + _e.message + ")\n");
 	}
 
-	if (_backends.length === 0) {
+	// Probe Bun + ffi (only if bun is installed)
+	if (_bunPath) {
+		_engines.push({ name: "bun-ffi", cmd: _bunPath, env: { MECHATRON_BACKEND: "ffi" }, backend: "ffi" });
+		_engines.push({ name: "bun-napi", cmd: _bunPath, env: { MECHATRON_BACKEND: "napi" }, backend: "napi" });
+	} else {
+		process.stdout.write("  [skip] bun engines not available (bun not in PATH)\n");
+	}
+
+	if (_engines.length === 0) {
 		process.stdout.write("\nERROR: No backends available to test!\n");
 		process.exitCode = 2;
 	} else {
 		var _overallFailed = false;
 		process.stdout.write("\n==============================\n");
 		process.stdout.write("MECHATRON TEST RUNNER\n");
-		process.stdout.write("Backends: " + _backends.join(", ") + "\n");
+		process.stdout.write("Engines: " + _engines.map(function (e) { return e.name; }).join(", ") + "\n");
 		process.stdout.write("==============================\n");
 
-		for (var _bi = 0; _bi < _backends.length; ++_bi) {
-			var _be = _backends[_bi];
-			process.stdout.write("\n>>> Running tests with " + _be.toUpperCase() + " backend...\n");
+		for (var _bi = 0; _bi < _engines.length; ++_bi) {
+			var _eng = _engines[_bi];
+			process.stdout.write("\n>>> Running tests with " + _eng.name.toUpperCase() + " engine...\n");
 
-			var _childArgs = [__filename].concat(_testArgs).concat(["--backend", _be]);
-			if (_junitPath) _childArgs.push("--junit", _junitPath.replace(/\.xml$/, "-" + _be + ".xml"));
-			var _result = _child_process.spawnSync(process.execPath, _childArgs, {
+			var _childArgs = [__filename].concat(_testArgs).concat(["--backend", _eng.backend]);
+			if (_junitPath) _childArgs.push("--junit", _junitPath.replace(/\.xml$/, "-" + _eng.name + ".xml"));
+			var _childEnv = Object.assign({}, process.env, _eng.env);
+			var _result = _child_process.spawnSync(_eng.cmd, _childArgs, {
 				stdio: "inherit",
-				env: process.env,
+				env: _childEnv,
 				cwd: _path.resolve(__dirname, ".."),
 				timeout: 120000,
 			});
 
 			if (_result.status !== 0) {
 				_overallFailed = true;
-				process.stdout.write(">>> " + _be.toUpperCase() + " backend: FAILED (exit " + _result.status + ")\n");
+				process.stdout.write(">>> " + _eng.name.toUpperCase() + " engine: FAILED (exit " + _result.status + ")\n");
 			} else {
-				process.stdout.write(">>> " + _be.toUpperCase() + " backend: PASSED\n");
+				process.stdout.write(">>> " + _eng.name.toUpperCase() + " engine: PASSED\n");
 			}
 		}
 
 		process.stdout.write("\n==============================\n");
 		if (_overallFailed) {
-			process.stdout.write("RESULT: SOME BACKENDS FAILED\n");
+			process.stdout.write("RESULT: SOME ENGINES FAILED\n");
 			process.exitCode = 2;
 		} else {
-			process.stdout.write("RESULT: ALL BACKENDS PASSED\n");
+			process.stdout.write("RESULT: ALL ENGINES PASSED\n");
 		}
 		process.stdout.write("==============================\n\n");
 	}
@@ -98,11 +127,14 @@ if (!_backendArg) {
 
 // --backend was specified — load mechatron and run tests
 var _path = require("path");
-if (_backendArg !== "rust") {
+if (_backendArg !== "napi" && _backendArg !== "ffi" && _backendArg !== "rust") {
 	process.stderr.write("Unknown backend: " + _backendArg + "\n");
 	process.exitCode = 2;
 	return;
 }
+// Legacy alias: "rust" → "napi"
+if (_backendArg === "rust") _backendArg = "napi";
+process.env.MECHATRON_BACKEND = _backendArg;
 var mechatron = require("..");
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -215,6 +247,21 @@ async function main() {
 		tests = tests.filter(function (t) {
 			return requested.indexOf(t[0]) >= 0;
 		});
+	}
+
+	// FFI backend currently only implements keyboard + mouse fully.
+	// Skip subsystems whose FFI surface is still scaffold-only.
+	if (_backendArg === "ffi") {
+		var ffiSupported = { types: 1, timer: 1, keyboard: 1, mouse: 1 };
+		var dropped = [];
+		tests = tests.filter(function (t) {
+			if (ffiSupported[t[0]]) return true;
+			dropped.push(t[0]);
+			return false;
+		});
+		if (dropped.length > 0) {
+			log("  [ffi] skipping unimplemented subsystems: " + dropped.join(", ") + "\n");
+		}
 	}
 
 	var failed = false;
