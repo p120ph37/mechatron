@@ -45,16 +45,23 @@ jobs:
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
-      # Install Bun so the test runner exercises the bun-napi engine on all
-      # platforms and the bun-ffi engine on Linux/Windows (FFI is not yet
-      # implemented on macOS, where the test runner skips that engine).
-      # Skip on cross-compile entries (host arch != target arch) since
-      # setup-bun installs the host-arch binary, which can't load
-      # cross-compiled native modules.
+      # Install host Bun on every cell.  Bun is used as the package
+      # manager (`bun install --frozen-lockfile`) and script runner
+      # (`bun run …`) universally — both work fine with the host-arch
+      # binary on every cell, including cross-compile cells.
+      #
+      # The TEST runner needs to be able to load the matrix-arch native
+      # modules, which means it must match the matrix arch:
+      #   - host-arch Bun for native cells (linux/win/mac native builds)
+      #   - legacy `node` fallback for Windows ia32 (no 32-bit Bun build)
+      #   - legacy `node` fallback for macOS x64 cross-compiled on arm64
+      #     (Bun's macOS x64 build — even the `-baseline` variant — uses
+      #     instructions Rosetta 2 doesn't emulate, e.g. BMI/F16C, and
+      #     SIGILLs immediately).  Coverage is skipped for these two
+      #     cells; their code paths are identical to the host-arch napi
+      #     cell, and FFI doesn't apply (ia32 has no Bun; macOS has no
+      #     FFI implementation).
       - uses: oven-sh/setup-bun@v2
-        if: |
-          !((matrix.arch == 'ia32' && runner.os == 'Windows') ||
-            (matrix.arch == 'x64' && runner.os == 'macOS' && runner.arch == 'ARM64'))
         with:
           bun-version: latest
 
@@ -99,7 +106,7 @@ jobs:
         with:
           targets: x86_64-apple-darwin
 
-      - run: npm ci --ignore-scripts
+      - run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build Rust napi modules
         run: |
@@ -146,7 +153,7 @@ jobs:
           done
 
       - name: Build TypeScript
-        run: npx tsc
+        run: bun run build
 
       - name: Build native memory test helper
         run: |
@@ -177,15 +184,16 @@ jobs:
       - name: Run tests
         run: |
           # Test runner selection per matrix cell:
-          #   - Windows ia32: node fallback (Bun has no 32-bit Windows build).
-          #     Coverage is skipped for this cell — code paths are identical
-          #     to Windows x64 in the napi backend, and FFI doesn't apply.
-          #   - macOS x64 cross-compiled on arm64: download host-x64 Bun.
+          #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows build).
+          #   - macOS x64 cross-compiled on arm64: legacy node runner via Rosetta
+          #     (Bun's macOS x64 binary, even -baseline, SIGILLs under Rosetta).
           #   - everything else: host Bun installed by oven-sh/setup-bun above.
+          # Coverage is skipped for the two node-fallback cells — their code
+          # paths are identical to the host-arch napi cell.
           #
           # Bun's `--coverage` collects JavaScriptCore coverage natively, which
           # is the only way to attribute coverage to lib/ffi/*.ts (c8 only sees
-          # V8, so the legacy node runner produced 0% coverage on FFI files).
+          # V8, so the legacy node runner produces 0% coverage on FFI files).
 
           JUNIT_DIR="${RUNNER_TEMP}/junit"
           COV_DIR="${RUNNER_TEMP}/coverage"
@@ -195,35 +203,38 @@ jobs:
 
           run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
 
-          # ── Windows ia32: legacy node runner, no coverage ─────────────────
+          # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
             JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE"
             exit "$?"
           fi
 
-          # ── Pick Bun binary (host vs cross-compiled) ──────────────────────
-          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
-            # macOS x64 on arm64 runner — fetch host-x64 Bun via Rosetta.
-            # The default x64 Bun build uses AVX2; Rosetta doesn't emulate
-            # AVX/AVX2 (it raises SIGILL).  Use the `-baseline` variant
-            # which is built for pre-AVX2 CPUs.
-            curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64-baseline.zip -o /tmp/bun-x64.zip
-            unzip -q /tmp/bun-x64.zip -d /tmp
-            BUN="/tmp/bun-darwin-x64-baseline/bun"
+          # ── macOS x64 on arm64 runner: legacy node runner via Rosetta ─────
+          # Only the napi backend is exercised — host-arch (arm64) Bun
+          # can't load matrix-arch (x64) native modules, and Bun's
+          # macOS x64 binary SIGILLs under Rosetta even with -baseline.
+          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            NODE_VERSION=$(node -v)
+            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+            X64_NODE="$(pwd)/node-${NODE_VERSION}-darwin-x64/bin/node"
             # Grant TCC for this binary too
             TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
             for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$BUN',1,2,4,1,0);" 2>/dev/null || true
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_NODE',1,2,4,1,0);" 2>/dev/null || true
             done
             sudo launchctl stop com.apple.tccd 2>/dev/null || true
             sleep 1
-          else
-            BUN="$(command -v bun)"
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
+            run_and_log sudo -E "$X64_NODE" test/test.js all --backend napi --junit "$JUNIT_FILE"
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" 2>/dev/null || true
+            exit "$?"
           fi
+
+          BUN="$(command -v bun)"
 
           # ── Per-OS test wrapper (xvfb / sudo / none) ──────────────────────
           if [ "${{ runner.os }}" = "Linux" ]; then
