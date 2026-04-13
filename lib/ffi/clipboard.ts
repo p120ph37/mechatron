@@ -66,13 +66,16 @@ function winGetText(): string {
     const ptr = k.GlobalLock(handle);
     if (ptr === 0n) return "";
     try {
-      // Determine UTF-16 length by walking until NUL.
+      // Determine UTF-16 length by walking until NUL.  Read 32 bits at
+      // a time and unpack each 16-bit lane manually — bun:ffi's
+      // `read.u16` exists on some platforms but doesn't reliably accept
+      // a bigint pointer on Windows (throws "Expected a pointer").
       const size = Number(k.GlobalSize(handle));
       const max = Math.max(0, size >> 1);
       let len = 0;
       while (len < max) {
-        const v = (F.read as any).u16 ? (F.read as any).u16(ptr, len * 2)
-          : (F.read.u32(ptr, (len * 2) & ~3) >>> ((len & 1) * 16)) & 0xFFFF;
+        const word = F.read.u32(ptr, (len * 2) & ~3);
+        const v = (word >>> ((len & 1) * 16)) & 0xFFFF;
         if (v === 0) break;
         len++;
       }

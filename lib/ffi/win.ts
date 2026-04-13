@@ -42,6 +42,8 @@ interface User32 {
   AdjustWindowRectEx: (lpRect: Pointer, dwStyle: number, bMenu: number, dwExStyle: number) => number;
   EnumDisplayMonitors: (hdc: bigint, lprcClip: Pointer, lpfnEnum: Pointer, dwData: bigint) => number;
   GetMonitorInfoW: (hMonitor: bigint, lpmi: Pointer) => number;
+  GetDC: (hWnd: bigint) => bigint;
+  ReleaseDC: (hWnd: bigint, hDC: bigint) => number;
   // Clipboard
   OpenClipboard: (hWnd: bigint) => number;
   CloseClipboard: () => number;
@@ -92,8 +94,6 @@ interface Gdi32 {
   DeleteDC: (hdc: bigint) => number;
   BitBlt: (hdc: bigint, x: number, y: number, cx: number, cy: number, hdcSrc: bigint, x1: number, y1: number, rop: number) => number;
   GetDIBits: (hdc: bigint, hbm: bigint, start: number, cLines: number, lpvBits: Pointer, lpbmi: Pointer, usage: number) => number;
-  GetDC: (hWnd: bigint) => bigint;
-  ReleaseDC: (hWnd: bigint, hDC: bigint) => number;
 }
 
 let _opened = false;
@@ -143,6 +143,8 @@ function tryDlopen(): void {
       AdjustWindowRectEx:        { args: [T.ptr, T.u32, T.i32, T.u32], returns: T.i32 },
       EnumDisplayMonitors:       { args: [T.u64, T.ptr, T.ptr, T.u64], returns: T.i32 },
       GetMonitorInfoW:           { args: [T.u64, T.ptr], returns: T.i32 },
+      GetDC:                     { args: [T.u64], returns: T.u64 },
+      ReleaseDC:                 { args: [T.u64, T.u64], returns: T.i32 },
       OpenClipboard:             { args: [T.u64], returns: T.i32 },
       CloseClipboard:            { args: [], returns: T.i32 },
       EmptyClipboard:            { args: [], returns: T.i32 },
@@ -207,8 +209,6 @@ function tryDlopen(): void {
       DeleteDC:               { args: [T.u64], returns: T.i32 },
       BitBlt:                 { args: [T.u64, T.i32, T.i32, T.i32, T.i32, T.u64, T.i32, T.i32, T.u32], returns: T.i32 },
       GetDIBits:              { args: [T.u64, T.u64, T.u32, T.u32, T.ptr, T.ptr, T.u32], returns: T.i32 },
-      GetDC:                  { args: [T.u64], returns: T.u64 },
-      ReleaseDC:              { args: [T.u64, T.u64], returns: T.i32 },
     });
     _gdi32 = lib.symbols;
   } catch (_) {

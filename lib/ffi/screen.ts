@@ -242,7 +242,7 @@ function winGrabScreen(x: number, y: number, w: number, h: number, windowHandle?
   const SRCCOPY = 0x00CC0020;
   const DIB_RGB_COLORS = 0;
   const hwnd = windowHandle && windowHandle !== 0 ? BigInt(windowHandle) : 0n;
-  const hdcScreen = g.GetDC(hwnd);
+  const hdcScreen = u.GetDC(hwnd);
   if (hdcScreen === 0n) return null;
   let hdcMem = 0n;
   let hbmp = 0n;
@@ -277,7 +277,7 @@ function winGrabScreen(x: number, y: number, w: number, h: number, windowHandle?
     if (hdcMem !== 0n && oldObj !== 0n) g.SelectObject(hdcMem, oldObj);
     if (hbmp !== 0n) g.DeleteObject(hbmp);
     if (hdcMem !== 0n) g.DeleteDC(hdcMem);
-    g.ReleaseDC(hwnd, hdcScreen);
+    u.ReleaseDC(hwnd, hdcScreen);
   }
 }
 
