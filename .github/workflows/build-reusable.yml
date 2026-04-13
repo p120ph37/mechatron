@@ -207,10 +207,13 @@ jobs:
 
           # ── Pick Bun binary (host vs cross-compiled) ──────────────────────
           if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
-            # macOS x64 on arm64 runner — fetch host-x64 Bun
-            curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64.zip -o /tmp/bun-x64.zip
+            # macOS x64 on arm64 runner — fetch host-x64 Bun via Rosetta.
+            # The default x64 Bun build uses AVX2; Rosetta doesn't emulate
+            # AVX/AVX2 (it raises SIGILL).  Use the `-baseline` variant
+            # which is built for pre-AVX2 CPUs.
+            curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64-baseline.zip -o /tmp/bun-x64.zip
             unzip -q /tmp/bun-x64.zip -d /tmp
-            BUN="/tmp/bun-darwin-x64/bun"
+            BUN="/tmp/bun-darwin-x64-baseline/bun"
             # Grant TCC for this binary too
             TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
             for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
