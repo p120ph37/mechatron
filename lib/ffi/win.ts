@@ -71,7 +71,10 @@ interface Kernel32 {
   VirtualProtectEx: (hProcess: bigint, lpAddress: bigint, dwSize: bigint, flNewProtect: number, lpflOldProtect: Pointer) => number;
   GlobalAlloc: (uFlags: number, dwBytes: bigint) => bigint;
   GlobalFree: (hMem: bigint) => bigint;
-  GlobalLock: (hMem: bigint) => bigint;
+  // T.ptr return — bun gives back null for NULL, otherwise a Pointer
+  // (number for low addresses, bigint for high) that read.*/toArrayBuffer
+  // accept directly.
+  GlobalLock: (hMem: bigint) => Pointer;
   GlobalUnlock: (hMem: bigint) => number;
   GlobalSize: (hMem: bigint) => bigint;
   WideCharToMultiByte: (CodePage: number, dwFlags: number, lpWideCharStr: Pointer, cchWideChar: number, lpMultiByteStr: Pointer, cbMultiByte: number, lpDefaultChar: Pointer, lpUsedDefaultChar: Pointer) => number;
@@ -176,7 +179,11 @@ function tryDlopen(): void {
       VirtualProtectEx:           { args: [T.u64, T.u64, T.u64, T.u32, T.ptr], returns: T.i32 },
       GlobalAlloc:                { args: [T.u32, T.u64], returns: T.u64 },
       GlobalFree:                 { args: [T.u64], returns: T.u64 },
-      GlobalLock:                 { args: [T.u64], returns: T.u64 },
+      // GlobalLock returns LPVOID — declared as T.ptr (not T.u64) so
+      // bun:ffi's `read.*` and `toArrayBuffer` accept the result directly
+      // on Windows x64, where high-bit pointers can't round-trip through
+      // the u64-as-bigint return path ("Expected a pointer" / out-of-bounds).
+      GlobalLock:                 { args: [T.u64], returns: T.ptr },
       GlobalUnlock:               { args: [T.u64], returns: T.i32 },
       GlobalSize:                 { args: [T.u64], returns: T.u64 },
       WideCharToMultiByte:        { args: [T.u32, T.u32, T.ptr, T.i32, T.ptr, T.i32, T.ptr, T.ptr], returns: T.i32 },

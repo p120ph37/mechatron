@@ -64,7 +64,7 @@ function winGetText(): string {
     const handle = u.GetClipboardData(CF_UNICODETEXT);
     if (handle === 0n) return "";
     const ptr = k.GlobalLock(handle);
-    if (ptr === 0n) return "";
+    if (!ptr) return "";
     try {
       // Wrap the clipboard memory as an ArrayBuffer (no copy) and read via
       // DataView.  bun:ffi's `read.u32` rejects high-bit `bigint` pointers
@@ -93,7 +93,7 @@ function winSetText(text: string): boolean {
   const hmem = k.GlobalAlloc(GMEM_MOVEABLE, BigInt(byteLen));
   if (hmem === 0n) return false;
   const ptr = k.GlobalLock(hmem);
-  if (ptr === 0n) { k.GlobalFree(hmem); return false; }
+  if (!ptr) { k.GlobalFree(hmem); return false; }
   try {
     // Wrap the moveable allocation as an ArrayBuffer (no copy) and write the
     // wide bytes directly into it via a typed-array view.
@@ -127,7 +127,7 @@ function winGetImage(): { width: number; height: number; data: Uint32Array } | n
     const handle = u.GetClipboardData(CF_DIB);
     if (handle === 0n) return null;
     const ptr = k.GlobalLock(handle);
-    if (ptr === 0n) return null;
+    if (!ptr) return null;
     try {
       const size = Number(k.GlobalSize(handle));
       // Wrap the locked clipboard memory directly (no copy).
@@ -209,7 +209,7 @@ function winSetImage(width: number, height: number, data: Uint32Array): boolean 
   const hmem = k.GlobalAlloc(GMEM_MOVEABLE, BigInt(total));
   if (hmem === 0n) return false;
   const ptr = k.GlobalLock(hmem);
-  if (ptr === 0n) { k.GlobalFree(hmem); return false; }
+  if (!ptr) { k.GlobalFree(hmem); return false; }
   try {
     new Uint8Array(F.toArrayBuffer(ptr, 0, total)).set(dib);
   } finally {
