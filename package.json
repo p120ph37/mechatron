@@ -31,8 +31,10 @@
     "build:native": "cd napi && cargo build --release",
     "build:test-helper": "clang -O2 test/memory-child.c -o test/memory-child",
     "build": "tsc",
-    "test": "node test/test.js types timer",
-    "test:all": "node test/test.js all"
+    "test": "bun test",
+    "test:napi": "MECHATRON_BACKEND=napi bun test",
+    "test:ffi": "MECHATRON_BACKEND=ffi bun test",
+    "test:node": "node test/test.js all"
   },
   "repository": {
     "type": "git",
@@ -60,7 +62,6 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "c8": "^11.0.0",
     "pngjs": "^6.0.0",
     "readline-sync": "~1.4",
     "sprintf-js": "~1.1",

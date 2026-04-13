@@ -176,63 +176,145 @@ jobs:
 
       - name: Run tests
         run: |
+          # Test runner selection per matrix cell:
+          #   - Windows ia32: node fallback (Bun has no 32-bit Windows build).
+          #     Coverage is skipped for this cell — code paths are identical
+          #     to Windows x64 in the napi backend, and FFI doesn't apply.
+          #   - macOS x64 cross-compiled on arm64: download host-x64 Bun.
+          #   - everything else: host Bun installed by oven-sh/setup-bun above.
+          #
+          # Bun's `--coverage` collects JavaScriptCore coverage natively, which
+          # is the only way to attribute coverage to lib/ffi/*.ts (c8 only sees
+          # V8, so the legacy node runner produced 0% coverage on FFI files).
+
           JUNIT_DIR="${RUNNER_TEMP}/junit"
-          mkdir -p "$JUNIT_DIR"
+          COV_DIR="${RUNNER_TEMP}/coverage"
+          mkdir -p "$JUNIT_DIR" "$COV_DIR"
           TEST_LOG="${RUNNER_TEMP}/test-output.txt"
-          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-          C8="./node_modules/.bin/c8"
-          C8_ARGS="--reporter text --reporter lcov --reports-dir ${RUNNER_TEMP}/coverage"
+          : > "$TEST_LOG"
 
-          run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+          run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
 
-          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
-            # Cross-compiled x64 on arm64 macOS — download x64 node to run tests
-            NODE_VERSION=$(node -v)
-            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
-            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
-            # Grant TCC to this binary too
-            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
-            X64_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
-            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_ABS',1,2,4,1,0);" 2>/dev/null || true
-            done
-            sudo launchctl stop com.apple.tccd 2>/dev/null || true
-            sleep 1
-            # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
-            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
-            run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"
-            # Fix ownership of files created under sudo so upload-artifact can read them
-            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
-            # Generate coverage report from raw V8 data
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
-          elif [ "${{ matrix.arch }}" = "ia32" ]; then
+          # ── Windows ia32: legacy node runner, no coverage ─────────────────
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
             run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
-          elif [ "${{ runner.os }}" = "Linux" ]; then
-            run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
-            run_and_log sudo -E node test/test.js all --junit "$JUNIT_FILE"
-            # Fix ownership of files created under sudo so upload-artifact can read them
-            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
-          else
-            run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
+            exit "$?"
           fi
+
+          # ── Pick Bun binary (host vs cross-compiled) ──────────────────────
+          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            # macOS x64 on arm64 runner — fetch host-x64 Bun
+            curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64.zip -o /tmp/bun-x64.zip
+            unzip -q /tmp/bun-x64.zip -d /tmp
+            BUN="/tmp/bun-darwin-x64/bun"
+            # Grant TCC for this binary too
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$BUN',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
+          else
+            BUN="$(command -v bun)"
+          fi
+
+          # ── Per-OS test wrapper (xvfb / sudo / none) ──────────────────────
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            WRAP=(xvfb-run --auto-servernum)
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            WRAP=(sudo -E)
+          else
+            WRAP=()
+          fi
+
+          # ── Backends per platform ─────────────────────────────────────────
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            # FFI not yet implemented on macOS; only exercise napi.
+            BACKENDS=(napi)
+          else
+            BACKENDS=(napi ffi)
+          fi
+
+          # ── Run each backend in its own bun process (loader caches the
+          #    backend choice on first access) ────────────────────────────────
+          OVERALL_RC=0
+          for be in "${BACKENDS[@]}"; do
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-$be.xml"
+            BE_COV_DIR="$COV_DIR/$be"
+            mkdir -p "$BE_COV_DIR"
+            MECHATRON_BACKEND="$be" \
+              run_and_log "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || OVERALL_RC=$?
+          done
+
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$COV_DIR" 2>/dev/null || true
+          fi
+
+          # Merge per-backend lcov.info files into a single coverage/lcov.info,
+          # summing line hits where the same source line is recorded by both
+          # backends.  Keeps the test-summary aggregator simple (one file).
+          node -e "
+            const fs = require('fs'), path = require('path');
+            const covDir = process.argv[1];
+            const files = {};
+            const fnSeen = {}, brSeen = {};
+            for (const sub of fs.readdirSync(covDir)) {
+              const p = path.join(covDir, sub, 'lcov.info');
+              if (!fs.existsSync(p)) continue;
+              let sf = null;
+              for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
+                if (line.startsWith('SF:')) {
+                  sf = line.slice(3);
+                  if (!files[sf]) files[sf] = { da: {}, fn: [], fnda: {}, brda: [] };
+                } else if (sf === null) continue;
+                else if (line.startsWith('DA:')) {
+                  const [ln, hits] = line.slice(3).split(',').map(Number);
+                  files[sf].da[ln] = (files[sf].da[ln] || 0) + (hits || 0);
+                } else if (line.startsWith('FN:')) {
+                  if (!fnSeen[sf+'|'+line]) { fnSeen[sf+'|'+line] = 1; files[sf].fn.push(line); }
+                } else if (line.startsWith('FNDA:')) {
+                  const m = line.slice(5).split(',');
+                  const name = m.slice(1).join(',');
+                  files[sf].fnda[name] = (files[sf].fnda[name] || 0) + Number(m[0] || 0);
+                } else if (line === 'end_of_record') sf = null;
+              }
+            }
+            const out = [];
+            for (const [sf, info] of Object.entries(files)) {
+              out.push('TN:', 'SF:' + sf);
+              for (const fn of info.fn) out.push(fn);
+              for (const [name, h] of Object.entries(info.fnda)) out.push('FNDA:' + h + ',' + name);
+              for (const ln of Object.keys(info.da).map(Number).sort((a, b) => a - b)) {
+                out.push('DA:' + ln + ',' + info.da[ln]);
+              }
+              out.push('end_of_record');
+            }
+            fs.writeFileSync(path.join(covDir, 'lcov.info'), out.join('\n') + '\n');
+          " "$COV_DIR"
+
+          exit "$OVERALL_RC"
 
       - name: Run mechatron-robot-js conformance tests
         run: |
-          # Root package is named "mechatron" but can't itself be a workspace, so
-          # mechatron-robot-js's `"mechatron": "*"` dep resolves from the registry.
-          # Use `npm link` to replace it with the working copy (uses junctions on Windows).
+          # Conformance always runs under node — it validates the published
+          # node-consumer API contract and we want regressions there caught
+          # independently of the bun runner.  No coverage collected.
+          #
+          # Root package is named "mechatron" but can't itself be a workspace,
+          # so mechatron-robot-js's `"mechatron": "*"` dep resolves from the
+          # registry.  `npm link` replaces it with the working copy
+          # (uses junctions on Windows).
           npm link
           npm link mechatron -w mechatron-robot-js
 
-          # Run conformance tests and append result to JUnit XML
+          # Run conformance tests and write a standalone JUnit XML file.
           node -e "
             const { execFileSync } = require('child_process');
             const fs = require('fs');
@@ -249,22 +331,21 @@ jobs:
             }
             const elapsed = ((Date.now() - start) / 1000).toFixed(3);
             process.stdout.write(output);
-            if (fs.existsSync(junitFile)) {
-              const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              let tc;
-              if (rc === 0) {
-                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>';
-              } else {
-                const fails = output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ');
-                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(fails) + '\"/></testcase>';
-              }
-              const xml = fs.readFileSync(junitFile, 'utf8');
-              fs.writeFileSync(junitFile, xml.replace('</testsuite>', tc + '</testsuite>'));
-            }
+            const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const tc = rc === 0
+              ? '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>'
+              : '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ')) + '\"/></testcase>';
+            const xml = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n'
+              + '<testsuites tests=\"1\" failures=\"' + (rc === 0 ? 0 : 1) + '\" time=\"' + elapsed + '\">\n'
+              + '  <testsuite name=\"conformance\" tests=\"1\" failures=\"' + (rc === 0 ? 0 : 1) + '\" time=\"' + elapsed + '\">\n'
+              + '    ' + tc + '\n'
+              + '  </testsuite>\n'
+              + '</testsuites>\n';
+            fs.writeFileSync(junitFile, xml);
             process.exit(rc);
           "
         env:
-          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml
+          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}-conformance.xml
 
       - uses: actions/upload-artifact@v7
         if: always()
