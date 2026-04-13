@@ -66,26 +66,16 @@ function winGetText(): string {
     const ptr = k.GlobalLock(handle);
     if (ptr === 0n) return "";
     try {
-      // Determine UTF-16 length by walking until NUL.  Read 32 bits at
-      // a time and unpack each 16-bit lane manually — bun:ffi's
-      // `read.u16` exists on some platforms but doesn't reliably accept
-      // a bigint pointer on Windows (throws "Expected a pointer").
+      // Wrap the clipboard memory as an ArrayBuffer (no copy) and read via
+      // DataView.  bun:ffi's `read.u32` rejects high-bit `bigint` pointers
+      // on Windows x64 ("Expected a pointer"); `toArrayBuffer` accepts
+      // them universally and returns a real ArrayBuffer view.
       const size = Number(k.GlobalSize(handle));
-      const max = Math.max(0, size >> 1);
+      const ab = F.toArrayBuffer(ptr, 0, size);
+      const u16 = new Uint16Array(ab);
+      const max = u16.length;
       let len = 0;
-      while (len < max) {
-        const word = F.read.u32(ptr, (len * 2) & ~3);
-        const v = (word >>> ((len & 1) * 16)) & 0xFFFF;
-        if (v === 0) break;
-        len++;
-      }
-      // Copy out via a wide buffer view.
-      const bytes = new Uint8Array(len * 2);
-      for (let i = 0; i < len * 2; i++) {
-        const word = F.read.u32(ptr, i & ~3);
-        bytes[i] = (word >>> ((i & 3) * 8)) & 0xFF;
-      }
-      const u16 = new Uint16Array(bytes.buffer);
+      while (len < max && u16[len] !== 0) len++;
       return w2js(u16, len);
     } finally {
       k.GlobalUnlock(handle);
@@ -105,27 +95,10 @@ function winSetText(text: string): boolean {
   const ptr = k.GlobalLock(hmem);
   if (ptr === 0n) { k.GlobalFree(hmem); return false; }
   try {
-    // Copy wide bytes into the moveable allocation via WriteProcessMemory on
-    // self.  Easier: use kernel32 RtlMoveMemory via a temp Uint8Array — but
-    // we don't have it bound.  Use kernel32's MultiByteToWideChar?  No: we
-    // already have UTF-16.  Fallback: write directly using a typed-array
-    // backed by the pointer is not exposed; instead use kernel32 has no
-    // memcpy export bound.  Loop via F.read?  read is read-only.
-    //
-    // Use bun:ffi's `ptr()` round-trip: bind a tiny scratch helper using
-    // kernel32's `lstrcpynW` (copies wide string up to N chars).
-    // We have lstrlenW bound but not lstrcpynW; however we *do* have
-    // WriteProcessMemory bound, so we can use it on our own process.
-    // GetCurrentProcess() returns -1 (pseudo-handle).
-    const src = new Uint8Array(wide.buffer);
-    const written = new BigUint64Array(1);
-    const ok = k.WriteProcessMemory(
-      0xFFFFFFFFFFFFFFFFn /* GetCurrentProcess pseudo handle */,
-      ptr, F.ptr(src), BigInt(byteLen), F.ptr(written),
-    );
-    if (ok === 0 || Number(written[0]) !== byteLen) {
-      k.GlobalUnlock(hmem); k.GlobalFree(hmem); return false;
-    }
+    // Wrap the moveable allocation as an ArrayBuffer (no copy) and write the
+    // wide bytes directly into it via a typed-array view.
+    const dst = new Uint8Array(F.toArrayBuffer(ptr, 0, byteLen));
+    dst.set(new Uint8Array(wide.buffer, wide.byteOffset, byteLen));
   } finally {
     k.GlobalUnlock(hmem);
   }
@@ -157,17 +130,10 @@ function winGetImage(): { width: number; height: number; data: Uint32Array } | n
     if (ptr === 0n) return null;
     try {
       const size = Number(k.GlobalSize(handle));
-      // Read full DIB into a JS-side buffer via WriteProcessMemory on self.
-      const buf = new Uint8Array(size);
-      const written = new BigUint64Array(1);
-      // Use ReadProcessMemory on the current process to copy.
-      const okRead = k.ReadProcessMemory(
-        0xFFFFFFFFFFFFFFFFn,
-        ptr, F.ptr(buf), BigInt(size), F.ptr(written),
-      );
-      if (okRead === 0) return null;
-
-      const dv = new DataView(buf.buffer);
+      // Wrap the locked clipboard memory directly (no copy).
+      const ab = F.toArrayBuffer(ptr, 0, size);
+      const buf = new Uint8Array(ab);
+      const dv = new DataView(ab);
       const headerSize = dv.getUint32(0, true);
       const width = dv.getInt32(4, true);
       const heightRaw = dv.getInt32(8, true);
@@ -245,13 +211,7 @@ function winSetImage(width: number, height: number, data: Uint32Array): boolean 
   const ptr = k.GlobalLock(hmem);
   if (ptr === 0n) { k.GlobalFree(hmem); return false; }
   try {
-    const written = new BigUint64Array(1);
-    const ok = k.WriteProcessMemory(
-      0xFFFFFFFFFFFFFFFFn, ptr, F.ptr(dib), BigInt(total), F.ptr(written),
-    );
-    if (ok === 0 || Number(written[0]) !== total) {
-      k.GlobalUnlock(hmem); k.GlobalFree(hmem); return false;
-    }
+    new Uint8Array(F.toArrayBuffer(ptr, 0, total)).set(dib);
   } finally {
     k.GlobalUnlock(hmem);
   }

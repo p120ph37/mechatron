@@ -49,6 +49,8 @@ export interface BunFFI {
   };
   /** Get a JS pointer for a TypedArray. */
   ptr(view: ArrayBufferView, byteOffset?: number, byteLength?: number): Pointer;
+  /** Wrap a raw pointer as an ArrayBuffer view (no copy). */
+  toArrayBuffer(ptr: Pointer, byteOffset?: number, byteLength?: number): ArrayBuffer;
   /** Read a NUL-terminated C string from a pointer. */
   CString: new (ptr: Pointer, byteOffset?: number, byteLength?: number) => string;
   /** Convert a JS string to a NUL-terminated buffer suitable as a `cstring` arg. */
