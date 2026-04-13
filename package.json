@@ -34,7 +34,7 @@
     "test": "bun test",
     "test:napi": "MECHATRON_BACKEND=napi bun test",
     "test:ffi": "MECHATRON_BACKEND=ffi bun test",
-    "test:node": "node test/test.js all"
+    "test:node": "node test/test.js all --backend napi"
   },
   "repository": {
     "type": "git",
