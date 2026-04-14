@@ -336,22 +336,24 @@ function macSetText(text: string): boolean {
   // autoreleased objects, and without a drain target some Bun+AppKit
   // combinations segfault.  Wrap the whole op in a local pool.
   const pool = O.objc_autoreleasePoolPush();
-  const typeStr = cfStringFromJS("public.utf8-plain-text");
   const str = cfStringFromJS(text);
   try {
-    if (!typeStr || !str) return false;
-    const declare = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i64);
-    if (!declare) return false;
-    const typesArr = macArrayWithOne(typeStr);
-    if (!typesArr) return false;
-    declare(board, sel("declareTypes:owner:"), typesArr, null);
-    const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
+    if (!str) return false;
+    // clearContents + writeObjects:@[str].  With the autorelease pool
+    // active the `writeObjects:` segfault is gone; and because our
+    // cfStringFromJS returns a heap-allocated (non-tagged) CFMutableString,
+    // NSString's toll-free bridge exposes it as a proper NSPasteboardWriting
+    // object that self-registers `public.utf8-plain-text`.
+    const clear = msgSendTyped([T.ptr, T.ptr], T.void);
+    if (clear) clear(board, sel("clearContents"));
+    const arr = macArrayWithOne(str);
+    if (!arr) return false;
+    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.i8);
     if (!send) return false;
-    const r = send(board, sel("setString:forType:"), str, typeStr);
+    const r = send(board, sel("writeObjects:"), arr);
     return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
   } finally {
     if (str) C.CFRelease(str);
-    if (typeStr) C.CFRelease(typeStr);
     O.objc_autoreleasePoolPop(pool);
   }
 }
