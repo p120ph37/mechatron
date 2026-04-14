@@ -81,7 +81,7 @@ function setWmState(win: bigint, setting: number, state: boolean): void {
   if (setting === STATE_MINIMIZE) {
     if (state) {
       if (!attr) return;
-      const screenNum = X.XScreenNumberOfScreen(attr.screen as any);
+      const screenNum = X.XScreenNumberOfScreen(attr.screen);
       X.XIconifyWindow(d, win, screenNum);
     } else {
       windowSetActiveInternal(win);
@@ -95,7 +95,7 @@ function setWmState(win: bigint, setting: number, state: boolean): void {
   const wmVmax = A("_NET_WM_STATE_MAXIMIZED_VERT");
   if (wmState === 0n || wmAbove === 0n || wmVmax === 0n || wmHmax === 0n || !attr) return;
 
-  const screenNum = X.XScreenNumberOfScreen(attr.screen as any);
+  const screenNum = X.XScreenNumberOfScreen(attr.screen);
   const longs: bigint[] = [BigInt(state ? 1 : 0), 0n, 0n, 0n, 0n];
   if (setting === STATE_TOPMOST) {
     longs[1] = wmAbove;
@@ -115,7 +115,7 @@ function windowSetActiveInternal(win: bigint): void {
   const wmActive = A("_NET_ACTIVE_WINDOW");
   const attr = getWindowAttributes(win);
   if (wmActive !== 0n && attr) {
-    const screenNum = X.XScreenNumberOfScreen(attr.screen as any);
+    const screenNum = X.XScreenNumberOfScreen(attr.screen);
     sendClientMessage(screenNum, win, wmActive, [2n, CurrentTime, 0n, 0n, 0n]);
   }
   X.XMapWindow(d, win);

@@ -265,6 +265,19 @@ jobs:
             xmessage -timeout 600 -name MechatronTestWindow "mechatron test client" &
             XMESSAGE_PID=$!
             sleep 0.3
+            # xmessage doesn't publish _NET_WM_PID on its own, but
+            # lib/ffi/window.ts:winIsValid treats _NET_WM_PID presence
+            # as the "is this a real window" heuristic — mirroring
+            # the napi backend.  Without the atom, every Linux-only
+            # helper (getTitle/getBounds/setTopMost/...) is skipped
+            # during enumeration and window.ts coverage sits at ~42%.
+            # Inject the atom post-hoc via xprop so the full Linux
+            # path is exercised.  xprop is in x11-utils (installed
+            # above).
+            XMSG_WIN=$(xwininfo -root -tree 2>/dev/null | grep MechatronTestWindow | head -1 | awk '{print $1}')
+            if [ -n "$XMSG_WIN" ]; then
+              xprop -id "$XMSG_WIN" -f _NET_WM_PID 32c -set _NET_WM_PID "$XMESSAGE_PID" 2>/dev/null || true
+            fi
             cleanup_x() {
               kill "$XMESSAGE_PID" "$OPENBOX_PID" "$XVFB_PID" 2>/dev/null || true
             }

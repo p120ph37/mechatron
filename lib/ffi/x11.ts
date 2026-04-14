@@ -23,9 +23,14 @@ interface X11 {
   XDefaultRootWindow: (display: Pointer) => bigint;
   XDefaultScreen: (display: Pointer) => number;
   XScreenOfDisplay: (display: Pointer, screen: number) => Pointer;
-  XWidthOfScreen: (screen: Pointer) => number;
-  XHeightOfScreen: (screen: Pointer) => number;
-  XScreenNumberOfScreen: (screen: Pointer) => number;
+  // Screen*-typed args are declared T.u64 to accept bigint from
+  // getBigUint64 readers; see dlopen spec.  Keeping the TS type as
+  // `Pointer | bigint` so that callers working from either an
+  // XScreenOfDisplay return (Pointer) or a getBigUint64-read field
+  // (bigint) both type-check.
+  XWidthOfScreen: (screen: Pointer | bigint) => number;
+  XHeightOfScreen: (screen: Pointer | bigint) => number;
+  XScreenNumberOfScreen: (screen: Pointer | bigint) => number;
   XRootWindow: (display: Pointer, screen: number) => bigint;
   XQueryPointer: (
     display: Pointer, w: bigint,
@@ -170,9 +175,15 @@ function tryDlopen(): void {
       XDefaultRootWindow:     { args: [T.ptr], returns: T.u64 },
       XDefaultScreen:         { args: [T.ptr], returns: T.i32 },
       XScreenOfDisplay:       { args: [T.ptr, T.i32], returns: T.ptr },
-      XWidthOfScreen:         { args: [T.ptr], returns: T.i32 },
-      XHeightOfScreen:        { args: [T.ptr], returns: T.i32 },
-      XScreenNumberOfScreen:  { args: [T.ptr], returns: T.i32 },
+      // Screen*-typed args are declared T.u64: we retrieve the pointer via
+      // getBigUint64 out of an XWindowAttributes struct (getWindowAttributes
+      // in window.ts), so it arrives as a JS bigint.  Bun's T.ptr coerction
+      // rejects bigint ("Unable to convert N to a pointer"); T.u64 has the
+      // same ABI on every 64-bit OS and accepts bigint directly — same
+      // trick the XFree / XDestroyImage / XGetPixel declarations use.
+      XWidthOfScreen:         { args: [T.u64], returns: T.i32 },
+      XHeightOfScreen:        { args: [T.u64], returns: T.i32 },
+      XScreenNumberOfScreen:  { args: [T.u64], returns: T.i32 },
       XRootWindow:            { args: [T.ptr, T.i32], returns: T.u64 },
       XQueryPointer:          {
         args: [T.ptr, T.u64, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr],
