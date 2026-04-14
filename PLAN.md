@@ -322,6 +322,218 @@ appropriately.  All subsystems run under all three engines.
 
 ---
 
+---
+
+## Phase 6: Linux / Wayland Platform Compatibility Enhancements
+
+Mechatron's Linux support has historically assumed a classic X11 session with
+`libXtst` + `libXrandr` available and accepting synthetic events.  That
+assumption breaks in three increasingly common environments:
+
+- **X11 without XTest** — minimal server builds, Xephyr, some remote-access
+  servers, and security-hardened hosts often ship Xlib only.  Our mouse /
+  keyboard subsystems silently no-op.
+- **Wayland sessions** — XWayland provides an X11 compatibility surface but
+  most compositors disable synthetic input through it, and screen capture
+  through XWayland only sees the single XWayland root, not the real
+  compositor output.
+- **Headless / container** — a bare framebuffer (`/dev/fb0`, KMS dumb
+  buffers) with no display server at all.
+
+Phase 6 adds layered fallback mechanisms, explicit mechanism selection, and
+runtime introspection so callers can discover what's in use and why.
+
+### 6a. Platform Mechanism Introspection API (COMPLETE — scaffolding)
+
+A new `Platform` module exports three functions per subsystem that can have
+multiple mechanisms (currently `input` — shared by keyboard + mouse — and
+`screen`; `clipboard` follows the same shape):
+
+```ts
+import { Platform } from "mechatron";
+
+Platform.listMechanisms("input");    // ["xtest", "uinput", "xproto", "libei"]
+Platform.getMechanism("input");      // "xtest"   — whichever was probed/picked
+Platform.setMechanism("input", "uinput");  // force-select; throws if unavailable
+Platform.getCapabilities("screen");  // { offScreenCapture: true, requiresUserApproval: false, … }
+```
+
+Selection priority for each capability is:
+
+1. Explicit `Platform.setMechanism(...)` call at runtime.
+2. Environment variable: `MECHATRON_INPUT_MECHANISM`, `MECHATRON_SCREEN_MECHANISM`,
+   `MECHATRON_CLIPBOARD_MECHANISM` (comma-separated fallback list accepted).
+3. Auto-detection — probe each mechanism in a defined priority order and
+   pick the first that self-reports available.
+
+Each mechanism exposes a `probe()` that returns a `MechanismInfo`:
+
+```ts
+interface MechanismInfo {
+  name: string;                      // "xtest", "uinput", …
+  available: boolean;
+  requiresElevatedPrivileges: boolean;
+  requiresUserApproval: boolean;     // runtime prompt required?
+  supportsOffScreen: boolean;        // virtual displays / off-screen windows
+  description: string;
+  reason?: string;                   // why unavailable, if applicable
+}
+```
+
+This gives app authors a principled way to decide (e.g.) whether to prompt
+the user for elevated privileges up front, or to skip Wayland's portal
+dialog by pre-caching a permission handle.
+
+### 6b. Linux Clipboard Support (COMPLETE — bridge)
+
+X11 has no clipboard manager; content only persists while the owning client
+is alive.  Rather than run our own EWMH-compliant persistent background
+thread (the approach used by some other Linux clipboard libraries and one
+that conflicts badly with short-lived CLI processes), we shell out to a
+small set of well-established helpers detected at runtime:
+
+| Mechanism | Backing tool(s) | Notes |
+|-----------|-----------------|-------|
+| `wl-clipboard` | `wl-copy`, `wl-paste` | Wayland sessions |
+| `xclip` | `xclip` | Classic X11 |
+| `xsel` | `xsel` | X11 alternative |
+
+The first tool present in `$PATH` wins; override via
+`MECHATRON_CLIPBOARD_MECHANISM=wl-clipboard|xclip|xsel|none`.  Both text and
+image (PNG round-trip) are supported where the underlying tool does.
+
+Implementation lives in TypeScript (`lib/clipboard/linux.ts`) so it works
+for both the napi and ffi backends unchanged — the napi stubs still live
+as a last-resort fallback when no tool is installed.
+
+### 6c. uinput Virtual Input Device Fallback (COMPLETE — skeleton)
+
+When XTest is unavailable or the session is Wayland, input can still be
+synthesised by creating a virtual keyboard/mouse via `/dev/uinput`:
+
+- Opens `/dev/uinput`, sets `UI_SET_EVBIT` / `UI_SET_KEYBIT` / `UI_SET_RELBIT`
+  for the keys and axes we emit, writes `uinput_user_dev`, ioctl
+  `UI_DEV_CREATE`.
+- Emits `EV_KEY` / `EV_REL` / `EV_SYN` structs to generate presses,
+  releases, motions, and scroll events.
+- Requires `CAP_SYS_ADMIN` or a udev rule (`KERNEL=="uinput", MODE="0660", GROUP="input"`).
+
+Detection checks read access on `/dev/uinput`; if unavailable, reports
+`requiresElevatedPrivileges: true` so callers know to prompt.  Because
+uinput works at the evdev layer, it works equally well under X11, Wayland,
+and headless sessions — but it cannot report *current* pointer/key state
+(that's a session-level concept), so `Mouse.getPos()` / `Keyboard.getState()`
+still transparently delegate to the X11 backend if one is also available.
+
+### 6d. Direct X Protocol Implementation (PLANNED)
+
+An intermediate fallback that speaks the X11 wire protocol directly over
+`$DISPLAY` (Unix socket or TCP), with no dependency on `libX11` /
+`libXtst` / `libXrandr`:
+
+- **Connection setup**: parse `$DISPLAY`, read Xauthority cookie,
+  send `X_ConnSetup` (byte-order + protocol version + auth), parse the
+  server's reply (screen/visual info lives right in the connection
+  setup response).
+- **Key/pointer events**: `WarpPointer` is a core X request; synthesised
+  input via `XTestFakeInput` is a single extension opcode that we can
+  send directly.  We can still probe for the XTEST extension without
+  libXtst via `X_QueryExtension`.
+- **Screen capture**: `GetImage` is core X; we already decode its reply
+  ourselves in the `XGetPixel` path.  XRandR monitor enumeration uses
+  opcode 42 of the RandR extension, which decodes to a straightforward
+  byte-layout reply.
+
+Benefits: no libX11/libXtst/libXrandr soname dependency (Alpine/musl
+distros that don't bundle them; containers that strip shared libraries);
+identical behaviour between the napi and ffi backends; easier to thread
+or background than libX11 which holds a global display lock.
+
+Risk: the X protocol is large; we only need a tiny subset, but the
+connection-setup parse is intricate.  This is planned as an *additional
+intermediate* fallback between xtest/libX11 and uinput/framebuffer —
+not a replacement for the library path unless it proves robust enough.
+
+### 6e. Framebuffer / KMS Screen Capture (COMPLETE — skeleton)
+
+For headless / TTY / container contexts with no X server, mechatron can
+read pixels directly from:
+
+- **`/dev/fb0`** (legacy framebuffer device) — mmap the device, read
+  `FBIOGET_VSCREENINFO` + `FBIOGET_FSCREENINFO` for geometry, decode
+  the pixel format (usually 32-bit ARGB or 16-bit RGB565) and convert
+  to our canonical ARGB.
+- **`/dev/dri/card0`** with DRM dumb buffers — required for most
+  modern Linux systems where `/dev/fb0` is deprecated and the actual
+  scanout lives in KMS planes.  Uses `DRM_IOCTL_MODE_GETCRTC` +
+  `DRM_IOCTL_MODE_MAP_DUMB` + `mmap`.
+
+Both paths require `CAP_SYS_ADMIN` or `video` group membership;
+`Platform.getCapabilities("screen")` reports `requiresElevatedPrivileges: true`
+when only the framebuffer mechanism is available.
+
+### 6f. Wayland / PipeWire Screen Capture (PLANNED)
+
+Wayland compositors expose screen capture via the `org.freedesktop.portal.ScreenCast`
+portal over D-Bus.  The flow is:
+
+1. Call `CreateSession` on `org.freedesktop.portal.ScreenCast` → returns a
+   session handle.
+2. `SelectSources` (optionally with `persist_mode=2` to get a reusable
+   permission handle).
+3. `Start` — this is where the user sees the permission prompt.  The
+   return includes a `restore_token` string we can persist to disk.
+4. `OpenPipeWireRemote` → returns a PipeWire fd we consume frames from.
+
+Permission-caching flow:
+
+- `Platform.saveScreenPermission("./my-app.tok")` — writes the restore
+  token from the current session.
+- `Platform.loadScreenPermission("./my-app.tok")` — on next run, pass
+  the cached token; the portal may either skip the prompt or fall back
+  to prompting if the token is no longer valid.
+
+If the process is run as root or started via a systemd unit with the
+`CAP_SYS_ADMIN` capability, we can bypass the portal entirely via the
+DRM scanout path (6e).  The screen mechanism selector is:
+
+```
+root / CAP_SYS_ADMIN         → drm  (no prompt)
+Wayland session              → portal-pipewire (prompt, cache token)
+X11 session                  → xrandr+XGetImage  (the classic path)
+last resort                  → framebuffer  (works everywhere, needs perms)
+```
+
+### 6g. libei / Remote Desktop Portal Input (PLANNED)
+
+A Wayland-native analogue of uinput for input synthesis:
+`org.freedesktop.portal.RemoteDesktop` exposes a libei (Emulated Input)
+session that bypasses uinput's root/udev requirement by routing through
+the same portal infrastructure as screen capture.  Similar permission-
+caching semantics; same `restore_token` idea.
+
+### 6h. CI matrix expansion (PLANNED)
+
+- Add a Wayland runner (Sway + Weston) job to CI.
+- Add an XTest-stripped runner that dlopen-blocks libXtst to validate
+  the uinput/xproto fallbacks run real workloads.
+- Add a framebuffer-only job (no X server) exercising DRM capture.
+
+### 6i. Phase 6 Implementation Status
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Platform mechanism introspection (6a) | **Complete** | `getMechanism`, `listMechanisms`, `setMechanism`, `getCapabilities` |
+| Linux clipboard via wl-clipboard/xclip/xsel (6b) | **Complete** | TS bridge with tool auto-detection |
+| uinput fallback (6c) | **Skeleton** | Probe + node-level detection; full write path scaffolded |
+| Pure X protocol (6d) | **Planned** | Connection-setup parser is the gating work item |
+| Framebuffer / DRM capture (6e) | **Skeleton** | /dev/fb0 probe + mmap path; DRM TBD |
+| Portal+PipeWire screen capture (6f) | **Planned** | D-Bus portal detection landed; capture thread TBD |
+| Portal+libei input (6g) | **Planned** | Detection landed; sendinput TBD |
+| CI expansion (6h) | **Planned** | Job definitions TBD |
+
+---
+
 ## Roadmap Summary
 
 | Phase | Status | Description |
@@ -332,3 +544,4 @@ appropriately.  All subsystems run under all three engines.
 | 4a | **Complete** | Segmented native packages (`@mechatronic/napi-*` as optionalDependencies) |
 | 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |
 | 5 | **Complete** | Bun FFI backend: pure-TS `bun:ffi` to system libs, no native binary needed under Bun (Linux + Windows) |
+| 6 | **In progress** | Linux/Wayland compat — mechanism introspection, clipboard, uinput/DRM/portal fallbacks |
