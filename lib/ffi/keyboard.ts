@@ -18,10 +18,26 @@ import {
 import {
   cg, cf, kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
 } from "./mac";
+import { injectKeysym, uinputReady } from "./uinput";
+import { getMechanism } from "../platform";
 
 // ==================== Linux ====================
 
+// Is uinput the selected input mechanism for this capability?  Checked
+// on each call so callers can swap mechanisms mid-process via
+// setMechanism("input", ...).  Platform.getMechanism caches its own
+// result internally, so this isn't a hot-path concern.
+function linux_useUinput(): boolean {
+  return getMechanism("input") === "uinput";
+}
+
 function linux_keyboard_press(keycode: number): void {
+  if (linux_useUinput() && uinputReady()) {
+    // injectKeysym returns false for unmapped keysyms — fall through to
+    // XTest in that case so niche keys (e.g. KEY_MEDIA_*, if ever added
+    // to mechatron's public surface) still reach the X server.
+    if (injectKeysym(keycode, true)) return;
+  }
   if (!isXTestAvailable()) return;
   const X = x11()!, T = xtest()!;
   const display = getDisplay();
@@ -31,6 +47,9 @@ function linux_keyboard_press(keycode: number): void {
 }
 
 function linux_keyboard_release(keycode: number): void {
+  if (linux_useUinput() && uinputReady()) {
+    if (injectKeysym(keycode, false)) return;
+  }
   if (!isXTestAvailable()) return;
   const X = x11()!, T = xtest()!;
   const display = getDisplay();

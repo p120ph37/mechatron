@@ -34,6 +34,11 @@ import {
   kCGScrollEventUnitPixel,
 } from "./mac";
 import type { Pointer } from "./bun";
+import {
+  injectMouseButton, injectMouseMoveRel, injectScrollV, injectScrollH,
+  uinputReady,
+} from "./uinput";
+import { getMechanism } from "../platform";
 
 // Button constants (must match lib/mouse/constants.ts)
 const BUTTON_LEFT = 0;
@@ -41,6 +46,11 @@ const BUTTON_MID = 1;
 const BUTTON_RIGHT = 2;
 const BUTTON_X1 = 3;
 const BUTTON_X2 = 4;
+
+// Is uinput the selected input mechanism?  See note in ffi/keyboard.ts.
+function linux_useUinput(): boolean {
+  return getMechanism("input") === "uinput";
+}
 
 // X11 button mask bits (from <X11/X.h>)
 const Button1Mask = 1 << 8;
@@ -59,6 +69,11 @@ function linux_xButton(button: number): number | null {
 }
 
 function linux_mouse_press(button: number): void {
+  if (linux_useUinput() && uinputReady()) {
+    // uinput supports all five mechatron buttons (L/M/R/X1/X2); fall
+    // through only on out-of-range values, which XTest will also drop.
+    if (injectMouseButton(button, true)) return;
+  }
   const xbtn = linux_xButton(button);
   if (xbtn === null || !isXTestAvailable()) return;
   const X = x11()!, T = xtest()!;
@@ -68,6 +83,9 @@ function linux_mouse_press(button: number): void {
 }
 
 function linux_mouse_release(button: number): void {
+  if (linux_useUinput() && uinputReady()) {
+    if (injectMouseButton(button, false)) return;
+  }
   const xbtn = linux_xButton(button);
   if (xbtn === null || !isXTestAvailable()) return;
   const X = x11()!, T = xtest()!;
@@ -77,6 +95,11 @@ function linux_mouse_release(button: number): void {
 }
 
 function linux_mouse_scrollH(amount: number): void {
+  if (linux_useUinput() && uinputReady()) {
+    // uinput REL_HWHEEL takes discrete notches in a single write, so
+    // one evdev event vs. XTest's |amount|×{press+release} pairs.
+    if (injectScrollH(amount)) return;
+  }
   if (!isXTestAvailable()) return;
   const X = x11()!, T = xtest()!;
   const display = getDisplay();
@@ -90,6 +113,9 @@ function linux_mouse_scrollH(amount: number): void {
 }
 
 function linux_mouse_scrollV(amount: number): void {
+  if (linux_useUinput() && uinputReady()) {
+    if (injectScrollV(amount)) return;
+  }
   if (!isXTestAvailable()) return;
   const X = x11()!, T = xtest()!;
   const display = getDisplay();

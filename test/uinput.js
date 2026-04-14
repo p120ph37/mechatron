@@ -313,6 +313,62 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(ffi.uinputReady() === false, "uinputReady false after close");
 		}
 
+		// ── Platform mechanism plumbing (6c part 3) ──────────────────
+		// Keyboard/Mouse dispatch consults Platform.getMechanism("input")
+		// on each call; verify that the mechanism registry knows about
+		// uinput, that pinning it works, and that Keyboard.press /
+		// Mouse.press don't throw when it's the selected mechanism —
+		// regardless of whether the device is actually live (dispatcher
+		// falls through to XTest when uinput isn't ready).
+		var infos = mechatron.listMechanisms("input");
+		assert(Array.isArray(infos), "listMechanisms returns array");
+		var uinputInfo = infos.find(function (m) { return m.name === "uinput"; });
+		assert(uinputInfo, "uinput mechanism registered");
+		assert(typeof uinputInfo.available === "boolean", "uinput.available boolean");
+		var xtestInfo = infos.find(function (m) { return m.name === "xtest"; });
+		assert(xtestInfo, "xtest mechanism registered");
+
+		// Pinning uinput: honoured even when unavailable so auto-detect
+		// doesn't silently pick xtest behind the user's back.
+		var prevActive = mechatron.getMechanism("input");
+		mechatron.setMechanism("input", "uinput");
+		assert(mechatron.getMechanism("input") === "uinput",
+			"setMechanism input=uinput sticks");
+
+		// Keyboard.press/release under uinput pin.  When uinput isn't
+		// ready the dispatcher silently falls through to XTest, so this
+		// just verifies no exception escapes.  We only attempt this if
+		// an XTest fallback is actually available — otherwise the whole
+		// call becomes a no-op but importing mechanism would still have
+		// been exercised.
+		var kb = new mechatron.Keyboard();
+		var mouse = new mechatron.Mouse();
+		try {
+			kb.press(KEYS.KEY_LSHIFT);
+			kb.release(KEYS.KEY_LSHIFT);
+		} catch (e) {
+			assert(false, "Keyboard under uinput pin threw: " + e.message);
+		}
+
+		// Mouse buttons + scroll under uinput pin.  setPos intentionally
+		// stays on the XTest path (uinput has no EV_ABS capability), so
+		// we don't exercise that here — the normal mouse test covers it.
+		try {
+			mouse.press(mechatron.BUTTON_LEFT);
+			mouse.release(mechatron.BUTTON_LEFT);
+			mouse.scrollV(1);
+			mouse.scrollH(-1);
+		} catch (e) {
+			assert(false, "Mouse ops under uinput pin threw: " + e.message);
+		}
+
+		// Restore prior selection so later tests aren't affected.
+		if (prevActive) {
+			mechatron.setMechanism("input", prevActive);
+		} else {
+			mechatron.resetMechanism("input");
+		}
+
 		log("OK\n");
 		return true;
 	}
