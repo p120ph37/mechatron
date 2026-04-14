@@ -367,7 +367,7 @@ function getWindowPid(win: bigint): number {
   const X = x11();
   if (!F || !X) return 0;
   // Property is CARDINAL/32 → first value is a long.  Read it.
-  const pid = Number(F.read.u64(r.data, 0) & 0xFFFFFFFFn);
+  const pid = Number(F.read.u64(Number(r.data), 0) & 0xFFFFFFFFn);
   X.XFree(r.data);
   return pid;
 }
@@ -435,7 +435,11 @@ function enumWindows(win: bigint, re: RegExp | null, pidFilter: number, out: num
     const n = ncount[0];
     if (ptr !== 0n && n > 0) {
       for (let i = 0; i < n; i++) {
-        const child = F.read.u64(ptr, i * 8);
+        // Bun's read.u64 rejects bigint pointer args with "Expected a
+        // pointer"; ptr came from BigUint64Array[0] (XQueryTree's Window**
+        // out-param).  Linux userspace VAs fit in 48 bits, so the
+        // Number round-trip is lossless.
+        const child = F.read.u64(Number(ptr), i * 8);
         enumWindows(child, re, pidFilter, out);
       }
       X.XFree(ptr);

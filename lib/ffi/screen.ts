@@ -65,16 +65,19 @@ function linuxSynchronize(): ScreenInfo[] | null {
       const info = xine.XineramaQueryScreens(d, F.ptr(xCount)) as bigint | null;
       const n = xCount[0];
       if (info && (info as bigint) !== 0n && n > 0) {
+        // Bun's read.* rejects bigint ptr args; convert to Number (userspace
+        // VAs fit in 48 bits on Linux so this is lossless).
+        const infoN = Number(info);
         for (let i = 0; i < n; i++) {
           const off = i * 12;
           // XineramaScreenInfo: i32 screen_number, i16 x_org, i16 y_org, i16 width, i16 height
-          const xOrg = (F.read.u32(info, off + 4) << 16) >> 16;  // sign-extend i16 from low 16 bits
+          const xOrg = (F.read.u32(infoN, off + 4) << 16) >> 16;  // sign-extend i16 from low 16 bits
           // Actually F.read doesn't have i16; manually read 4 bytes and split
           // Instead, read u32 at off+4 and decode two i16 LE values:
-          const word1 = F.read.u32(info, off + 4);
+          const word1 = F.read.u32(infoN, off + 4);
           const x_org = (word1 & 0xFFFF) << 16 >> 16;
           const y_org = (word1 >>> 16) << 16 >> 16;
-          const word2 = F.read.u32(info, off + 8);
+          const word2 = F.read.u32(infoN, off + 8);
           const width = (word2 & 0xFFFF) << 16 >> 16;
           const height = (word2 >>> 16) << 16 >> 16;
           const bounds: RawRect = { x: x_org, y: y_org, w: width, h: height };
@@ -134,10 +137,14 @@ function linuxSynchronize(): ScreenInfo[] | null {
       if (status === 0 && propRet[0] !== 0n
           && actualType[0] === XA_CARDINAL
           && actualFormat[0] === 32 && nitems[0] === 4n) {
-        const x = Number(F.read.u64(propRet[0], 0)) | 0;
-        const y = Number(F.read.u64(propRet[0], 8)) | 0;
-        const w = Number(F.read.u64(propRet[0], 16)) | 0;
-        const h = Number(F.read.u64(propRet[0], 24)) | 0;
+        // Bun's read.u64 rejects bigint pointer args ("Expected a pointer");
+        // convert the BigUint64Array slot to Number (Linux userspace VAs fit
+        // in 48 bits so this is lossless).
+        const pr = Number(propRet[0]);
+        const x = Number(F.read.u64(pr, 0)) | 0;
+        const y = Number(F.read.u64(pr, 8)) | 0;
+        const w = Number(F.read.u64(pr, 16)) | 0;
+        const h = Number(F.read.u64(pr, 24)) | 0;
         const u: RawRect = { x, y, w, h };
         screens[i].usable = usedXinerama ? intersectBounds(u, screens[i].bounds) : u;
       }
@@ -161,12 +168,14 @@ function linuxGrabScreen(x: number, y: number, w: number, h: number, windowHandl
   try {
     // XImage layout: width@0(i32), height@4(i32), red_mask@56(u64),
     // green_mask@64(u64), blue_mask@72(u64).
-    const iw = F.read.i32(img, 0);
-    const ih = F.read.i32(img, 4);
+    // Normalise pointer to Number (Bun's read.* rejects bigint ptr args).
+    const imgN = Number(img);
+    const iw = F.read.i32(imgN, 0);
+    const ih = F.read.i32(imgN, 4);
     if (iw <= 0 || ih <= 0) return null;
-    const redMask   = F.read.u64(img, 56);
-    const greenMask = F.read.u64(img, 64);
-    const blueMask  = F.read.u64(img, 72);
+    const redMask   = F.read.u64(imgN, 56);
+    const greenMask = F.read.u64(imgN, 64);
+    const blueMask  = F.read.u64(imgN, 72);
 
     const pixels = new Uint32Array(iw * ih);
     for (let yy = 0; yy < ih; yy++) {

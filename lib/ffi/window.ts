@@ -53,7 +53,7 @@ function getWmState(win: bigint, setting: number): boolean {
   if (!r) return false;
   let test1 = false, test2 = false;
   for (let i = 0n; i < r.nitems; i++) {
-    const a = F.read.u64(r.data, Number(i) * 8);
+    const a = F.read.u64(Number(r.data), Number(i) * 8);
     switch (setting) {
       case STATE_TOPMOST:
         if (a === wmAbove) { test1 = true; test2 = true; }
@@ -133,10 +133,11 @@ function getFrame(win: bigint): { left: number; top: number; right: number; bott
   const r = getWindowProperty(win, wmExtents);
   if (!r) return { left: 0, top: 0, right: 0, bottom: 0 };
   if (r.nitems !== 4n) { X.XFree(r.data); return { left: 0, top: 0, right: 0, bottom: 0 }; }
-  const left   = Number(F.read.u64(r.data, 0));
-  const right  = Number(F.read.u64(r.data, 8));
-  const top    = Number(F.read.u64(r.data, 16));
-  const bottom = Number(F.read.u64(r.data, 24));
+  const rData = Number(r.data);
+  const left   = Number(F.read.u64(rData, 0));
+  const right  = Number(F.read.u64(rData, 8));
+  const top    = Number(F.read.u64(rData, 16));
+  const bottom = Number(F.read.u64(rData, 24));
   X.XFree(r.data);
   // Returns (left, top, leftPlusRight, topPlusBottom) for caller convenience
   return { left, top, right: left + right, bottom: top + bottom };
@@ -177,7 +178,7 @@ function getPid(win: bigint): number {
   if (wmPid === 0n) return 0;
   const r = getWindowProperty(win, wmPid);
   if (!r) return 0;
-  const v = Number(F.read.u64(r.data, 0) & 0xFFFFFFFFn);
+  const v = Number(F.read.u64(Number(r.data), 0) & 0xFFFFFFFFn);
   X.XFree(r.data);
   return v;
 }
@@ -232,7 +233,8 @@ function enumWindows(win: bigint, re: RegExp | null, pidFilter: number, out: num
     const n = ncount[0];
     if (ptr !== 0n && n > 0) {
       for (let i = 0; i < n; i++) {
-        const child = F.read.u64(ptr, i * 8);
+        // Bun's read.u64 rejects bigint pointer args; see process.ts:438.
+        const child = F.read.u64(Number(ptr), i * 8);
         enumWindows(child, re, pidFilter, out);
       }
       X.XFree(ptr);
@@ -271,7 +273,7 @@ export function window_isBorderless(handle: number): boolean {
   const r = getWindowProperty(BigInt(handle), wmHints);
   if (!r) return false;
   // _MOTIF_WM_HINTS: flags(ulong), funcs(ulong), decorations(ulong) at offset 16
-  const decorations = F.read.u64(r.data, 16);
+  const decorations = F.read.u64(Number(r.data), 16);
   X.XFree(r.data);
   return decorations === 0n;
 }
@@ -423,7 +425,7 @@ export function window_getActive(): number {
   const root = X.XDefaultRootWindow(d);
   const r = getWindowProperty(root, wmActive);
   if (!r) return 0;
-  const win = F.read.u64(r.data, 0);
+  const win = F.read.u64(Number(r.data), 0);
   X.XFree(r.data);
   return Number(win);
 }
