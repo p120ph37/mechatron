@@ -278,8 +278,9 @@ suited — there is no standard for engine-conditional downloads.
 `lib/napi.ts` (the unified loader) picks per-subsystem:
 
 - **Node.js**: only `napi` is considered.
-- **Bun**: tries `ffi` first (loading `lib/ffi/<sub>.ts`); falls back to
-  `napi` if that subsystem hasn't been ported to pure FFI yet.
+- **Bun**: tries `napi` first (same as Node.js — faster and better tested);
+  falls back to `ffi` (loading `lib/ffi/<sub>.ts`) when the
+  `@mechatronic/napi-<sub>` prebuild isn't installed.
 - `MECHATRON_BACKEND=napi|ffi` env var forces a specific backend.
 
 A new `getBackend(subsystem)` API reports which backend is in use.

@@ -117,12 +117,14 @@ dependency (workspace symlinks provide resolution during development).
 
 ### Bun runtime
 
-Under Bun, the loader prefers a second backend that uses `bun:ffi` to dlopen
-the underlying system libraries (libX11/libXtst/libXrandr, user32.dll, etc.)
-directly from pure TypeScript in `lib/ffi/`.  No native binary is downloaded
-for Bun consumers — Bun loads the package's TypeScript directly via the
-`"bun"` exports condition.  Subsystems not yet ported to pure FFI fall back
-to napi.
+Under Bun, the loader still prefers the NAPI backend when the appropriate
+`@mechatronic/napi-<sub>` prebuild is installed — it's faster and better
+tested.  When the NAPI prebuild is missing, the loader falls back to a
+pure-TypeScript `bun:ffi` backend in `lib/ffi/` that dlopens the underlying
+system libraries (libX11/libXtst/libXrandr, user32.dll, etc.) directly.
+This lets Bun consumers install mechatron without any native binary at all
+(`bun install mechatron --omit=optional`) — Bun loads the package's
+TypeScript directly via the `"bun"` exports condition.
 
 Force a specific backend with `MECHATRON_BACKEND=napi|ffi`.  Query the
 selected backend with `getBackend("keyboard")`.
