@@ -58,7 +58,7 @@ behavioral parity with the original robot-js documented APIs.
 - Windows: `windows` crate v0.58
 - macOS: `objc2`, `objc2-app-kit`, `objc2-core-graphics`, `objc2-core-foundation`,
   Mach VM APIs via raw `extern "C"` FFI
-- Linux: X11/Xinerama via raw FFI, `/proc` filesystem
+- Linux: X11/XRandR via raw FFI, `/proc` filesystem
 
 ### 2b. C++ Backend Removal
 The C++ backend (`src/`, `src/native/`, `src/robot/`) and the dual-backend test
@@ -291,7 +291,7 @@ A new `getBackend(subsystem)` API reports which backend is in use.
 | keyboard  | Linux, Windows | macOS deferred (Objective-C runtime via FFI) |
 | mouse     | Linux, Windows | macOS deferred |
 | clipboard | Linux (stubs), Windows | Linux X11 has no clipboard manager — mirrors napi stubs |
-| screen    | Linux, Windows | Xinerama + XGetImage on Linux; BitBlt + GetDIBits on Windows |
+| screen    | Linux, Windows | XRandR 1.5 + XGetImage on Linux; BitBlt + GetDIBits on Windows |
 | window    | Linux, Windows (stubs) | Linux full EWMH/Motif; Windows mirrors napi stubs |
 | process   | Linux, Windows | /proc on Linux; toolhelp + psapi on Windows |
 | memory    | Linux, Windows | process_vm_readv/writev on Linux; RPM/WPM/VirtualQueryEx on Windows |

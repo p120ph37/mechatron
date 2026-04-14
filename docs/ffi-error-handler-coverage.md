@@ -19,7 +19,7 @@ testing strategy:
 
 1. **dlopen / symbol-load failures** — the `try { dlopen(...) } catch { _x = null; }`
    arms in `lib/ffi/{mac,win,x11,linux}.ts`.  Reached when a shared library
-   isn't present (e.g. AppKit headless, libXinerama missing).
+   isn't present (e.g. AppKit headless, libXrandr missing).
 2. **Handle-allocation failures** — `GlobalAlloc`/`GlobalLock` returning 0,
    `CreateCompatibleBitmap` returning null, `CGBitmapContextCreate` returning
    null.  Reached under memory pressure or with invalid arguments.
@@ -36,15 +36,15 @@ testing strategy:
 ### 1. dlopen / symbol-load failures
 
 The loader is written so that each shared library is optional — losing
-libXinerama or libXtst doesn't crash, it just disables the corresponding
+libXrandr or libXtst doesn't crash, it just disables the corresponding
 feature.  We can force the catch arms to run by:
 
 - **`LD_PRELOAD` with a stub that refuses `dlopen` for a chosen soname.**
   A 20-line C shim can intercept `dlopen()` and return `NULL` when the
   requested path matches a pattern passed via an env var, while forwarding
   everything else.  Build once in CI, then run one additional test invocation
-  with `LD_PRELOAD=./dlopen-stub.so MECHATRON_BLOCK_DLOPEN=libXinerama.so.1`
-  to exercise the no-Xinerama fallback.  Repeat for `libXtst.so.6`.
+  with `LD_PRELOAD=./dlopen-stub.so MECHATRON_BLOCK_DLOPEN=libXrandr.so.2`
+  to exercise the no-XRandR fallback.  Repeat for `libXtst.so.6`.
 
 - **On macOS**, use `DYLD_INSERT_LIBRARIES` with the same idea but
   intercepting `dlopen` (the dynamic linker uses the same entry point).
@@ -174,7 +174,7 @@ removable; the rest are load-bearing and should stay.
 3. **Handle-allocation tests** (category 2).  Add oversize-region screen
    grabs; audit which `GlobalAlloc` guards are reachable.  Est. 1 hour.
 4. **`dlopen` interception** (category 1).  Build the LD_PRELOAD/DYLD shim
-   and add two extra CI invocations (libXinerama blocked, libXtst blocked).
+   and add two extra CI invocations (libXrandr blocked, libXtst blocked).
    Est. 3 hours including CI wiring.
 
 Target: bring the combined FFI coverage from ~95% (post-display-harness) to

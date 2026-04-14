@@ -118,10 +118,11 @@ dependency (workspace symlinks provide resolution during development).
 ### Bun runtime
 
 Under Bun, the loader prefers a second backend that uses `bun:ffi` to dlopen
-the underlying system libraries (libX11/libXtst, user32.dll, etc.) directly
-from pure TypeScript in `lib/ffi/`.  No native binary is downloaded for Bun
-consumers — Bun loads the package's TypeScript directly via the `"bun"`
-exports condition.  Subsystems not yet ported to pure FFI fall back to napi.
+the underlying system libraries (libX11/libXtst/libXrandr, user32.dll, etc.)
+directly from pure TypeScript in `lib/ffi/`.  No native binary is downloaded
+for Bun consumers — Bun loads the package's TypeScript directly via the
+`"bun"` exports condition.  Subsystems not yet ported to pure FFI fall back
+to napi.
 
 Force a specific backend with `MECHATRON_BACKEND=napi|ffi`.  Query the
 selected backend with `getBackend("keyboard")`.

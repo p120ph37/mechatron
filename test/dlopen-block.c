@@ -3,7 +3,7 @@
  * a colon-separated substring list in `$MECHATRON_BLOCK_DLOPEN`.
  *
  * Used to force the FFI loader's "library unavailable" catch arms
- * in lib/ffi/x11.ts (libXtst.so.6, libXinerama.so.1) to fire in CI
+ * in lib/ffi/x11.ts (libXtst.so.6, libXrandr.so.2) to fire in CI
  * without physically uninstalling the libraries.  Any dlopen() call
  * whose path substring-matches one of the entries is denied with
  * dlerror="blocked by MECHATRON_BLOCK_DLOPEN"; all other loads pass
@@ -11,10 +11,10 @@
  *
  * Build:    cc -shared -fPIC -ldl -o dlopen-block.so dlopen-block.c
  * Use:      LD_PRELOAD=./dlopen-block.so \
- *             MECHATRON_BLOCK_DLOPEN=libXinerama.so.1 <cmd>
+ *             MECHATRON_BLOCK_DLOPEN=libXrandr.so.2 <cmd>
  *
  * Multiple libraries can be blocked at once via colon separation:
- *   MECHATRON_BLOCK_DLOPEN=libXinerama.so.1:libXtst.so.6
+ *   MECHATRON_BLOCK_DLOPEN=libXrandr.so.2:libXtst.so.6
  */
 
 #define _GNU_SOURCE
