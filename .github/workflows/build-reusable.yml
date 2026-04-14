@@ -193,6 +193,37 @@ jobs:
             test/memory-child.c -o "test/memory-child$EXT"
           ls -la "test/memory-child$EXT"
 
+      - name: Enable /dev/uinput
+        if: runner.os == 'Linux'
+        # Expose /dev/uinput to the test process so lib/ffi/uinput.ts can
+        # run its full open + UI_SET_*BIT + UI_DEV_SETUP + UI_DEV_CREATE
+        # dance.  Without this the ioctl paths (~150 LOC of FFI glue) sit
+        # uncovered.  GitHub's ubuntu-* runners ship the `uinput` kernel
+        # module but don't load it at boot and leave the device node
+        # root-only; we modprobe the module and chmod 0666 the node
+        # (simpler and more reliable than a udev rule + group change,
+        # which would need a relogin to take effect).  If the module
+        # can't be loaded on this runner image, we still proceed — the
+        # test harness skips the uinput-live assertions and only
+        # exercises the !ready branches (which is the default state for
+        # most of mechatron's consumers anyway).
+        run: |
+          sudo modprobe uinput || echo "modprobe uinput failed (module may be builtin or unavailable)"
+          # Wait briefly for the device node to appear; udev sometimes
+          # takes a tick after modprobe returns.
+          for _ in $(seq 1 50); do
+            [ -c /dev/uinput ] && break
+            sleep 0.1
+          done
+          if [ -c /dev/uinput ]; then
+            sudo chmod 0666 /dev/uinput
+            ls -l /dev/uinput
+          else
+            echo "WARNING: /dev/uinput not available on this runner"
+            uname -a
+            lsmod | grep -i uinput || true
+          fi
+
       - name: Build dlopen-block LD_PRELOAD shim
         if: runner.os == 'Linux'
         # Compile the selective dlopen-interception shim used to force the
@@ -398,6 +429,43 @@ jobs:
           #    Each variant is its own bun process so the loader re-runs
           #    tryDlopen() with the new LD_PRELOAD policy.  JUnit and lcov
           #    feed into the same aggregators as the base backends.
+          # ── Linux-only: FFI with MECHATRON_INPUT_MECHANISM=uinput.
+          #    Drives coverage of lib/ffi/uinput.ts (libc dlopen, ioctl
+          #    request encoding, event-burst writes) and the uinput
+          #    branches inside lib/ffi/keyboard.ts + lib/ffi/mouse.ts.
+          #    Only runs when /dev/uinput is writable (the "Enable
+          #    /dev/uinput" step above sets this up on ubuntu-*); the
+          #    tests themselves fall back to xtest when it isn't, so
+          #    failing to detect the device here just re-runs the ffi
+          #    backend with a different selector — no harm but also no
+          #    extra coverage.
+          if [ "${{ runner.os }}" = "Linux" ] && [ -w /dev/uinput ]; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-uinput.xml"
+            BE_COV_DIR="$COV_DIR/ffi-uinput"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND=ffi \
+            MECHATRON_INPUT_MECHANISM=uinput \
+              run_bun "ffi-uinput" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for ffi-uinput (MECHATRON_INPUT_MECHANISM=uinput) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="ffi-uinput-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="ffi-uinput backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          fi
+
           if [ "${{ runner.os }}" = "Linux" ]; then
             for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
               label="${variant%%:*}"
