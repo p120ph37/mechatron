@@ -28,7 +28,7 @@ jobs:
             arch: arm64
           - os: macos-14
             arch: arm64
-          - os: macos-14
+          - os: macos-14-large
             arch: x64
           - os: windows-2022
             arch: x64
@@ -52,24 +52,20 @@ jobs:
       #
       # The TEST runner needs to be able to load the matrix-arch native
       # modules, which means it must match the matrix arch:
-      #   - host-arch Bun for native cells (linux/win/mac native builds)
-      #   - legacy `node` fallback for Windows ia32 (no 32-bit Bun build)
-      #   - legacy `node` fallback for macOS x64 cross-compiled on arm64
-      #     (Bun's macOS x64 build — even the `-baseline` variant — uses
-      #     instructions Rosetta 2 doesn't emulate, e.g. BMI/F16C, and
-      #     SIGILLs immediately).  Coverage is skipped for these two
-      #     cells; their code paths are identical to the host-arch napi
-      #     cell, and FFI doesn't apply (ia32 has no Bun; macOS has no
-      #     FFI implementation).
+      #   - host-arch Bun for native cells (linux/win/mac native builds,
+      #     including macos-14-large for the x64 cell — a native Intel
+      #     runner that lets Bun's x64 binary run without Rosetta).
+      #   - legacy `node` fallback for Windows ia32 (no 32-bit Bun build).
+      # No Rosetta path is exercised anywhere — Bun's x64 binary SIGILLs
+      # under Rosetta 2 (BMI/F16C instructions aren't emulated), which is
+      # why the macOS x64 cell uses a native Intel runner instead of
+      # cross-compiling on arm64.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
-
-      - if: runner.os == 'macOS' && matrix.arch == 'x64'
-        run: softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Grant macOS TCC permissions
         if: runner.os == 'macOS'
@@ -92,19 +88,13 @@ jobs:
           sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
 
       - uses: dtolnay/rust-toolchain@stable
-        if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
+        if: matrix.arch != 'ia32'
 
       # Cross-compile Rust for ia32 needs i686 target
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.arch == 'ia32'
         with:
           targets: i686-pc-windows-msvc
-
-      # Cross-compile Rust for macOS x64 on arm64 runner
-      - uses: dtolnay/rust-toolchain@stable
-        if: runner.os == 'macOS' && matrix.arch == 'x64'
-        with:
-          targets: x86_64-apple-darwin
 
       - run: bun install --frozen-lockfile --ignore-scripts
 
@@ -114,10 +104,6 @@ jobs:
           cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CARGO_TARGET=i686-pc-windows-msvc
-            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
-            TARGET_DIR="target/$CARGO_TARGET/release"
-          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            CARGO_TARGET=x86_64-apple-darwin
             cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
             TARGET_DIR="target/$CARGO_TARGET/release"
           else
@@ -172,8 +158,6 @@ jobs:
           fi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CLANG_TARGET="--target=i686-pc-windows-msvc"
-          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
-            CLANG_TARGET="--target=x86_64-apple-darwin"
           else
             CLANG_TARGET=""
           fi
@@ -185,11 +169,11 @@ jobs:
         run: |
           # Test runner selection per matrix cell:
           #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows build).
-          #   - macOS x64 cross-compiled on arm64: legacy node runner via Rosetta
-          #     (Bun's macOS x64 binary, even -baseline, SIGILLs under Rosetta).
           #   - everything else: host Bun installed by oven-sh/setup-bun above.
-          # Coverage is skipped for the two node-fallback cells — their code
-          # paths are identical to the host-arch napi cell.
+          #     For macOS x64 this is a native Intel runner (macos-14-large),
+          #     so host-arch Bun matches matrix arch and FFI tests run.
+          # Coverage is skipped for Windows ia32 — its code path is identical
+          # to the host-arch napi cell.
           #
           # Bun's `--coverage` collects JavaScriptCore coverage natively, which
           # is the only way to attribute coverage to lib/ffi/*.ts (c8 only sees
@@ -210,27 +194,6 @@ jobs:
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
             JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
             run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE"
-            exit "$?"
-          fi
-
-          # ── macOS x64 on arm64 runner: legacy node runner via Rosetta ─────
-          # Only the napi backend is exercised — host-arch (arm64) Bun
-          # can't load matrix-arch (x64) native modules, and Bun's
-          # macOS x64 binary SIGILLs under Rosetta even with -baseline.
-          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
-            NODE_VERSION=$(node -v)
-            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
-            X64_NODE="$(pwd)/node-${NODE_VERSION}-darwin-x64/bin/node"
-            # Grant TCC for this binary too
-            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
-            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_NODE',1,2,4,1,0);" 2>/dev/null || true
-            done
-            sudo launchctl stop com.apple.tccd 2>/dev/null || true
-            sleep 1
-            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-            run_and_log sudo -E "$X64_NODE" test/test.js all --backend napi --junit "$JUNIT_FILE"
-            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" 2>/dev/null || true
             exit "$?"
           fi
 
