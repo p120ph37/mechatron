@@ -125,6 +125,16 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(typeof r6 === "boolean", "grabScreen Bounds + window-like");
 		}
 
+		// --- Oversize grab (handle-allocation failure path) ---
+		// Pushes CreateCompatibleBitmap / CGBitmapContextCreate / XGetImage past
+		// what the host can allocate.  The FFI backends each have a null-check
+		// arm for the allocation result; this test reaches it without crashing.
+		// Any well-behaved backend must either succeed (unlikely at 100000x100000)
+		// or return false without throwing.
+		var imgHuge = new Image();
+		var rHuge = Screen.grabScreen(imgHuge, 0, 0, 100000, 100000);
+		assert(typeof rHuge === "boolean", "oversize grabScreen returns boolean");
+
 		// --- Async variants ---
 		var pa1 = Screen.synchronizeAsync();
 		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");

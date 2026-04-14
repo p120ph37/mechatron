@@ -55,6 +55,16 @@ export interface BunFFI {
   CString: new (ptr: Pointer, byteOffset?: number, byteLength?: number) => string;
   /** Convert a JS string to a NUL-terminated buffer suitable as a `cstring` arg. */
   toBuffer?(value: string): Uint8Array;
+  /**
+   * JSCallback wraps a JS function as a native function pointer.  Used to
+   * install C-callable handlers like XSetErrorHandler so Xlib errors can be
+   * swallowed instead of triggering libX11's default handler (which calls
+   * exit(1) and kills the Bun process).
+   */
+  JSCallback: new (
+    fn: (...args: any[]) => any,
+    spec: { args?: number[]; returns?: number },
+  ) => { readonly ptr: Pointer; close(): void };
 }
 
 let _ffi: BunFFI | null | undefined;

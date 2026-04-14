@@ -115,6 +115,32 @@ let _display: Pointer = null;
 let _xtestAvailable = false;
 let _xineramaAvailable = false;
 
+// Keep a strong reference to the error-handler JSCallback — if it's GC'd
+// while Xlib still holds the function pointer, the next X error becomes a
+// SIGSEGV.  One handler per process is sufficient; Xlib stores the latest
+// pointer globally.
+let _errorHandler: { ptr: Pointer; close(): void } | null = null;
+
+function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
+  if (_errorHandler) return;
+  const T = ffi.FFIType;
+  try {
+    _errorHandler = new ffi.JSCallback(
+      // (Display* display, XErrorEvent* ev) -> int
+      // Ignore the error; Xlib will return normally and the calling
+      // wrapper observes the failure through its own return value.
+      () => 0,
+      { args: [T.ptr, T.ptr], returns: T.i32 },
+    );
+    x.XSetErrorHandler(_errorHandler.ptr);
+  } catch (_) {
+    // Older Bun versions without JSCallback leave the default handler
+    // in place; errors will still crash the process but at least the
+    // FFI backend loads.
+    _errorHandler = null;
+  }
+}
+
 function tryDlopen(): void {
   if (_opened) return;
   _opened = true;
@@ -220,6 +246,16 @@ function tryDlopen(): void {
     _xinerama = null;
     _xineramaAvailable = false;
   }
+
+  // Install a silent XErrorHandler BEFORE opening the display.  Without
+  // this, Xlib's built-in handler prints the error and calls exit(1) on
+  // any X protocol error (e.g. BadWindow when a window handle we obtained
+  // via XQueryTree is destroyed before we can read its properties — a
+  // benign TOCTOU race that happens constantly when enumerating windows
+  // under a live WM).  Returning 0 from the handler tells Xlib to
+  // continue; the calling API will observe the failure through its own
+  // return value (0/null/status != Success) and we handle it there.
+  installSilentErrorHandler(_ffi, _x11);
 
   _display = _x11.XOpenDisplay(_ffi.ptr(cstr("")));
 
