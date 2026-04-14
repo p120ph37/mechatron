@@ -122,6 +122,7 @@ interface Libc {
   free: (ptr: Pointer) => void;
   // dynamic-loader lookup — needed to resolve DATA symbols like
   // NSPasteboardTypeString (bun:ffi.dlopen wraps only function symbols).
+  dlopen: (path: Pointer, flags: number) => Pointer;
   dlsym: (handle: Pointer, name: Pointer) => Pointer;
 }
 
@@ -245,6 +246,7 @@ function tryDlopen(): void {
       task_get_exception_ports:     { args: [T.u32, T.u32, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr], returns: T.i32 },
       uname:                        { args: [T.ptr], returns: T.i32 },
       free:                         { args: [T.ptr], returns: T.void },
+      dlopen:                       { args: [T.ptr, T.i32], returns: T.ptr },
       dlsym:                        { args: [T.ptr, T.ptr], returns: T.ptr },
     });
     _libc = lib.symbols;
@@ -376,20 +378,29 @@ export function msgSendTyped(args: number[], returns: number): ((...a: any[]) =>
 }
 
 /**
- * Resolve a DATA symbol (e.g. `NSPasteboardTypeString`) loaded into the
- * process and return the pointer value stored at it.  `bun:ffi.dlopen`
- * only wraps *function* symbols, so we use `dlsym` directly with
- * `RTLD_DEFAULT` (search every loaded dylib) and then dereference the
- * resulting `NSString * const`.  Returns null if the symbol isn't loaded.
+ * Resolve a DATA symbol (e.g. `NSPasteboardTypeString`) from a loaded
+ * dylib and return the pointer value stored at it.  `bun:ffi.dlopen`
+ * only wraps function symbols, so we call `dlsym` directly.
+ *
+ * We can't use RTLD_DEFAULT as the handle: that's `(void *)-2`, whose
+ * 64-bit unsigned value (2^64-2) is above 2^63 and bun:ffi's T.ptr
+ * bigint-to-pointer conversion rejects it with "Unable to convert … to
+ * a pointer".  Instead, dlopen the containing dylib to get a real
+ * heap-range handle and dlsym against that.
  */
-const RTLD_DEFAULT: bigint = 0xFFFFFFFFFFFFFFFEn; // (void *)-2 on macOS
+const RTLD_LAZY = 1;
+let _appkitHandle: Pointer = null;
 const _dataSymCache = new Map<string, Pointer>();
 export function resolveDataSymbol(name: string): Pointer {
   if (_dataSymCache.has(name)) return _dataSymCache.get(name)!;
   const lc = libc();
   const F = macFFI();
   if (!lc || !F) return null;
-  const addr = lc.dlsym(RTLD_DEFAULT as unknown as Pointer, F.ptr(cstr(name)));
+  if (!_appkitHandle) {
+    _appkitHandle = lc.dlopen(F.ptr(cstr(AK_PATH)), RTLD_LAZY);
+    if (!_appkitHandle) { _dataSymCache.set(name, null); return null; }
+  }
+  const addr = lc.dlsym(_appkitHandle, F.ptr(cstr(name)));
   if (!addr) { _dataSymCache.set(name, null); return null; }
   // `addr` points to the `void * const` slot; read through to the object.
   const val = F.read.ptr(addr);
