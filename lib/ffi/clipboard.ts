@@ -18,7 +18,7 @@
 import { user32, kernel32, winFFI, w2js, js2w } from "./win";
 import {
   cg, cf, objc, macFFI, hasAppKit,
-  cls, sel, msgSendTyped, cfStringFromJS, cfStringToJS, resolveDataSymbol,
+  cls, sel, msgSendTyped, cfStringFromJS, cfStringToJS,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
 import type { Pointer } from "./bun";
@@ -246,6 +246,21 @@ function winSequence(): number {
 
 // ── macOS helpers ─────────────────────────────────────────────────────
 
+// NSPasteboardTypeString is the UTI string "public.utf8-plain-text".
+// NSPasteboard matches pasteboard types as UTIs (value-compared via
+// isEqualToString:), not by pointer identity against the AppKit-exported
+// singleton, so a freshly-allocated CFString with the same content is
+// equivalent.  Avoiding dlsym'ing the real singleton also avoids bun:ffi's
+// `F.read.ptr()` truncating high-bit bigint returns through a JS number
+// round-trip, which corrupts tagged-pointer class bits and leaves ObjC
+// interpreting the result as an `__NSTaggedDate`.
+let _macTypeStr: Pointer = null;
+function macTypeString(): Pointer {
+  if (_macTypeStr) return _macTypeStr;
+  _macTypeStr = cfStringFromJS("public.utf8-plain-text");
+  return _macTypeStr;
+}
+
 function macGeneralPasteboard(): Pointer {
   const F = macFFI(); if (!F) return null;
   const T = F.FFIType;
@@ -290,7 +305,7 @@ function macHasText(): boolean {
   if (!F || !O) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
-  const typeStr = resolveDataSymbol("NSPasteboardTypeString");
+  const typeStr = macTypeString();
   if (!typeStr) return false;
   const pool = O.objc_autoreleasePoolPush();
   try {
@@ -311,7 +326,7 @@ function macGetText(): string {
   if (!F || !O) return "";
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return "";
-  const typeStr = resolveDataSymbol("NSPasteboardTypeString");
+  const typeStr = macTypeString();
   if (!typeStr) return "";
   const pool = O.objc_autoreleasePoolPush();
   try {
@@ -332,15 +347,13 @@ function macSetText(text: string): boolean {
   if (!F || !C || !O) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
-  // Mirror the napi backend's exact path:
+  // Mirror the napi backend's path:
   //   board.clearContents();
   //   board.setString_forType(NSString::from_str(text), NSPasteboardTypeString);
-  // The AppKit-exported `NSPasteboardTypeString` is a pointer-identical
-  // singleton; modern NSPasteboard auto-declares the type on first
-  // setString:, so we don't need declareTypes:owner:.  Our local
-  // autorelease pool covers intermediate ObjC allocations (no Cocoa
-  // event loop in pure-FFI context).
-  const typeStr = resolveDataSymbol("NSPasteboardTypeString");
+  // Modern NSPasteboard auto-declares the type on first setString:, so we
+  // don't need declareTypes:owner:.  Our local autorelease pool covers
+  // intermediate ObjC allocations (no Cocoa event loop in pure-FFI).
+  const typeStr = macTypeString();
   if (!typeStr) return false;
   const pool = O.objc_autoreleasePoolPush();
   const str = cfStringFromJS(text);
