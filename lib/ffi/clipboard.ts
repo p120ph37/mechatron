@@ -18,7 +18,7 @@
 import { user32, kernel32, winFFI, w2js, js2w } from "./win";
 import {
   cg, cf, objc, macFFI, hasAppKit,
-  cls, sel, msgSendTyped, cfStringFromJS, cfStringToJS,
+  cls, sel, msgSendTyped, cfStringFromJS, cfStringToJS, resolveDataSymbol,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
 import type { Pointer } from "./bun";
@@ -286,32 +286,34 @@ function macClear(): boolean {
 
 function macHasText(): boolean {
   if (!hasAppKit()) return false;
-  const F = macFFI(); const C = cf();
-  if (!F || !C) return false;
+  const F = macFFI(); const O = objc();
+  if (!F || !O) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
-  const typeStr = cfStringFromJS("public.utf8-plain-text");
+  const typeStr = resolveDataSymbol("NSPasteboardTypeString");
   if (!typeStr) return false;
-  const arr = macArrayWithOne(typeStr);
+  const pool = O.objc_autoreleasePoolPush();
   try {
+    const arr = macArrayWithOne(typeStr);
     if (!arr) return false;
     const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
     if (!send) return false;
     const r = send(board, sel("availableTypeFromArray:"), arr);
     return !!r && r !== 0n;
   } finally {
-    C.CFRelease(typeStr);
+    O.objc_autoreleasePoolPop(pool);
   }
 }
 
 function macGetText(): string {
   if (!hasAppKit()) return "";
-  const F = macFFI(); const C = cf();
-  if (!F || !C) return "";
+  const F = macFFI(); const O = objc();
+  if (!F || !O) return "";
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return "";
-  const typeStr = cfStringFromJS("public.utf8-plain-text");
+  const typeStr = resolveDataSymbol("NSPasteboardTypeString");
   if (!typeStr) return "";
+  const pool = O.objc_autoreleasePoolPush();
   try {
     const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
     if (!send) return "";
@@ -320,7 +322,7 @@ function macGetText(): string {
     // NSString is toll-free bridged with CFStringRef.
     return cfStringToJS(nsStr);
   } finally {
-    C.CFRelease(typeStr);
+    O.objc_autoreleasePoolPop(pool);
   }
 }
 
@@ -330,27 +332,25 @@ function macSetText(text: string): boolean {
   if (!F || !C || !O) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
-  // Running from pure FFI there's no Cocoa event loop, so no ambient
-  // autorelease pool.  Both `[NSArray arrayWithObject:]` and the
-  // internal machinery of `writeObjects:` / `setString:forType:` create
-  // autoreleased objects, and without a drain target some Bun+AppKit
-  // combinations segfault.  Wrap the whole op in a local pool.
+  // Mirror the napi backend's exact path:
+  //   board.clearContents();
+  //   board.setString_forType(NSString::from_str(text), NSPasteboardTypeString);
+  // The AppKit-exported `NSPasteboardTypeString` is a pointer-identical
+  // singleton; modern NSPasteboard auto-declares the type on first
+  // setString:, so we don't need declareTypes:owner:.  Our local
+  // autorelease pool covers intermediate ObjC allocations (no Cocoa
+  // event loop in pure-FFI context).
+  const typeStr = resolveDataSymbol("NSPasteboardTypeString");
+  if (!typeStr) return false;
   const pool = O.objc_autoreleasePoolPush();
   const str = cfStringFromJS(text);
   try {
     if (!str) return false;
-    // clearContents + writeObjects:@[str].  With the autorelease pool
-    // active the `writeObjects:` segfault is gone; and because our
-    // cfStringFromJS returns a heap-allocated (non-tagged) CFMutableString,
-    // NSString's toll-free bridge exposes it as a proper NSPasteboardWriting
-    // object that self-registers `public.utf8-plain-text`.
     const clear = msgSendTyped([T.ptr, T.ptr], T.void);
     if (clear) clear(board, sel("clearContents"));
-    const arr = macArrayWithOne(str);
-    if (!arr) return false;
-    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.i8);
+    const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
     if (!send) return false;
-    const r = send(board, sel("writeObjects:"), arr);
+    const r = send(board, sel("setString:forType:"), str, typeStr);
     return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
   } finally {
     if (str) C.CFRelease(str);
