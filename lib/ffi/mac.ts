@@ -78,7 +78,8 @@ interface CoreGraphics {
 
 interface CoreFoundation {
   CFRelease: (cf: Pointer) => void;
-  CFStringCreateWithCString: (alloc: Pointer, str: Pointer, encoding: number) => Pointer;
+  CFStringCreateMutable: (alloc: Pointer, maxLength: bigint) => Pointer;
+  CFStringAppendCString: (s: Pointer, cstr: Pointer, encoding: number) => void;
   CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => number;
   CFStringGetLength: (s: Pointer) => bigint;
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
@@ -187,7 +188,8 @@ function tryDlopen(): void {
   try {
     const lib = _ffi.dlopen<CoreFoundation>(CF_PATH, {
       CFRelease:                          { args: [T.ptr], returns: T.void },
-      CFStringCreateWithCString:          { args: [T.ptr, T.ptr, T.u32], returns: T.ptr },
+      CFStringCreateMutable:              { args: [T.ptr, T.i64], returns: T.ptr },
+      CFStringAppendCString:              { args: [T.ptr, T.ptr, T.u32], returns: T.void },
       CFStringGetCString:                 { args: [T.ptr, T.ptr, T.u64, T.u32], returns: T.i32 },
       CFStringGetLength:                  { args: [T.ptr], returns: T.i64 },
       CFStringGetMaximumSizeForEncoding:  { args: [T.i64, T.u32], returns: T.i64 },
@@ -369,12 +371,28 @@ export function msgSendTyped(args: number[], returns: number): ((...a: any[]) =>
   }
 }
 
-/** Build a CFString from a JS string.  Caller must CFRelease() the result. */
+/**
+ * Build a CFString from a JS string.  Caller must CFRelease() the result.
+ *
+ * We deliberately avoid `CFStringCreateWithCString`, which returns a
+ * *tagged pointer* for short ASCII strings on arm64 Darwin.  Tagged CFStrings
+ * encode their class index in the top bits of the 64-bit pointer, producing
+ * pointer values above 2^53 — which bun:ffi's `T.ptr` round-trip silently
+ * truncates to JS number, corrupting the class-tag bits.  The ObjC runtime
+ * then sees the corrupted pointer as an `__NSTaggedDate`, and
+ * `[NSPasteboard writeObjects:]` rejects it for not conforming to
+ * `NSPasteboardWriting`.  `CFStringCreateMutable` always returns a
+ * heap-allocated pointer (low 48 bits, safely below 2^53), sidestepping the
+ * whole class of bugs.
+ */
 export function cfStringFromJS(s: string): Pointer {
   const C = cf();
   const F = macFFI();
   if (!C || !F) return null;
-  return C.CFStringCreateWithCString(null, F.ptr(cstr(s)), kCFStringEncodingUTF8);
+  const m = C.CFStringCreateMutable(null, 0n);
+  if (!m) return null;
+  C.CFStringAppendCString(m, F.ptr(cstr(s)), kCFStringEncodingUTF8);
+  return m;
 }
 
 /** Decode a CFStringRef to JS.  Does not release the CFString. */

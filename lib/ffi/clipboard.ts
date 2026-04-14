@@ -330,24 +330,29 @@ function macSetText(text: string): boolean {
   if (!F || !C) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
+  const typeStr = cfStringFromJS("public.utf8-plain-text");
+  if (!typeStr) return false;
   const str = cfStringFromJS(text);
-  if (!str) return false;
+  if (!str) { C.CFRelease(typeStr); return false; }
   try {
-    // `-[NSPasteboard setString:forType:]` raises an ObjC exception when the
-    // type hasn't been previously declared on the pasteboard — `clearContents`
-    // clears the declared-types list, so pairing them is wrong.  Use the
-    // modern `writeObjects:` API instead; NSString conforms to
-    // NSPasteboardWriting and registers `public.utf8-plain-text` itself.
-    const clear = msgSendTyped([T.ptr, T.ptr], T.void);
-    if (clear) clear(board, sel("clearContents"));
-    const arr = macArrayWithOne(str);
-    if (!arr) return false;
-    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.i8);
+    // Use the classic declareTypes:owner: + setString:forType: pair, which
+    // works without an autorelease pool (unlike clearContents:+writeObjects:,
+    // where `[NSArray arrayWithObject:]` returns an autoreleased array that
+    // has nowhere to land from pure FFI).  declareTypes: itself bumps the
+    // changeCount and registers the single type we care about; setString:
+    // then succeeds because the type is declared.
+    const declare = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i64);
+    if (!declare) return false;
+    const typesArr = macArrayWithOne(typeStr);
+    if (!typesArr) return false;
+    declare(board, sel("declareTypes:owner:"), typesArr, null);
+    const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
     if (!send) return false;
-    const r = send(board, sel("writeObjects:"), arr);
+    const r = send(board, sel("setString:forType:"), str, typeStr);
     return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
   } finally {
     C.CFRelease(str);
+    C.CFRelease(typeStr);
   }
 }
 
