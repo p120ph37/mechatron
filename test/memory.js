@@ -464,6 +464,45 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			try { _child.kill(); } catch (_) {}
 		}
 
+		// --- task_for_pid failure path (macOS, non-root -> root process) ---
+		// On macOS CI the test suite runs as root (sudo -E).  Spawn a
+		// helper child with uid dropped to `nobody` and target launchd
+		// (pid 1, root-owned).  task_for_pid() returns KERN_FAILURE for
+		// an unprivileged caller against a privileged target, which
+		// exercises the `task_for_pid(...) !== 0 -> return 0` arm in
+		// macGetTask (lib/ffi/memory.ts line ~124, lib/ffi/process.ts
+		// line ~151).  The non-root drop is preferred over targeting a
+		// hardened binary because SIP-disabled CI hosts can sometimes
+		// bypass hardened runtime restrictions, while a root-owned task
+		// always denies an unprivileged task_for_pid.
+		if (process.platform === "darwin" &&
+			typeof process.getuid === "function" &&
+			process.getuid() === 0) {
+			var _nrScript =
+				"var m = require(" + JSON.stringify(_path.resolve(__dirname, "..")) + ");" +
+				"var p = new m.Process(); p.open(1);" +
+				"var mem = new m.Memory(p);" +
+				"process.exit(mem.isValid() ? 1 : 0);";
+			var _nrResult = null;
+			try {
+				_nrResult = _cp.spawnSync(process.execPath,
+					["-e", _nrScript],
+					{
+						uid: -2, gid: -2,   // macOS "nobody"
+						stdio: ["ignore", "inherit", "inherit"],
+						env: process.env,
+						timeout: 30000,
+					});
+			} catch (_) { _nrResult = null; }
+			if (_nrResult && _nrResult.status !== null && !_nrResult.error) {
+				assert(_nrResult.status === 0,
+					"non-root Memory(pid=1) invalid (task_for_pid denied)");
+			} else {
+				expectOrSkip("task_for_pid-nonroot", "task_for_pid non-root drop");
+				log("(non-root helper unavailable) ");
+			}
+		}
+
 		// --- Multi-value (count > 1) typed reads ---
 		if (readable && readable.size >= 32) {
 			var mv8 = mem.readInt8(readable.start, 4);
