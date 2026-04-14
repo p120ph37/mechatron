@@ -28,7 +28,13 @@ jobs:
             arch: arm64
           - os: macos-14
             arch: arm64
-          - os: macos-14-large
+          # macOS x64: run on the Sequoia arm64 runner and cross-compile +
+          # use Rosetta 2 for the test binary.  Rosetta 2 on macOS 15 gained
+          # support for AVX/AVX2/BMI1/BMI2/F16C — the ISA extensions that
+          # Bun's x64 binary requires — so bun-darwin-x64-baseline runs
+          # under Rosetta there.  Native Intel runners (macos-*-large /
+          # macos-15-intel) exist but are paid-tier only for this repo.
+          - os: macos-15
             arch: x64
           - os: windows-2022
             arch: x64
@@ -52,20 +58,22 @@ jobs:
       #
       # The TEST runner needs to be able to load the matrix-arch native
       # modules, which means it must match the matrix arch:
-      #   - host-arch Bun for native cells (linux/win/mac native builds,
-      #     including macos-14-large for the x64 cell — a native Intel
-      #     runner that lets Bun's x64 binary run without Rosetta).
-      #   - legacy `node` fallback for Windows ia32 (no 32-bit Bun build).
-      # No Rosetta path is exercised anywhere — Bun's x64 binary SIGILLs
-      # under Rosetta 2 (BMI/F16C instructions aren't emulated), which is
-      # why the macOS x64 cell uses a native Intel runner instead of
-      # cross-compiling on arm64.
+      #   - host-arch Bun for native cells (linux/win/mac arm64).
+      #   - macOS x64: download bun-darwin-x64-baseline and run it under
+      #     Rosetta 2 on the Sequoia arm64 runner (macos-15 gained
+      #     AVX/AVX2/BMI/F16C emulation, which earlier Rosetta lacked —
+      #     previously Bun's x64 binary SIGILL'd on macos-14 Sonoma).
+      #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows
+      #     build) — runs the napi backend only.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
+
+      - if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Grant macOS TCC permissions
         if: runner.os == 'macOS'
@@ -88,13 +96,19 @@ jobs:
           sudo sqlite3 "$TCC_DB" "SELECT service,client FROM access WHERE client='$NODE_BIN';" 2>/dev/null || echo "(TCC.db read blocked by SIP)"
 
       - uses: dtolnay/rust-toolchain@stable
-        if: matrix.arch != 'ia32'
+        if: matrix.arch != 'ia32' && !(runner.os == 'macOS' && matrix.arch == 'x64')
 
       # Cross-compile Rust for ia32 needs i686 target
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.arch == 'ia32'
         with:
           targets: i686-pc-windows-msvc
+
+      # Cross-compile Rust for macOS x64 on arm64 runner
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        with:
+          targets: x86_64-apple-darwin
 
       - run: bun install --frozen-lockfile --ignore-scripts
 
@@ -104,6 +118,10 @@ jobs:
           cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CARGO_TARGET=i686-pc-windows-msvc
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
+            TARGET_DIR="target/$CARGO_TARGET/release"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            CARGO_TARGET=x86_64-apple-darwin
             cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
             TARGET_DIR="target/$CARGO_TARGET/release"
           else
@@ -158,6 +176,8 @@ jobs:
           fi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CLANG_TARGET="--target=i686-pc-windows-msvc"
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
+            CLANG_TARGET="--target=x86_64-apple-darwin"
           else
             CLANG_TARGET=""
           fi
@@ -169,9 +189,10 @@ jobs:
         run: |
           # Test runner selection per matrix cell:
           #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows build).
+          #   - macOS x64 on arm64 Sequoia runner: download bun-darwin-x64-baseline
+          #     and run it under Rosetta 2 (`arch -x86_64`).  macOS 15 Rosetta
+          #     emulates AVX/AVX2/BMI/F16C, which prior releases didn't.
           #   - everything else: host Bun installed by oven-sh/setup-bun above.
-          #     For macOS x64 this is a native Intel runner (macos-14-large),
-          #     so host-arch Bun matches matrix arch and FFI tests run.
           # Coverage is skipped for Windows ia32 — its code path is identical
           # to the host-arch napi cell.
           #
@@ -206,6 +227,28 @@ jobs:
             WRAP=(sudo -E)
           else
             WRAP=()
+          fi
+
+          # ── macOS x64 on arm64 runner: swap in x64 Bun under Rosetta ──────
+          # The host-arch Bun (arm64) loads arm64 native modules, which don't
+          # match the matrix-arch (x64) prebuilds.  Download Bun's x64
+          # baseline tarball and invoke it via `arch -x86_64` so Rosetta 2
+          # translates the x86_64 code (including JIT output) to arm64.
+          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            curl -sL "https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64-baseline.zip" -o /tmp/bun-x64.zip
+            unzip -q /tmp/bun-x64.zip -d /tmp/
+            X64_BUN="/tmp/bun-darwin-x64-baseline/bun"
+            chmod +x "$X64_BUN"
+            BUN="$X64_BUN"
+            # Prepend `arch -x86_64` so child process runs under Rosetta.
+            WRAP+=(arch -x86_64)
+            # Grant TCC for this binary too
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_BUN',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
           fi
 
           # ── Backends per platform ─────────────────────────────────────────
