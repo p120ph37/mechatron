@@ -52,7 +52,6 @@ function napiNodeFile(subsystem: string): string {
 
 const _cache: Partial<Record<Subsystem, any>> = {};
 const _backend: Partial<Record<Subsystem, Backend>> = {};
-const _errors: Partial<Record<Subsystem, Error>> = {};
 
 function tryLoadNapi(subsystem: Subsystem): any | null {
   try {
@@ -68,18 +67,12 @@ function tryLoadNapi(subsystem: Subsystem): any | null {
 
 function tryLoadFfi(subsystem: Subsystem): any | null {
   if (!IS_BUN) return null;
-  // Each FFI module is a sibling .ts file under ./ffi/.  We try to require
-  // it by name; any subsystem that hasn't been ported yet simply doesn't
-  // exist as a module and we return null so the caller can fall back.
+  // Each FFI module is a sibling .ts file under ./ffi/.  Any subsystem
+  // that hasn't been ported yet simply doesn't exist as a module, and
+  // require() throws — returning null lets the caller fall back to napi.
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require(`./ffi/${subsystem}`);
-    // Sanity-check that the module exported at least one symbol — empty
-    // modules are treated as "not implemented".
-    for (const k in mod) {
-      if (typeof mod[k] === "function") return mod;
-    }
-    return null;
+    return require(`./ffi/${subsystem}`);
   } catch (_) {
     return null;
   }
@@ -87,7 +80,6 @@ function tryLoadFfi(subsystem: Subsystem): any | null {
 
 function tryLoad(subsystem: Subsystem): any | null {
   if (_cache[subsystem]) return _cache[subsystem];
-  if (_errors[subsystem]) return null;
 
   const forced = envBackend();
   const order: Backend[] =
@@ -105,20 +97,19 @@ function tryLoad(subsystem: Subsystem): any | null {
     }
   }
 
-  _errors[subsystem] = new Error(
-    `mechatron: native module for "${subsystem}" is not available. ` +
-    `Install @mechatronic/napi-${subsystem} or build from source` +
-    (IS_BUN ? `, or use a Bun runtime with the FFI backend implemented for this subsystem` : "") +
-    "."
-  );
   return null;
 }
 
 /** Load the native module for a subsystem, throwing if unavailable. */
 export function getNative(subsystem: Subsystem): any {
   const mod = tryLoad(subsystem);
-  if (!mod) throw _errors[subsystem]!;
-  return mod;
+  if (mod) return mod;
+  throw new Error(
+    `mechatron: native module for "${subsystem}" is not available. ` +
+    `Install @mechatronic/napi-${subsystem} or build from source` +
+    (IS_BUN ? `, or use a Bun runtime with the FFI backend implemented for this subsystem` : "") +
+    "."
+  );
 }
 
 /** Check whether a subsystem's native module can be loaded. */
