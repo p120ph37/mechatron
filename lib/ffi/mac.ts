@@ -337,31 +337,32 @@ export function sel(name: string): Pointer {
 /**
  * Build a typed callable for objc_msgSend with the given signature.
  *
- * `bun:ffi`'s `CFunction({ args, returns, ptr })` takes a raw function
- * pointer and wraps it with a new type signature.  This lets us resolve
- * `objc_msgSend` *once* and then call it with any number of parameter
- * layouts — otherwise we'd have to dlopen the symbol separately for each
- * Objective-C method signature we dispatch to.
+ * Each unique Objective-C method signature we dispatch to needs its own
+ * FFI-typed view of `objc_msgSend`.  Bun's `bun:ffi` ties symbol types to
+ * the `dlopen()` call rather than to individual invocations, so we re-
+ * `dlopen` libobjc with the requested signature and cache the resulting
+ * callable by signature key.  This avoids relying on `CFunction({ ptr })`
+ * / `symbol.ptr`, which are unreliable across Bun versions.
  */
+const _msgSendCache = new Map<string, (...a: any[]) => any>();
+
 export function msgSendTyped(args: number[], returns: number): ((...a: any[]) => any) | null {
-  const o = objc();
   const F = macFFI();
-  if (!o || !F) return null;
-  const CFunction = (F as any).CFunction;
-  if (!CFunction) return null;
-  // The plain objc_msgSend symbol pointer: we get a bigint back from
-  // reading the symbol.  Bun's dlopen populates symbols as functions;
-  // the underlying ptr is available via `.ptr` or by dlopening the same
-  // lib with a different key as `{ ptr: true }`.  Easiest is to dlopen
-  // just objc_msgSend and grab its .ptr.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const msgSend = o.objc_msgSend as any;
-  const ptr = msgSend.ptr ?? msgSend;
-  const fn = new CFunction({ args, returns, ptr });
-  // CFunction may return a callable directly, or an object with `.call`.
-  if (typeof fn === "function") return fn;
-  if (typeof fn?.call === "function") return (...a: any[]) => fn.call(...a);
-  return null;
+  if (!F) return null;
+  const key = args.join(",") + "=>" + returns;
+  const cached = _msgSendCache.get(key);
+  if (cached) return cached;
+  try {
+    const lib = F.dlopen<{ objc_msgSend: (...a: any[]) => any }>(
+      "/usr/lib/libobjc.A.dylib",
+      { objc_msgSend: { args, returns } },
+    );
+    const fn = lib.symbols.objc_msgSend;
+    _msgSendCache.set(key, fn);
+    return fn;
+  } catch (_) {
+    return null;
+  }
 }
 
 /** Build a CFString from a JS string.  Caller must CFRelease() the result. */

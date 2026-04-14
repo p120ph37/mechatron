@@ -299,8 +299,10 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
         const rp = m.realpath(F.ptr(zeroTerm), null);
         if (rp && (rp as any) !== 0n) {
           // Read the returned C string via the FFI CString helper.
+          // `new CString(ptr)` returns a String-wrapper object; coerce to
+          // a primitive string (otherwise `typeof` reports "object").
           const CString = (F as any).CString;
-          resolved = CString ? new CString(rp) as string : raw;
+          resolved = CString ? String(new CString(rp)) : raw;
           m.free(rp);
         } else {
           resolved = raw;

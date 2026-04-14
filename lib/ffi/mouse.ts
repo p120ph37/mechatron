@@ -32,8 +32,8 @@ import {
   kCGEventOtherMouseDown, kCGEventOtherMouseUp,
   kCGMouseButtonLeft, kCGMouseButtonRight, kCGMouseButtonCenter,
   kCGScrollEventUnitPixel,
-  kCGMouseEventButtonNumber,
 } from "./mac";
+import type { Pointer } from "./bun";
 
 // Button constants (must match lib/mouse/constants.ts)
 const BUTTON_LEFT = 0;
@@ -264,20 +264,31 @@ function mac_cgButton(button: number): { type_down: number; type_up: number; cg_
   }
 }
 
+// Shared HID event source (cheaper than recreating it per call).
+let _macMouseSource: Pointer = null;
+function macMouseSource(): Pointer {
+  if (_macMouseSource) return _macMouseSource;
+  const C = cg(); if (!C) return null;
+  _macMouseSource = C.CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+  return _macMouseSource;
+}
+
+// Last-known cursor position.  `CGEventGetLocation` returns a CGPoint by
+// value which bun:ffi can't retrieve, so we track position ourselves via
+// `setPos`.  `getPos` returns the cached value.
+let _macLastPos = { x: 0, y: 0 };
+
 function mac_mouse_press(button: number): void {
   const C = cg();
   const F = cf();
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
-  // We can't call CGEventGetLocation to read the current cursor pos
-  // (struct-by-value return is unsupported by bun:ffi), so we create a
-  // null-sourced event, stamp the button number, and set its type.  This
-  // mirrors what the Core Graphics developer docs describe for
-  // button-only injection.
-  const evt = C.CGEventCreate(null);
+  const src = macMouseSource();
+  // CGPoint is passed as two f64 args (see mac.ts CGEventCreateMouseEvent
+  // signature).  Posting at the tracked last position matches the napi
+  // backend's behavior closely enough for HID state-source updates.
+  const evt = C.CGEventCreateMouseEvent(src, spec.type_down, _macLastPos.x, _macLastPos.y, spec.cg_btn);
   if (!evt) return;
-  C.CGEventSetType(evt, spec.type_down);
-  C.CGEventSetIntegerValueField(evt, kCGMouseEventButtonNumber, BigInt(spec.cg_btn));
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -287,10 +298,9 @@ function mac_mouse_release(button: number): void {
   const F = cf();
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
-  const evt = C.CGEventCreate(null);
+  const src = macMouseSource();
+  const evt = C.CGEventCreateMouseEvent(src, spec.type_up, _macLastPos.x, _macLastPos.y, spec.cg_btn);
   if (!evt) return;
-  C.CGEventSetType(evt, spec.type_up);
-  C.CGEventSetIntegerValueField(evt, kCGMouseEventButtonNumber, BigInt(spec.cg_btn));
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -318,10 +328,9 @@ function mac_mouse_scrollH(amount: number): void {
 
 function mac_mouse_getPos(): { x: number; y: number } {
   // CGEventGetLocation returns CGPoint by value; bun:ffi can't retrieve
-  // both components.  Returning {0,0} so Keyboard test helpers see a
-  // deterministic value; `expectOrSkip("mousePos", …)` handles the
-  // platform-cell-specific skip.
-  return { x: 0, y: 0 };
+  // both components.  We return the last position we warped the cursor
+  // to instead — accurate as long as all movement goes through setPos.
+  return { x: _macLastPos.x, y: _macLastPos.y };
 }
 
 function mac_mouse_setPos(x: number, y: number): void {
@@ -331,6 +340,7 @@ function mac_mouse_setPos(x: number, y: number): void {
   // Immediately re-associate so the system mouse tracks the synthesized
   // position (matches napi backend behavior).
   C.CGAssociateMouseAndMouseCursorPosition(1);
+  _macLastPos = { x, y };
 }
 
 function mac_mouse_getButtonState(button: number): boolean {
