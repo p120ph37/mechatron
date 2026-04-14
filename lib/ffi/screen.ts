@@ -1,9 +1,10 @@
 /**
  * Screen subsystem — pure FFI implementation.
  *
- * Linux: enumerates monitors via Xinerama (preferred) or X screen list, with
- * usable area from `_NET_WORKAREA`.  Captures pixels with XGetImage +
- * XGetPixel using the visual's red/green/blue masks.
+ * Linux: enumerates monitors via XRandR 1.5 (XRRGetMonitors, preferred)
+ * or the X screen list, with usable area from `_NET_WORKAREA`.  Captures
+ * pixels with XGetImage + XGetPixel using the visual's red/green/blue
+ * masks.
  *
  * Windows: EnumDisplayMonitors + MONITORINFO for layout; BitBlt + GetDIBits
  * for capture.
@@ -16,7 +17,7 @@
  */
 
 import {
-  x11, ffi as x11ffi, xinerama, isXineramaAvailable, getDisplay,
+  x11, ffi as x11ffi, xrandr, isXrandrAvailable, getDisplay,
   ZPixmap, AllPlanes, XA_CARDINAL, AnyPropertyType, True, False,
 } from "./x11";
 import { user32, kernel32, gdi32, winFFI } from "./win";
@@ -31,11 +32,6 @@ interface RawRect { x: number; y: number; w: number; h: number; }
 export interface ScreenInfo { bounds: RawRect; usable: RawRect; }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function intersects(a: RawRect, b: RawRect): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x
-      && a.y < b.y + b.h && a.y + a.h > b.y;
-}
 
 function intersectBounds(a: RawRect, b: RawRect): RawRect {
   const l = Math.max(a.x, b.x);
@@ -55,49 +51,61 @@ function linuxSynchronize(): ScreenInfo[] | null {
 
   const screens: { bounds: RawRect; usable: RawRect }[] = [];
 
-  // Try Xinerama first
-  let usedXinerama = false;
+  // Prefer XRandR 1.5 (XRRGetMonitors) over the older Xinerama query:
+  // RandR exposes a primary-monitor flag and per-output metadata that
+  // Xinerama lacks, and has shipped with X.org since 2015.  The
+  // dlopen-catch path in x11.ts leaves isXrandrAvailable() == false when
+  // libXrandr.so.2 isn't present, at which point we fall through to the
+  // single-XScreenOfDisplay branch below.
+  let usedXrandr = false;
   const count = X.XScreenCount(d);
-  if (count === 1 && isXineramaAvailable()) {
-    const xine = xinerama();
-    if (xine && xine.XineramaIsActive(d) === True) {
-      const xCount = new Int32Array(1);
-      const info = xine.XineramaQueryScreens(d, F.ptr(xCount)) as bigint | null;
-      const n = xCount[0];
-      if (info && (info as bigint) !== 0n && n > 0) {
+  if (isXrandrAvailable()) {
+    const xrr = xrandr();
+    if (xrr) {
+      const root = X.XDefaultRootWindow(d);
+      const nOut = new Int32Array(1);
+      // get_active=1 filters out disabled outputs so we don't enumerate
+      // monitors that aren't currently driving a display.
+      const info = xrr.XRRGetMonitors(d, root, True, F.ptr(nOut)) as bigint | number | null;
+      const n = nOut[0];
+      if (info && (info as bigint | number) !== 0n && (info as bigint | number) !== 0 && n > 0) {
         // Bun's read.* rejects bigint ptr args; convert to Number (userspace
         // VAs fit in 48 bits on Linux so this is lossless).
         const infoN = Number(info);
+        // XRRMonitorInfo on LP64 (56 bytes):
+        //   Atom name            @ 0  (u64)
+        //   Bool primary         @ 8  (i32)
+        //   Bool automatic       @ 12 (i32)
+        //   int  noutput         @ 16
+        //   int  x               @ 20
+        //   int  y               @ 24
+        //   int  width           @ 28
+        //   int  height          @ 32
+        //   int  mwidth          @ 36
+        //   int  mheight         @ 40
+        //   (4 bytes padding    @ 44)
+        //   RROutput *outputs    @ 48 (u64)
+        const STRIDE = 56;
+        let primaryIdx: number | null = null;
         for (let i = 0; i < n; i++) {
-          const off = i * 12;
-          // XineramaScreenInfo: i32 screen_number, i16 x_org, i16 y_org, i16 width, i16 height
-          const xOrg = (F.read.u32(infoN, off + 4) << 16) >> 16;  // sign-extend i16 from low 16 bits
-          // Actually F.read doesn't have i16; manually read 4 bytes and split
-          // Instead, read u32 at off+4 and decode two i16 LE values:
-          const word1 = F.read.u32(infoN, off + 4);
-          const x_org = (word1 & 0xFFFF) << 16 >> 16;
-          const y_org = (word1 >>> 16) << 16 >> 16;
-          const word2 = F.read.u32(infoN, off + 8);
-          const width = (word2 & 0xFFFF) << 16 >> 16;
-          const height = (word2 >>> 16) << 16 >> 16;
-          const bounds: RawRect = { x: x_org, y: y_org, w: width, h: height };
-
-          if (screens.length > 0) {
-            const last = screens[screens.length - 1];
-            if (intersects(last.bounds, bounds)) {
-              const la = last.bounds.w * last.bounds.h;
-              const ba = bounds.w * bounds.h;
-              if (ba > la) {
-                last.bounds = bounds;
-                last.usable = bounds;
-              }
-              continue;
-            }
-          }
+          const off = i * STRIDE;
+          const primary = F.read.i32(infoN, off + 8);
+          const x = F.read.i32(infoN, off + 20);
+          const y = F.read.i32(infoN, off + 24);
+          const w = F.read.i32(infoN, off + 28);
+          const h = F.read.i32(infoN, off + 32);
+          const bounds: RawRect = { x, y, w, h };
+          if (primary !== 0 && primaryIdx === null) primaryIdx = screens.length;
           screens.push({ bounds, usable: bounds });
         }
-        X.XFree(info);
-        usedXinerama = true;
+        // Put primary first to match Windows/macOS convention + legacy
+        // XDefaultScreen ordering.
+        if (primaryIdx !== null && primaryIdx > 0) {
+          const [p] = screens.splice(primaryIdx, 1);
+          screens.unshift(p);
+        }
+        xrr.XRRFreeMonitors(info as bigint);
+        usedXrandr = true;
       }
     }
   }
@@ -120,7 +128,7 @@ function linuxSynchronize(): ScreenInfo[] | null {
   const netWorkarea = X.XInternAtom(d, F.ptr(buf), True);
   if (netWorkarea !== 0n) {
     for (let i = 0; i < screens.length; i++) {
-      const rootScreen = usedXinerama ? X.XDefaultScreen(d) : i;
+      const rootScreen = usedXrandr ? X.XDefaultScreen(d) : i;
       const win = X.XRootWindow(d, rootScreen);
 
       const actualType = new BigUint64Array(1);
@@ -146,7 +154,7 @@ function linuxSynchronize(): ScreenInfo[] | null {
         const w = Number(F.read.u64(pr, 16)) | 0;
         const h = Number(F.read.u64(pr, 24)) | 0;
         const u: RawRect = { x, y, w, h };
-        screens[i].usable = usedXinerama ? intersectBounds(u, screens[i].bounds) : u;
+        screens[i].usable = usedXrandr ? intersectBounds(u, screens[i].bounds) : u;
       }
       if (propRet[0] !== 0n) X.XFree(propRet[0]);
     }

@@ -44,31 +44,39 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
 
         let net_workarea = XInternAtom(display, b"_NET_WORKAREA\0".as_ptr() as _, True_);
         let count = XScreenCount(display);
-        let mut used_xinerama = false;
+        let mut used_xrandr = false;
 
-        if count == 1 && is_xinerama_available() && XineramaIsActive(display) == True_ {
-            let mut xine_count: c_int = 0;
-            let info = XineramaQueryScreens(display, &mut xine_count);
-            if !info.is_null() && xine_count > 0 {
-                for i in 0..xine_count as usize {
-                    let si = &*info.add(i);
-                    let bounds = (si.x_org as i32, si.y_org as i32, si.width as i32, si.height as i32);
-
-                    if let Some(last) = screens.last_mut() {
-                        if intersects(last.0, bounds) {
-                            let la = last.0.2 * last.0.3;
-                            let ba = bounds.2 * bounds.3;
-                            if ba > la {
-                                last.0 = bounds;
-                                last.1 = bounds;
-                            }
-                            continue;
-                        }
+        // XRandR (RandR 1.5 XRRGetMonitors) replaces the older Xinerama
+        // query.  Unlike Xinerama, it returns a primary-monitor flag and
+        // per-monitor name atom; we only consume the geometry here but
+        // the richer data is available for future callers.  get_active=1
+        // filters out disabled outputs so we don't enumerate monitors
+        // that aren't currently driving a display.
+        if is_xrandr_available() {
+            let root = XDefaultRootWindow(display);
+            let mut n: c_int = 0;
+            let info = XRRGetMonitors(display, root, True_, &mut n);
+            if !info.is_null() && n > 0 {
+                // XRandR reports primary monitor via a flag — reorder so the
+                // primary appears at index 0, matching the Windows/macOS
+                // convention and the legacy Xinerama+XDefaultScreen behaviour.
+                let mut primary_idx: Option<usize> = None;
+                for i in 0..n as usize {
+                    let mi = &*info.add(i);
+                    let bounds = (mi.x, mi.y, mi.width, mi.height);
+                    if mi.primary != 0 && primary_idx.is_none() {
+                        primary_idx = Some(screens.len());
                     }
                     screens.push((bounds, bounds));
                 }
-                XFree(info as *mut c_void);
-                used_xinerama = true;
+                if let Some(p) = primary_idx {
+                    if p > 0 {
+                        let item = screens.remove(p);
+                        screens.insert(0, item);
+                    }
+                }
+                XRRFreeMonitors(info);
+                used_xrandr = true;
             }
         }
 
@@ -89,7 +97,7 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
 
         if net_workarea != None_ {
             for i in 0..screens.len() {
-                let root_screen = if used_xinerama { XDefaultScreen(display) } else { i as c_int };
+                let root_screen = if used_xrandr { XDefaultScreen(display) } else { i as c_int };
                 let win = XRootWindow(display, root_screen);
 
                 let mut type_: Atom = 0;
@@ -111,7 +119,7 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
                         *usable.add(2) as i32,
                         *usable.add(3) as i32,
                     );
-                    screens[i].1 = if used_xinerama {
+                    screens[i].1 = if used_xrandr {
                         intersect_bounds(u, screens[i].0)
                     } else {
                         u

@@ -1,8 +1,12 @@
 /**
  * Linux/X11 FFI helpers shared between subsystems.
  *
- * Opens libX11 (and optionally libXtst, libXinerama) once per process,
- * caches the Display* and the XTest extension availability check.
+ * Opens libX11 (and optionally libXtst, libXrandr) once per process,
+ * caches the Display* and the XTest / XRandR extension availability checks.
+ *
+ * XRandR 1.5 (XRRGetMonitors) replaces the older Xinerama query: modern
+ * X servers ship libXrandr.so.2 by default and RandR exposes primary-
+ * monitor / per-output metadata that Xinerama cannot.
  *
  * Keep all X11 symbols used by any subsystem in this single shared dlopen so
  * they all reference the same Display.
@@ -101,19 +105,27 @@ interface XTest {
   ) => number;
 }
 
-interface Xinerama {
-  XineramaIsActive: (display: Pointer) => number;
-  XineramaQueryScreens: (display: Pointer, num_ret: Pointer) => Pointer;
+interface XRandR {
+  XRRQueryExtension: (
+    display: Pointer, eventBaseRet: Pointer, errorBaseRet: Pointer,
+  ) => number;
+  XRRQueryVersion: (
+    display: Pointer, majorRet: Pointer, minorRet: Pointer,
+  ) => number;
+  XRRGetMonitors: (
+    display: Pointer, window: bigint, getActive: number, nmonitorsRet: Pointer,
+  ) => Pointer;
+  XRRFreeMonitors: (monitors: Pointer) => number;
 }
 
 let _opened = false;
 let _ffi: BunFFI | null = null;
 let _x11: X11 | null = null;
 let _xtest: XTest | null = null;
-let _xinerama: Xinerama | null = null;
+let _xrandr: XRandR | null = null;
 let _display: Pointer = null;
 let _xtestAvailable = false;
-let _xineramaAvailable = false;
+let _xrandrAvailable = false;
 
 // Keep a strong reference to the error-handler JSCallback — if it's GC'd
 // while Xlib still holds the function pointer, the next X error becomes a
@@ -236,15 +248,22 @@ function tryDlopen(): void {
   }
 
   try {
-    const xine = _ffi.dlopen<Xinerama>("libXinerama.so.1", {
-      XineramaIsActive:     { args: [T.ptr], returns: T.i32 },
-      XineramaQueryScreens: { args: [T.ptr, T.ptr], returns: T.ptr },
+    const xrr = _ffi.dlopen<XRandR>("libXrandr.so.2", {
+      XRRQueryExtension: { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
+      XRRQueryVersion:   { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
+      // window is u64 (XID); matches the XQueryTree / XRootWindow handles
+      // we hold as bigint elsewhere.  Return is XRRMonitorInfo* array,
+      // which we read through F.read.* — keep as T.ptr so Bun returns a
+      // native Pointer (not bigint) we can normalise to Number below.
+      XRRGetMonitors:    { args: [T.ptr, T.u64, T.i32, T.ptr], returns: T.ptr },
+      // XRRFreeMonitors takes a pointer we hold as bigint (from T.ptr
+      // return normalised via Number(ptr) into Number form); declare as
+      // u64 so Bun accepts either bigint or Number.
+      XRRFreeMonitors:   { args: [T.u64], returns: T.i32 },
     });
-    _xinerama = xine.symbols;
-    _xineramaAvailable = true;
+    _xrandr = xrr.symbols;
   } catch (_) {
-    _xinerama = null;
-    _xineramaAvailable = false;
+    _xrandr = null;
   }
 
   // Install a silent XErrorHandler BEFORE opening the display.  Without
@@ -271,6 +290,25 @@ function tryDlopen(): void {
     );
     _xtestAvailable = r !== 0;
   }
+
+  if (_display && _xrandr) {
+    // XRRQueryVersion() returns non-zero on success and writes the server's
+    // advertised RandR version.  We require 1.5 for XRRGetMonitors, which
+    // has shipped in every X.org since 2015 — so this only filters out
+    // the (rare) legacy servers; the screen subsystem then falls back to
+    // the single-XScreenOfDisplay path.
+    const evBase = new Int32Array(1);
+    const errBase = new Int32Array(1);
+    const queryR = _xrandr.XRRQueryExtension(_display, _ffi.ptr(evBase), _ffi.ptr(errBase));
+    if (queryR !== 0) {
+      const major = new Int32Array(1);
+      const minor = new Int32Array(1);
+      const verR = _xrandr.XRRQueryVersion(_display, _ffi.ptr(major), _ffi.ptr(minor));
+      if (verR !== 0 && (major[0] > 1 || (major[0] === 1 && minor[0] >= 5))) {
+        _xrandrAvailable = true;
+      }
+    }
+  }
 }
 
 export function getDisplay(): Pointer {
@@ -283,9 +321,9 @@ export function isXTestAvailable(): boolean {
   return _xtestAvailable;
 }
 
-export function isXineramaAvailable(): boolean {
+export function isXrandrAvailable(): boolean {
   tryDlopen();
-  return _xineramaAvailable;
+  return _xrandrAvailable;
 }
 
 export function x11(): X11 | null {
@@ -298,9 +336,9 @@ export function xtest(): XTest | null {
   return _xtest;
 }
 
-export function xinerama(): Xinerama | null {
+export function xrandr(): XRandR | null {
   tryDlopen();
-  return _xinerama;
+  return _xrandr;
 }
 
 export function ffi(): BunFFI | null {
