@@ -241,9 +241,77 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 				"probe failure includes a reason");
 		}
 
-		// uinputAvailable() is currently hard-false until the ioctl
-		// path lands (lib/ffi/uinput.ts, next commit).
-		assert(ui.uinputAvailable() === false, "uinputAvailable: false pending ffi");
+		// uinputAvailable() is a cheap probe — should agree with
+		// openUinputForProbe().ok (same syscall, no device creation).
+		assert(ui.uinputAvailable() === probe.ok,
+			"uinputAvailable matches probe.ok");
+
+		// ── FFI layer (lib/ffi/uinput.ts) ────────────────────────────
+		// The ioctl-based device lifecycle requires bun:ffi.  On Node
+		// the module loads cleanly (just can't open libc) and every
+		// injection helper returns false.  On Bun with /dev/uinput
+		// writable the full create+write path runs; without it, the
+		// open diagnostic string should be non-empty.
+		var ffi = require("../lib/ffi/uinput");
+		assert(typeof ffi.getUinputDevice === "function", "ffi.getUinputDevice");
+		assert(typeof ffi.uinputReady === "function", "ffi.uinputReady");
+		assert(typeof ffi.uinputOpenReason === "function", "ffi.uinputOpenReason");
+		assert(typeof ffi.injectKeysym === "function", "ffi.injectKeysym");
+		assert(typeof ffi.injectMouseButton === "function", "ffi.injectMouseButton");
+		assert(typeof ffi.injectMouseMoveRel === "function", "ffi.injectMouseMoveRel");
+		assert(typeof ffi.injectScrollV === "function", "ffi.injectScrollV");
+		assert(typeof ffi.injectScrollH === "function", "ffi.injectScrollH");
+		assert(typeof ffi.writeEvents === "function", "ffi.writeEvents");
+		assert(typeof ffi.closeUinputDevice === "function", "ffi.closeUinputDevice");
+
+		// Re-exported encoding helpers match the pure-TS originals.
+		assert(ffi.encodeInputEvent === ui.encodeInputEvent, "re-export encodeInputEvent");
+		assert(ffi.encodeEventBurst === ui.encodeEventBurst, "re-export encodeEventBurst");
+		assert(ffi.encodeUinputSetup === ui.encodeUinputSetup, "re-export encodeUinputSetup");
+
+		var ready = ffi.uinputReady();
+		assert(typeof ready === "boolean", "uinputReady boolean");
+		if (!ready) {
+			// Diagnostic string must be populated on failure so operators
+			// can tell "why not" without running strace.
+			var reason = ffi.uinputOpenReason();
+			assert(typeof reason === "string" && reason.length > 0,
+				"uinputOpenReason populated when not ready (got " + JSON.stringify(reason) + ")");
+			// All injection helpers short-circuit to false when the
+			// device isn't available — they must NOT throw.
+			assert(ffi.injectKeysym(KEYS.KEY_A, true) === false, "injectKeysym false when !ready");
+			assert(ffi.injectMouseButton(0, true) === false, "injectMouseButton false when !ready");
+			assert(ffi.injectMouseMoveRel(1, 1) === false, "injectMouseMoveRel false when !ready");
+			assert(ffi.injectScrollV(1) === false, "injectScrollV false when !ready");
+			assert(ffi.injectScrollH(1) === false, "injectScrollH false when !ready");
+			// closeUinputDevice is a no-op when there's no device.
+			ffi.closeUinputDevice();
+		} else {
+			// Live-device smoke tests: each injection is a best-effort
+			// write; "true" just means the syscall didn't error.  We
+			// don't read back via evdev here because that requires
+			// privileges beyond what `input` group gives us and would
+			// race against the compositor's grab.
+			log("(live uinput) ");
+			assert(ffi.injectKeysym(KEYS.KEY_LSHIFT, true) === true, "LSHIFT press accepted");
+			assert(ffi.injectKeysym(KEYS.KEY_LSHIFT, false) === true, "LSHIFT release accepted");
+			// Unmapped keysym: short-circuits false without writing.
+			assert(ffi.injectKeysym(0xFFFE, true) === false, "unknown keysym returns false");
+			assert(ffi.injectMouseButton(0, true) === true, "BTN_LEFT press accepted");
+			assert(ffi.injectMouseButton(0, false) === true, "BTN_LEFT release accepted");
+			assert(ffi.injectMouseButton(99, true) === false, "out-of-range button false");
+			assert(ffi.injectMouseMoveRel(3, -2) === true, "rel move 3,-2 accepted");
+			assert(ffi.injectMouseMoveRel(0, 0) === true, "rel move 0,0 no-op");
+			assert(ffi.injectScrollV(1) === true, "scrollV +1 accepted");
+			assert(ffi.injectScrollV(0) === true, "scrollV 0 no-op");
+			assert(ffi.injectScrollH(-1) === true, "scrollH -1 accepted");
+			assert(ffi.injectScrollH(0) === true, "scrollH 0 no-op");
+			// Tear down explicitly so process exit doesn't leak the device.
+			ffi.closeUinputDevice();
+			// After close, getUinputDevice returns null (re-open is
+			// guarded by _openAttempted; a second probe gets null+null).
+			assert(ffi.uinputReady() === false, "uinputReady false after close");
+		}
 
 		log("OK\n");
 		return true;

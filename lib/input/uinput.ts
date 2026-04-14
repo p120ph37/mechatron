@@ -363,11 +363,20 @@ export function openUinputForProbe(): { ok: boolean; reason?: string } {
 }
 
 /**
- * Is the full uinput write path wired up?  Returns true only when the
- * bun:ffi backend layer (`lib/ffi/uinput.ts`) has been loaded AND the
- * kernel device is writable.  Until the ioctl path lands this stays
- * `false` so mechanism dispatch transparently falls back to xtest.
+ * Is the uinput write path plausibly operational on this host?  A cheap
+ * synchronous probe that only checks whether `/dev/uinput` exists and is
+ * writable by the current process — it does **not** create a virtual
+ * device (that requires `UI_DEV_CREATE`, which belongs to the FFI layer).
+ *
+ * Callers that need an authoritative "is the device actually live" answer
+ * should use `lib/ffi/uinput.ts`'s `uinputReady()`, which triggers the
+ * full open + ioctl + create dance (and caches the result).
+ *
+ * Returning `false` here (e.g. on non-Linux, when the device is missing,
+ * or when the current uid lacks write permission) tells mechanism
+ * dispatch that this host can't even begin to synthesise uinput events,
+ * so it shouldn't bother loading the FFI layer.
  */
 export function uinputAvailable(): boolean {
-  return false;
+  return openUinputForProbe().ok;
 }
