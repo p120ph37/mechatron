@@ -18,7 +18,8 @@
 import { user32, kernel32, winFFI, w2js, js2w } from "./win";
 import {
   cg, cf, objc, macFFI, hasAppKit,
-  cls, sel, msgSendTyped, cfStringFromJS, cfStringToJS,
+  cls, sel, msgSendTyped, cfStringFromJS,
+  nsStringFromJS, nsStringToJS,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
 import type { Pointer } from "./bun";
@@ -334,8 +335,10 @@ function macGetText(): string {
     if (!send) return "";
     const nsStr = send(board, sel("stringForType:"), typeStr);
     if (!nsStr || nsStr === 0n) return "";
-    // NSString is toll-free bridged with CFStringRef.
-    return cfStringToJS(nsStr);
+    // Use -[NSString UTF8String] directly rather than CFStringGetCString;
+    // the latter has been observed to return 0-length output against
+    // NSPasteboard-owned immutable NSStrings under bun:ffi.
+    return nsStringToJS(nsStr);
   } finally {
     O.objc_autoreleasePoolPop(pool);
   }
@@ -343,8 +346,8 @@ function macGetText(): string {
 
 function macSetText(text: string): boolean {
   if (!hasAppKit()) return false;
-  const F = macFFI(); const C = cf(); const O = objc();
-  if (!F || !C || !O) return false;
+  const F = macFFI(); const O = objc();
+  if (!F || !O) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
   // Mirror the napi backend's path:
@@ -356,7 +359,7 @@ function macSetText(text: string): boolean {
   const typeStr = macTypeString();
   if (!typeStr) return false;
   const pool = O.objc_autoreleasePoolPush();
-  const str = cfStringFromJS(text);
+  const str = nsStringFromJS(text);
   try {
     if (!str) return false;
     const clear = msgSendTyped([T.ptr, T.ptr], T.void);
@@ -366,7 +369,10 @@ function macSetText(text: string): boolean {
     const r = send(board, sel("setString:forType:"), str, typeStr);
     return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
   } finally {
-    if (str) C.CFRelease(str);
+    if (str) {
+      const release = msgSendTyped([T.ptr, T.ptr], T.void);
+      if (release) release(str, sel("release"));
+    }
     O.objc_autoreleasePoolPop(pool);
   }
 }

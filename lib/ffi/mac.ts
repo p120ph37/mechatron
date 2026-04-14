@@ -451,6 +451,53 @@ export function cfStringToJS(cfstr: Pointer): string {
   return new TextDecoder("utf-8").decode(buf.subarray(0, end));
 }
 
+/**
+ * Build an immutable NSString from a JS string using
+ * `[[NSString alloc] initWithBytes:length:encoding:]` (NSUTF8StringEncoding).
+ * Caller owns the resulting reference and must `[release]` it (or let a pool
+ * drain it).  This mirrors the napi backend's path (`NSString::from_str`) and
+ * avoids CFString tagged-pointer / mutability hazards.
+ *
+ * The `bytes` buffer is held live across the msgSend so bun's GC can't
+ * reclaim the underlying Uint8Array while AppKit is reading from it.
+ */
+export function nsStringFromJS(s: string): Pointer {
+  const F = macFFI();
+  if (!F) return null;
+  const T = F.FFIType;
+  const ncls = cls("NSString");
+  if (!ncls) return null;
+  const alloc = msgSendTyped([T.ptr, T.ptr], T.ptr);
+  const initBytes = msgSendTyped([T.ptr, T.ptr, T.ptr, T.u64, T.u64], T.ptr);
+  if (!alloc || !initBytes) return null;
+  const raw = alloc(ncls, sel("alloc"));
+  if (!raw || raw === 0n) return null;
+  const bytes = new TextEncoder().encode(s);
+  const p = F.ptr(bytes);
+  const ns = initBytes(raw, sel("initWithBytes:length:encoding:"), p, BigInt(bytes.length), 4n /* NSUTF8StringEncoding */);
+  // Keep `bytes` live across the msgSend above.  A trivial reference after
+  // the call blocks any overly-aggressive escape analysis.
+  if (bytes.length < 0) return null;
+  return ns;
+}
+
+/**
+ * Decode an NSString using `-[NSString UTF8String]` → C string.  The returned
+ * buffer is owned by an autorelease pool; callers must ensure a pool is on
+ * the stack until the JS string is materialised.  Returns "" on failure.
+ */
+export function nsStringToJS(ns: Pointer): string {
+  const F = macFFI();
+  if (!F || !ns) return "";
+  const T = F.FFIType;
+  const utf8 = msgSendTyped([T.ptr, T.ptr], T.ptr);
+  if (!utf8) return "";
+  const c = utf8(ns, sel("UTF8String"));
+  if (!c || c === 0n) return "";
+  try { return new F.CString(c as Pointer); }
+  catch { return ""; }
+}
+
 /** Decode a NUL-terminated byte buffer up to `len` bytes as UTF-8. */
 export function bufToStr(buf: Uint8Array, len?: number): string {
   let end = 0;
