@@ -19,7 +19,6 @@ import { user32, kernel32, winFFI, w2js, js2w } from "./win";
 import {
   cg, cf, objc, macFFI, hasAppKit,
   cls, sel, msgSendTyped, cfStringFromJS,
-  nsStringFromJS, nsStringToJS,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
 import type { Pointer } from "./bun";
@@ -331,14 +330,21 @@ function macGetText(): string {
   if (!typeStr) return "";
   const pool = O.objc_autoreleasePoolPush();
   try {
+    // Read via dataForType: → -[NSData bytes]/-length to avoid NSString
+    // tagged-pointer round-trip hazards (see macSetText).
     const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
     if (!send) return "";
-    const nsStr = send(board, sel("stringForType:"), typeStr);
-    if (!nsStr || nsStr === 0n) return "";
-    // Use -[NSString UTF8String] directly rather than CFStringGetCString;
-    // the latter has been observed to return 0-length output against
-    // NSPasteboard-owned immutable NSStrings under bun:ffi.
-    return nsStringToJS(nsStr);
+    const nsData = send(board, sel("dataForType:"), typeStr);
+    if (!nsData || nsData === 0n) return "";
+    const getBytes = msgSendTyped([T.ptr, T.ptr], T.ptr);
+    const getLen = msgSendTyped([T.ptr, T.ptr], T.u64);
+    if (!getBytes || !getLen) return "";
+    const bytesPtr = getBytes(nsData, sel("bytes"));
+    const lenRaw = getLen(nsData, sel("length"));
+    const len = typeof lenRaw === "bigint" ? Number(lenRaw) : (lenRaw as number);
+    if (!bytesPtr || bytesPtr === 0n || len <= 0) return "";
+    const ab = F.toArrayBuffer(bytesPtr as Pointer, 0, len);
+    return new TextDecoder("utf-8").decode(new Uint8Array(ab));
   } finally {
     O.objc_autoreleasePoolPop(pool);
   }
@@ -350,29 +356,36 @@ function macSetText(text: string): boolean {
   if (!F || !O) return false;
   const T = F.FFIType;
   const board = macGeneralPasteboard(); if (!board) return false;
-  // Mirror the napi backend's path:
-  //   board.clearContents();
-  //   board.setString_forType(NSString::from_str(text), NSPasteboardTypeString);
-  // Modern NSPasteboard auto-declares the type on first setString:, so we
-  // don't need declareTypes:owner:.  Our local autorelease pool covers
-  // intermediate ObjC allocations (no Cocoa event loop in pure-FFI).
+  // Use NSData rather than NSString: short immutable NSString instances
+  // on arm64 Darwin are *tagged pointers* (bit 63 set), and bun:ffi's
+  // T.ptr can't round-trip values ≥ 2^63 without truncation through a
+  // JS number cast — which corrupts the tag bits so subsequent -copy /
+  // isKindOfClass: on the object dereferences garbage and segfaults.
+  // NSData is always heap-allocated and NSPasteboard's setData:forType: /
+  // dataForType: are the primitive operations that setString:/stringForType:
+  // wrap — they match on UTI string value the same way.
   const typeStr = macTypeString();
   if (!typeStr) return false;
   const pool = O.objc_autoreleasePoolPush();
-  const str = nsStringFromJS(text);
   try {
-    if (!str) return false;
+    const bytes = new TextEncoder().encode(text);
+    const dataCls = cls("NSData"); if (!dataCls) return false;
+    const mkData = msgSendTyped([T.ptr, T.ptr, T.ptr, T.u64], T.ptr);
+    if (!mkData) return false;
+    const dataPtr = F.ptr(bytes);
+    const nsData = mkData(dataCls, sel("dataWithBytes:length:"), dataPtr, BigInt(bytes.length));
+    // Reference `bytes` again after the call to block aggressive escape
+    // analysis — dataWithBytes:length: copies internally, but we need the
+    // source buffer alive during the copy.
+    if (bytes.length < 0) return false;
+    if (!nsData || nsData === 0n) return false;
     const clear = msgSendTyped([T.ptr, T.ptr], T.void);
     if (clear) clear(board, sel("clearContents"));
     const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
     if (!send) return false;
-    const r = send(board, sel("setString:forType:"), str, typeStr);
+    const r = send(board, sel("setData:forType:"), nsData, typeStr);
     return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
   } finally {
-    if (str) {
-      const release = msgSendTyped([T.ptr, T.ptr], T.void);
-      if (release) release(str, sel("release"));
-    }
     O.objc_autoreleasePoolPop(pool);
   }
 }
