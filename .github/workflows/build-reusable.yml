@@ -70,7 +70,15 @@ jobs:
           bun-version: latest
 
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
+        # openbox: minimal EWMH-compliant window manager that publishes
+        #   _NET_WORKAREA / _NET_WM_STATE / _NET_ACTIVE_WINDOW on the root
+        #   window so lib/ffi/window.ts and lib/ffi/screen.ts can actually
+        #   traverse its EWMH paths instead of bailing at the first missing
+        #   atom.
+        # x11-utils / x11-apps: xmessage ships in x11-utils on Debian-based
+        #   runners; we use it as a lightweight, mapped test window so
+        #   window_getList() has something to enumerate.
+        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb openbox x11-utils x11-apps
 
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
@@ -221,8 +229,37 @@ jobs:
           BUN="$(command -v bun)"
 
           # ── Per-OS test wrapper (xvfb / sudo / none) ──────────────────────
+          # Linux: we manage Xvfb + openbox + a mapped client window ourselves
+          # instead of `xvfb-run` so the WM and test window persist across both
+          # the napi and ffi backend invocations.  Without a WM, EWMH atoms
+          # (_NET_WORKAREA, _NET_WM_STATE, _NET_ACTIVE_WINDOW) never appear
+          # and lib/ffi/{window,screen,x11}.ts paths that depend on them are
+          # unreachable.  Without a mapped client, window_getList() is empty
+          # and every per-window helper (title, bounds, state) sits idle.
           if [ "${{ runner.os }}" = "Linux" ]; then
-            WRAP=(xvfb-run --auto-servernum)
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
+            XVFB_PID=$!
+            # Wait for the X server to accept connections
+            for _ in $(seq 1 50); do
+              xdpyinfo -display :99 >/dev/null 2>&1 && break
+              sleep 0.1
+            done
+            openbox &
+            OPENBOX_PID=$!
+            # Give openbox a moment to own the root window and publish EWMH atoms
+            sleep 0.5
+            # A persistent mapped window so window_getList() has real data.
+            # -timeout 600 auto-dismisses after 10 minutes in case cleanup is
+            # skipped; -name gives us a stable title to match against regexes.
+            xmessage -timeout 600 -name MechatronTestWindow "mechatron test client" &
+            XMESSAGE_PID=$!
+            sleep 0.3
+            cleanup_x() {
+              kill "$XMESSAGE_PID" "$OPENBOX_PID" "$XVFB_PID" 2>/dev/null || true
+            }
+            trap cleanup_x EXIT
+            WRAP=()
           elif [ "${{ runner.os }}" = "macOS" ]; then
             WRAP=(sudo -E)
           else

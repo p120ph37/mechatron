@@ -499,6 +499,45 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(typeof accessFlags === "boolean", "setAccess flags returns bool");
 		}
 
+		// --- Flag-bearing reads: SKIP_ERRORS / AUTO_ACCESS ---
+		// These drive the per-region walker in lib/ffi/memory.ts (linux/mac/win
+		// have separate implementations at lines ~676-706, ~717-754, ~763-809
+		// for reads and symmetric blocks for writes) — paths that FLAG_DEFAULT
+		// bypasses entirely in favor of the single-shot read primitive.
+		// Use a span that deliberately crosses region boundaries so we exit
+		// the region loop via the "gap" and "end-of-range" paths as well.
+		if (readable) {
+			var spanStart = readable.start;
+			// 1MB span is big enough to cross region boundaries in most processes
+			var spanLen = Math.min(1024 * 1024, readable.size * 2);
+			var spanBuf = Buffer.alloc(spanLen);
+			var gotSkip = mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
+			assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
+			var gotAuto = mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
+			assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
+
+			// Same for writeData — target the tail of a writable region so the
+			// no-op path (non-writable region in between) gets exercised too.
+			var writable = null;
+			for (var j = 0; j < regions.length; ++j) {
+				if (regions[j].valid && regions[j].bound && regions[j].writable && regions[j].size > 16) {
+					writable = regions[j];
+					break;
+				}
+			}
+			if (writable) {
+				var wBuf = Buffer.alloc(16);
+				var wroteSkip = mem.writeData(writable.start, wBuf, 16, Memory.SKIP_ERRORS);
+				assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
+				var wroteAuto = mem.writeData(writable.start, wBuf, 16, Memory.AUTO_ACCESS);
+				assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
+			}
+		}
+
+		// --- readData with zero length early-out ---
+		assert(mem.readData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "readData len=0");
+		assert(mem.writeData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "writeData len=0");
+
 		// --- writeDataAsync ---
 		var pa4 = mem.writeDataAsync(0, Buffer.alloc(1), 1);
 		assert(pa4 instanceof Promise, "writeDataAsync returns Promise");

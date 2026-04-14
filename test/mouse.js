@@ -79,6 +79,32 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		m.scrollH(1);
 		m.scrollH(-1);
 
+		// --- X1 / X2 buttons (extra mouse buttons) ---
+		// Exercise the BUTTON_X1/X2 branches in press/release/getButtonState.
+		// On Linux these are unsupported (XTest has no X1/X2) and getButtonState
+		// returns false unconditionally — that's still the branch we want to
+		// hit.  On Windows/macOS these go through the full event-post path.
+		m.press(mechatron.BUTTON_X1);
+		m.release(mechatron.BUTTON_X1);
+		m.press(mechatron.BUTTON_X2);
+		m.release(mechatron.BUTTON_X2);
+		assert(typeof Mouse.getState(mechatron.BUTTON_X1) === "boolean", "BUTTON_X1 getState bool");
+		assert(typeof Mouse.getState(mechatron.BUTTON_X2) === "boolean", "BUTTON_X2 getState bool");
+
+		// --- Out-of-range button (default branch) ---
+		// The FFI backend's switch statements have a default `return null/false`
+		// arm for unknown button numbers; press/release/getState should all
+		// no-op or return false without throwing.
+		m.press(99);
+		m.release(99);
+		assert(Mouse.getState(99) === false, "unknown button getState=false");
+
+		// --- Multi-step scroll (exercises the repeat loop on Linux) ---
+		m.scrollV(3);
+		m.scrollV(-3);
+		m.scrollH(2);
+		m.scrollH(-2);
+
 		// --- autoDelay ---
 		assert(m.autoDelay instanceof mechatron.Range, "autoDelay is Range");
 

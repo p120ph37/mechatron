@@ -106,12 +106,19 @@ jobs:
                     curNorm = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
                     cur = curNorm;
                     files[cur] = { hit: 0, total: 0 };
-                    if (!combined[curNorm]) combined[curNorm] = {};
+                    if (!combined[curNorm]) combined[curNorm] = { lines: {}, parsers: new Set() };
+                    // Remember which platform parsed this file — used below to
+                    // filter out "phantom uncovered" lines (see comment in
+                    // combined aggregation block).
+                    combined[curNorm].parsers.add(platform);
                   } else if (line.startsWith("DA:") && cur) {
                     const [ln, hits] = line.slice(3).split(",").map(Number);
                     files[cur].total++;
                     if (hits > 0) files[cur].hit++;
-                    combined[curNorm][ln] = (combined[curNorm][ln] || 0) + (hits || 0);
+                    const rec = combined[curNorm].lines[ln]
+                      || (combined[curNorm].lines[ln] = { hits: 0, emitters: new Set() });
+                    rec.hits += (hits || 0);
+                    rec.emitters.add(platform);
                   } else if (line === "end_of_record") {
                     cur = null; curNorm = null;
                   }
@@ -135,15 +142,23 @@ jobs:
           // covered if any platform exercised it.  This gives a single
           // headline number that isn't dragged down by opposite-OS code
           // in cross-platform files.
-          const combinedFiles = Object.entries(combined).filter(([, lines]) => Object.keys(lines).length > 0);
+          const combinedFiles = Object.entries(combined).filter(([, v]) => Object.keys(v.lines).length > 0);
           if (anyResults && combinedFiles.length > 0) {
             let tH = 0, tL = 0;
             const rows = [];
-            for (const [f, lines] of combinedFiles.sort()) {
+            for (const [f, { lines, parsers }] of combinedFiles.sort()) {
               let hit = 0, total = 0;
-              for (const ln of Object.keys(lines)) {
+              for (const lnStr of Object.keys(lines)) {
+                const { hits, emitters } = lines[lnStr];
+                // Drop phantom-uncovered lines: zero hits everywhere AND at
+                // least one platform that parsed this file didn't emit a DA
+                // for this line.  Bun sometimes emits DA:line,0 for comment/
+                // whitespace lines inside functions that weren't called, but
+                // skips the same lines entirely on platforms where the
+                // function actually ran — so a naive union under-reports.
+                if (hits === 0 && emitters.size < parsers.size) continue;
                 total++;
-                if (lines[ln] > 0) hit++;
+                if (hits > 0) hit++;
               }
               if (total === 0) continue;
               rows.push(`| ${f} | ${hit}/${total} | ${(100*hit/total).toFixed(1)}% |`);
