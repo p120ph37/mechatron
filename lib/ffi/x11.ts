@@ -154,7 +154,12 @@ function tryDlopen(): void {
         args: [T.ptr, T.u64, T.u64, T.u64, T.i32, T.i32, T.ptr, T.i32],
         returns: T.i32,
       },
-      XFree:                  { args: [T.ptr], returns: T.i32 },
+      // XFree/XDestroyImage take a pointer we hold as a bigint (it came
+      // from a BigUint64Array out-param or a T.u64 return), and Bun's T.ptr
+      // argument coercion rejects bigint with "Unable to convert N to a
+      // pointer".  T.u64 has identical ABI to T.ptr on every 64-bit OS and
+      // accepts bigint directly, so we declare the arg as u64.
+      XFree:                  { args: [T.u64], returns: T.i32 },
       XQueryTree:             {
         args: [T.ptr, T.u64, T.ptr, T.ptr, T.ptr, T.ptr],
         returns: T.i32,
@@ -181,8 +186,8 @@ function tryDlopen(): void {
         args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32, T.u64, T.i32],
         returns: T.ptr,
       },
-      XDestroyImage:          { args: [T.ptr], returns: T.i32 },
-      XGetPixel:              { args: [T.ptr, T.i32, T.i32], returns: T.u64 },
+      XDestroyImage:          { args: [T.u64], returns: T.i32 },
+      XGetPixel:              { args: [T.u64, T.i32, T.i32], returns: T.u64 },
       XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
     });
     _x11 = x11.symbols;
