@@ -61,6 +61,20 @@ if (_blocked.includes("libxtst")) {
   // getPos/setPos round-trip observes no movement when libXtst is blocked.
   gExpect.mousePos = false;
 }
+// When MECHATRON_INPUT_MECHANISM=uinput is pinned, Keyboard.press /
+// Mouse.press route through /dev/uinput → kernel evdev.  In CI the X
+// server is Xvfb, which reads from its own IPC rather than /dev/input,
+// so synthetic input events never reach it and Keyboard.getState() /
+// Mouse.getState() can't observe the press.  Demote keyboardSim /
+// mouseSim from "expected to work" to "may skip" for this cell —
+// coverage of the uinput code path still happens; we just can't do
+// an end-to-end verify against Xvfb.  Mouse.setPos stays on the
+// XTest path (lib/ffi/mouse.ts:linux_mouse_setPos has no uinput
+// routing — uinput is EV_REL-only), so mousePos is unaffected.
+if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "uinput") {
+  gExpect.keyboardSim = false;
+  gExpect.mouseSim = false;
+}
 
 const log = (msg: string) => process.stdout.write(msg);
 const assert = (cond: unknown, msg?: string) => {
