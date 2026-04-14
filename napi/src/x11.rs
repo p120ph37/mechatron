@@ -107,12 +107,18 @@ pub union XClientMessageData {
 pub type XEvent = [u8; 192]; // XEvent is 192 bytes on x86_64
 
 #[repr(C)]
-pub struct XineramaScreenInfo {
-    pub screen_number: c_int,
-    pub x_org: i16,
-    pub y_org: i16,
-    pub width: i16,
-    pub height: i16,
+pub struct XRRMonitorInfo {
+    pub name: Atom,
+    pub primary: Bool,
+    pub automatic: Bool,
+    pub noutput: c_int,
+    pub x: c_int,
+    pub y: c_int,
+    pub width: c_int,
+    pub height: c_int,
+    pub mwidth: c_int,
+    pub mheight: c_int,
+    pub outputs: *mut c_ulong,
 }
 
 extern "C" {
@@ -214,12 +220,23 @@ extern "C" {
         major_opcode: *mut c_int, first_event: *mut c_int, first_error: *mut c_int,
     ) -> Bool;
 
-    // Xinerama extension
-    pub fn XineramaQueryVersion(
-        display: *mut Display, major: *mut c_int, minor: *mut c_int,
+    // XRandR extension — replaces Xinerama (deprecated).  RandR 1.5
+    // (~2015) introduced XRRGetMonitors, which returns the same per-
+    // monitor geometry information as Xinerama plus primary-monitor
+    // flag and logical/physical size metadata.  Modern X servers ship
+    // libXrandr.so.2; the CI dlopen-block shim still lets us exercise
+    // the "library unavailable" arm by denying it selectively.
+    pub fn XRRQueryExtension(
+        display: *mut Display, event_base: *mut c_int, error_base: *mut c_int,
     ) -> Bool;
-    pub fn XineramaIsActive(display: *mut Display) -> Bool;
-    pub fn XineramaQueryScreens(display: *mut Display, number: *mut c_int) -> *mut XineramaScreenInfo;
+    pub fn XRRQueryVersion(
+        display: *mut Display, major: *mut c_int, minor: *mut c_int,
+    ) -> Status;
+    pub fn XRRGetMonitors(
+        display: *mut Display, window: Window,
+        get_active: Bool, nmonitors: *mut c_int,
+    ) -> *mut XRRMonitorInfo;
+    pub fn XRRFreeMonitors(monitors: *mut XRRMonitorInfo);
 
     // Xutil
     pub fn XFetchName(display: *mut Display, w: Window, name: *mut *mut c_char) -> Status;
@@ -284,13 +301,18 @@ pub fn is_xtest_available() -> bool {
     }
 }
 
-// --- Xinerama availability check ---
-static XINERAMA_INIT: Once = Once::new();
-static mut XINERAMA_AVAILABLE: bool = false;
+// --- XRandR availability check ---
+// Requires RandR 1.5 for XRRGetMonitors; earlier versions only expose
+// XRRGetScreenResources + XRRGetCrtcInfo, which is a more involved API.
+// 1.5 has been the X.org default since 2015, so every supported host
+// ships it; the availability flag lets the dlopen-fails arm fall back
+// to the single-XScreenOfDisplay path cleanly.
+static XRANDR_INIT: Once = Once::new();
+static mut XRANDR_AVAILABLE: bool = false;
 
-pub fn is_xinerama_available() -> bool {
+pub fn is_xrandr_available() -> bool {
     unsafe {
-        XINERAMA_INIT.call_once(|| {
+        XRANDR_INIT.call_once(|| {
             let display = get_display();
             if display.is_null() {
                 return;
@@ -298,17 +320,20 @@ pub fn is_xinerama_available() -> bool {
             let mut major: c_int = 0;
             let mut evt: c_int = 0;
             let mut error: c_int = 0;
-            let name = b"XINERAMA\0";
+            let name = b"RANDR\0";
             if XQueryExtension(display, name.as_ptr() as *const c_char, &mut major, &mut evt, &mut error) == 0 {
                 return;
             }
             let mut minor: c_int = 0;
-            if XineramaQueryVersion(display, &mut major, &mut minor) == 0 {
+            if XRRQueryVersion(display, &mut major, &mut minor) == 0 {
                 return;
             }
-            XINERAMA_AVAILABLE = true;
+            if major < 1 || (major == 1 && minor < 5) {
+                return;
+            }
+            XRANDR_AVAILABLE = true;
         });
-        XINERAMA_AVAILABLE
+        XRANDR_AVAILABLE
     }
 }
 

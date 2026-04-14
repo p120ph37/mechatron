@@ -1,0 +1,26 @@
+# Bun configuration for mechatron.
+#
+# `bun test` discovers `*.test.{ts,js,tsx,jsx}` under the project; today the
+# only matching file is `test/bun.test.ts`.  Per-subsystem helper modules
+# (test/keyboard.js, test/mouse.js, ...) are intentionally NOT named *.test.js
+# so Bun won't load them directly — they're factory modules consumed by
+# bun.test.ts.
+
+[test]
+# Some subsystem tests (e.g. memory r/w against a child process) take longer
+# than Bun's default 5 s timeout.
+timeout = 60000
+# Don't bill the test files themselves against coverage.
+# `coverageSkipTestFiles` only catches the *.test.*/*.spec.* naming convention;
+# our per-subsystem helpers (test/keyboard.js, test/mouse.js, …) are deliberately
+# named without `.test.` so Bun doesn't load them directly.  Add an explicit
+# path-glob exclusion so they're also excluded from coverage instrumentation.
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["test/**"]
+# We use require()/process.execPath for spawning helpers; preloading is unused.
+
+# Don't run bun's package-lifecycle scripts when installing dev tooling — the
+# napi packages do their own native build via cargo in CI.
+[install]
+# Lock to npm registry semantics; mirrors `npm ci` behavior.
+registry = "https://registry.npmjs.org/"

@@ -149,6 +149,66 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			Window.setActive(activeW);
 		}
 
+		// --- Stale-handle probe (Linux FFI): exercise the
+		//     XGetWindowProperty-on-destroyed-window error arm inside
+		//     winIsValid (lib/ffi/window.ts:34).  Spawn a throwaway
+		//     xmessage, confirm its handle, destroy the window via
+		//     mechatron (XDestroyWindow), then reuse the now-stale
+		//     handle in setHandle() — winIsValid issues
+		//     XGetWindowProperty(_NET_WM_PID, staleHandle), which the
+		//     X server answers with BadWindow.  The silent X error
+		//     handler installed in lib/ffi/x11.ts returns 0 so Xlib's
+		//     default exit(1) handler never fires; getWindowProperty
+		//     sees a non-zero status and returns null; winIsValid
+		//     returns false; setHandle returns false.  Timeouts are
+		//     kept short (bun test default per-test timeout is 5s)
+		//     and any step that can't complete falls through to the
+		//     skip path — the primary test here is the stale-handle
+		//     check after a successful destroy; xmessage-not-listed
+		//     hosts simply skip without failing the suite.
+		if (process.platform === "linux" &&
+			mechatron.getBackend("window") === "ffi") {
+			var _cpw = require("child_process");
+			var _tag = "MechatronStaleProbe_" + process.pid;
+			var _xm = null;
+			try {
+				_xm = _cpw.spawn("xmessage",
+					["-name", _tag, "-timeout", "10", _tag],
+					{ stdio: "ignore" });
+			} catch (_) { _xm = null; }
+			var _stale = 0;
+			if (_xm) {
+				waitFor(function () {
+					var f = Window.getList(_tag);
+					if (f.length > 0 && f[0].isValid()) {
+						_stale = f[0].getHandle();
+						return true;
+					}
+					return false;
+				}, 1500);
+			}
+			if (_stale !== 0) {
+				// Destroy via mechatron (XDestroyWindow + XFlush).
+				var _live = new Window();
+				if (_live.setHandle(_stale)) {
+					_live.close();
+					var _gone = waitFor(function () {
+						return Window.getList(_tag).length === 0;
+					}, 1500);
+					if (_gone) {
+						// Stale handle: setHandle -> winIsValid ->
+						// getWindowProperty -> XGetWindowProperty
+						// (BadWindow, swallowed) -> status != 0 ->
+						// null -> false.
+						var _stalew = new Window();
+						assert(_stalew.setHandle(_stale) === false,
+							"stale handle setHandle false (BadWindow swallowed)");
+					}
+				}
+			}
+			if (_xm) { try { _xm.kill(); } catch (_) {} }
+		}
+
 		// --- isAxEnabled ---
 		assert(typeof Window.isAxEnabled() === "boolean", "isAxEnabled bool");
 

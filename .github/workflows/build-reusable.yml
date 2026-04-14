@@ -26,9 +26,15 @@ jobs:
             arch: x64
           - os: ubuntu-22.04-arm
             arch: arm64
-          - os: macos-14
+          - os: macos-15
             arch: arm64
-          - os: macos-14
+          # macOS x64: run on the Sequoia arm64 runner and cross-compile +
+          # use Rosetta 2 for the test binary.  Rosetta 2 on macOS 15 gained
+          # support for AVX/AVX2/BMI1/BMI2/F16C — the ISA extensions that
+          # Bun's x64 binary requires — so bun-darwin-x64-baseline runs
+          # under Rosetta there.  Native Intel runners (macos-*-large /
+          # macos-15-intel) exist but are paid-tier only for this repo.
+          - os: macos-15
             arch: x64
           - os: windows-2022
             arch: x64
@@ -45,8 +51,34 @@ jobs:
         with:
           node-version: ${{ env.HOST_NODE_VERSION }}
 
+      # Install host Bun on every cell.  Bun is used as the package
+      # manager (`bun install --frozen-lockfile`) and script runner
+      # (`bun run …`) universally — both work fine with the host-arch
+      # binary on every cell, including cross-compile cells.
+      #
+      # The TEST runner needs to be able to load the matrix-arch native
+      # modules, which means it must match the matrix arch:
+      #   - host-arch Bun for native cells (linux/win/mac arm64).
+      #   - macOS x64: download bun-darwin-x64-baseline and run it under
+      #     Rosetta 2 on the Sequoia arm64 runner (macos-15 gained
+      #     AVX/AVX2/BMI/F16C emulation, which earlier Rosetta lacked —
+      #     previously Bun's x64 binary SIGILL'd on macos-14 Sonoma).
+      #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows
+      #     build) — runs the napi backend only.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxinerama-dev libxtst-dev xvfb
+        # openbox: minimal EWMH-compliant window manager that publishes
+        #   _NET_WORKAREA / _NET_WM_STATE / _NET_ACTIVE_WINDOW on the root
+        #   window so lib/ffi/window.ts and lib/ffi/screen.ts can actually
+        #   traverse its EWMH paths instead of bailing at the first missing
+        #   atom.
+        # x11-utils / x11-apps: xmessage ships in x11-utils on Debian-based
+        #   runners; we use it as a lightweight, mapped test window so
+        #   window_getList() has something to enumerate.
+        run: sudo apt-get update && sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
 
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
@@ -86,7 +118,7 @@ jobs:
         with:
           targets: x86_64-apple-darwin
 
-      - run: npm ci --ignore-scripts
+      - run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build Rust napi modules
         run: |
@@ -133,7 +165,7 @@ jobs:
           done
 
       - name: Build TypeScript
-        run: npx tsc
+        run: bun run build
 
       - name: Build native memory test helper
         run: |
@@ -161,65 +193,305 @@ jobs:
             test/memory-child.c -o "test/memory-child$EXT"
           ls -la "test/memory-child$EXT"
 
+      - name: Build dlopen-block LD_PRELOAD shim
+        if: runner.os == 'Linux'
+        # Compile the selective dlopen-interception shim used to force the
+        # FFI backend's "library unavailable" catch arms (lib/ffi/x11.ts
+        # :220, :234, :245) to fire without uninstalling libXtst /
+        # libXrandr from the runner.  See test/dlopen-block.c.
+        run: |
+          clang -shared -fPIC -ldl -o test/dlopen-block.so test/dlopen-block.c
+          ls -la test/dlopen-block.so
+
       - name: Run tests
         run: |
+          # Test runner selection per matrix cell:
+          #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows build).
+          #   - macOS x64 on arm64 Sequoia runner: download bun-darwin-x64-baseline
+          #     and run it under Rosetta 2 (`arch -x86_64`).  macOS 15 Rosetta
+          #     emulates AVX/AVX2/BMI/F16C, which prior releases didn't.
+          #   - everything else: host Bun installed by oven-sh/setup-bun above.
+          # Coverage is skipped for Windows ia32 — its code path is identical
+          # to the host-arch napi cell.
+          #
+          # Bun's `--coverage` collects JavaScriptCore coverage natively, which
+          # is the only way to attribute coverage to lib/ffi/*.ts (c8 only sees
+          # V8, so the legacy node runner produces 0% coverage on FFI files).
+
           JUNIT_DIR="${RUNNER_TEMP}/junit"
-          mkdir -p "$JUNIT_DIR"
+          COV_DIR="${RUNNER_TEMP}/coverage"
+          mkdir -p "$JUNIT_DIR" "$COV_DIR"
           TEST_LOG="${RUNNER_TEMP}/test-output.txt"
-          JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-          C8="./node_modules/.bin/c8"
-          C8_ARGS="--reporter text --reporter lcov --reports-dir ${RUNNER_TEMP}/coverage"
+          : > "$TEST_LOG"
 
-          run_and_log() { "$@" 2>&1 | tee "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+          run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
 
-          if [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
-            # Cross-compiled x64 on arm64 macOS — download x64 node to run tests
-            NODE_VERSION=$(node -v)
-            curl -sL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
-            X64_NODE="./node-${NODE_VERSION}-darwin-x64/bin/node"
-            # Grant TCC to this binary too
-            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
-            X64_ABS="$(cd "$(dirname "$X64_NODE")" && pwd)/$(basename "$X64_NODE")"
-            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_ABS',1,2,4,1,0);" 2>/dev/null || true
+          # run_bun LABEL JUNIT_FILE -- <bun test command> ...
+          # Wraps run_and_log with: (1) a visible progress marker so CI
+          # logs show exactly which invocation the script is on, and
+          # (2) a single retry when bun exits non-zero with an empty
+          # JUnit file (i.e. crashed before a single testcase could
+          # execute).  The ubuntu-22.04-arm runner has intermittently
+          # killed bun at --coverage instrumentation setup time with
+          # zero stdout/stderr; a single retry clears this without
+          # masking real test failures (which always produce testcases
+          # and thus skip the retry).
+          run_bun() {
+            local LABEL="$1"; shift
+            local JUNIT_FILE="$1"; shift
+            [ "$1" = "--" ] && shift
+            local ATTEMPT RC OUT_BEFORE OUT_AFTER
+            OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
+            for ATTEMPT in 1 2; do
+              echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
+              RC=0
+              run_and_log "$@" || RC=$?
+              if [ "$RC" = 0 ]; then return 0; fi
+              OUT_AFTER=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
+              # If bun produced any testcase output, this is a real
+              # test failure — don't retry.  Otherwise it's a startup
+              # crash on a pristine junit file; retry once.
+              if [ -s "$JUNIT_FILE" ] && grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+                echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
+                return "$RC"
+              fi
+              if [ "$ATTEMPT" = 2 ]; then
+                echo ">>> [$LABEL] retry also failed (rc=$RC), giving up" | tee -a "$TEST_LOG"
+                return "$RC"
+              fi
+              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying once" | tee -a "$TEST_LOG"
+              # Clear the empty junit so the second attempt gets a
+              # clean file and our "no testcase" detection works below.
+              rm -f "$JUNIT_FILE"
+              sleep 2
             done
-            sudo launchctl stop com.apple.tccd 2>/dev/null || true
-            sleep 1
-            # c8 cannot wrap a non-local binary; use NODE_V8_COVERAGE instead
-            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
-            run_and_log sudo -E "$X64_ABS" test/test.js all --junit "$JUNIT_FILE"
-            # Fix ownership of files created under sudo so upload-artifact can read them
-            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
-            # Generate coverage report from raw V8 data
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
-          elif [ "${{ matrix.arch }}" = "ia32" ]; then
+          }
+
+          # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --junit "$JUNIT_FILE"
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
-          elif [ "${{ runner.os }}" = "Linux" ]; then
-            run_and_log xvfb-run --auto-servernum $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            export NODE_V8_COVERAGE="${RUNNER_TEMP}/v8-coverage"
-            run_and_log sudo -E node test/test.js all --junit "$JUNIT_FILE"
-            # Fix ownership of files created under sudo so upload-artifact can read them
-            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$NODE_V8_COVERAGE" 2>/dev/null || true
-            $C8 report --temp-directory "$NODE_V8_COVERAGE" --reporter text --reporter lcov --reports-dir "${RUNNER_TEMP}/coverage" --src lib/ 2>/dev/null || true
-          else
-            run_and_log $C8 $C8_ARGS node test/test.js all --junit "$JUNIT_FILE"
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE"
+            exit "$?"
           fi
+
+          BUN="$(command -v bun)"
+
+          # ── Per-OS test wrapper (xvfb / sudo / none) ──────────────────────
+          # Linux: we manage Xvfb + openbox + a mapped client window ourselves
+          # instead of `xvfb-run` so the WM and test window persist across both
+          # the napi and ffi backend invocations.  Without a WM, EWMH atoms
+          # (_NET_WORKAREA, _NET_WM_STATE, _NET_ACTIVE_WINDOW) never appear
+          # and lib/ffi/{window,screen,x11}.ts paths that depend on them are
+          # unreachable.  Without a mapped client, window_getList() is empty
+          # and every per-window helper (title, bounds, state) sits idle.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
+            XVFB_PID=$!
+            # Wait for the X server to accept connections
+            for _ in $(seq 1 50); do
+              xdpyinfo -display :99 >/dev/null 2>&1 && break
+              sleep 0.1
+            done
+            openbox &
+            OPENBOX_PID=$!
+            # Give openbox a moment to own the root window and publish EWMH atoms
+            sleep 0.5
+            # A persistent mapped window so window_getList() has real data.
+            # -timeout 600 auto-dismisses after 10 minutes in case cleanup is
+            # skipped; -name gives us a stable title to match against regexes.
+            xmessage -timeout 600 -name MechatronTestWindow "mechatron test client" &
+            XMESSAGE_PID=$!
+            sleep 0.3
+            # xmessage doesn't publish _NET_WM_PID on its own, but
+            # lib/ffi/window.ts:winIsValid treats _NET_WM_PID presence
+            # as the "is this a real window" heuristic — mirroring
+            # the napi backend.  Without the atom, every Linux-only
+            # helper (getTitle/getBounds/setTopMost/...) is skipped
+            # during enumeration and window.ts coverage sits at ~42%.
+            # Inject the atom post-hoc via xprop so the full Linux
+            # path is exercised.  xprop is in x11-utils (installed
+            # above).
+            XMSG_WIN=$(xwininfo -root -tree 2>/dev/null | grep MechatronTestWindow | head -1 | awk '{print $1}')
+            if [ -n "$XMSG_WIN" ]; then
+              xprop -id "$XMSG_WIN" -f _NET_WM_PID 32c -set _NET_WM_PID "$XMESSAGE_PID" 2>/dev/null || true
+            fi
+            cleanup_x() {
+              kill "$XMESSAGE_PID" "$OPENBOX_PID" "$XVFB_PID" 2>/dev/null || true
+            }
+            trap cleanup_x EXIT
+            WRAP=()
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            WRAP=(sudo -E)
+          else
+            WRAP=()
+          fi
+
+          # ── macOS x64 on arm64 runner: swap in x64 Bun under Rosetta ──────
+          # The host-arch Bun (arm64) loads arm64 native modules, which don't
+          # match the matrix-arch (x64) prebuilds.  Download Bun's x64
+          # baseline tarball and invoke it via `arch -x86_64` so Rosetta 2
+          # translates the x86_64 code (including JIT output) to arm64.
+          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
+            curl -sL "https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64-baseline.zip" -o /tmp/bun-x64.zip
+            unzip -q /tmp/bun-x64.zip -d /tmp/
+            X64_BUN="/tmp/bun-darwin-x64-baseline/bun"
+            chmod +x "$X64_BUN"
+            BUN="$X64_BUN"
+            # Prepend `arch -x86_64` so child process runs under Rosetta.
+            WRAP+=(arch -x86_64)
+            # Grant TCC for this binary too
+            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_BUN',1,2,4,1,0);" 2>/dev/null || true
+            done
+            sudo launchctl stop com.apple.tccd 2>/dev/null || true
+            sleep 1
+          fi
+
+          # ── Backends per platform ─────────────────────────────────────────
+          BACKENDS=(napi ffi)
+
+          # ── Run each backend in its own bun process (loader caches the
+          #    backend choice on first access) ────────────────────────────────
+          OVERALL_RC=0
+          for be in "${BACKENDS[@]}"; do
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-$be.xml"
+            BE_COV_DIR="$COV_DIR/$be"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND="$be" \
+              run_bun "$be" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            # If bun test crashed at module-load (e.g. native-level abort) it
+            # may leave a junit file with 0 testcases, or none at all.  The
+            # summary aggregator then silently counts 0 tests for that
+            # backend and the PR comment looks green.  Guard against this:
+            # when the backend is expected to run and produced no usable
+            # junit, synthesize a failure entry so the summary surfaces the
+            # startup crash instead of hiding it.
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for MECHATRON_BACKEND=${be} exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run (see test-output.txt artifact)."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="%s-backend" tests="1" failures="1">\n' "$be"
+                printf '    <testcase name="%s backend startup" classname="backend" time="0">\n' "$be"
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          done
+
+          # ── Linux-only: FFI with selected libraries denied via LD_PRELOAD
+          #    dlopen-block shim.  Drives coverage of the FFI loader's
+          #    library-unavailable catch arms (lib/ffi/x11.ts:234 libXtst,
+          #    :245 libXrandr) without needing to uninstall the libraries.
+          #    Each variant is its own bun process so the loader re-runs
+          #    tryDlopen() with the new LD_PRELOAD policy.  JUnit and lcov
+          #    feed into the same aggregators as the base backends.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
+              label="${variant%%:*}"
+              block="${variant#*:}"
+              JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-${label}.xml"
+              BE_COV_DIR="$COV_DIR/ffi-${label}"
+              mkdir -p "$BE_COV_DIR"
+              BE_RC=0
+              MECHATRON_BACKEND=ffi \
+              MECHATRON_BLOCK_DLOPEN="$block" \
+              LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
+                run_bun "ffi-$label" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                  --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                  --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+                || BE_RC=$?
+              if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+                MSG="bun test for ffi-${label} (LD_PRELOAD dlopen-block $block) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+                {
+                  printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                  printf '<testsuites tests="1" failures="1">\n'
+                  printf '  <testsuite name="ffi-%s-backend" tests="1" failures="1">\n' "$label"
+                  printf '    <testcase name="ffi-%s backend startup" classname="backend" time="0">\n' "$label"
+                  printf '      <failure message="%s"/>\n' "$MSG"
+                  printf '    </testcase>\n'
+                  printf '  </testsuite>\n'
+                  printf '</testsuites>\n'
+                } > "$JUNIT_FILE"
+              fi
+              [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+            done
+          fi
+
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$COV_DIR" 2>/dev/null || true
+          fi
+
+          # Merge per-backend lcov.info files into a single coverage/lcov.info,
+          # summing line hits where the same source line is recorded by both
+          # backends.  Keeps the test-summary aggregator simple (one file).
+          node -e "
+            const fs = require('fs'), path = require('path');
+            const covDir = process.argv[1];
+            const files = {};
+            const fnSeen = {}, brSeen = {};
+            for (const sub of fs.readdirSync(covDir)) {
+              const p = path.join(covDir, sub, 'lcov.info');
+              if (!fs.existsSync(p)) continue;
+              let sf = null;
+              for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
+                if (line.startsWith('SF:')) {
+                  sf = line.slice(3);
+                  if (!files[sf]) files[sf] = { da: {}, fn: [], fnda: {}, brda: [] };
+                } else if (sf === null) continue;
+                else if (line.startsWith('DA:')) {
+                  const [ln, hits] = line.slice(3).split(',').map(Number);
+                  files[sf].da[ln] = (files[sf].da[ln] || 0) + (hits || 0);
+                } else if (line.startsWith('FN:')) {
+                  if (!fnSeen[sf+'|'+line]) { fnSeen[sf+'|'+line] = 1; files[sf].fn.push(line); }
+                } else if (line.startsWith('FNDA:')) {
+                  const m = line.slice(5).split(',');
+                  const name = m.slice(1).join(',');
+                  files[sf].fnda[name] = (files[sf].fnda[name] || 0) + Number(m[0] || 0);
+                } else if (line === 'end_of_record') sf = null;
+              }
+            }
+            const out = [];
+            for (const [sf, info] of Object.entries(files)) {
+              out.push('TN:', 'SF:' + sf);
+              for (const fn of info.fn) out.push(fn);
+              for (const [name, h] of Object.entries(info.fnda)) out.push('FNDA:' + h + ',' + name);
+              for (const ln of Object.keys(info.da).map(Number).sort((a, b) => a - b)) {
+                out.push('DA:' + ln + ',' + info.da[ln]);
+              }
+              out.push('end_of_record');
+            }
+            fs.writeFileSync(path.join(covDir, 'lcov.info'), out.join('\n') + '\n');
+          " "$COV_DIR"
+
+          exit "$OVERALL_RC"
 
       - name: Run mechatron-robot-js conformance tests
         run: |
-          # Root package is named "mechatron" but can't itself be a workspace, so
-          # mechatron-robot-js's `"mechatron": "*"` dep resolves from the registry.
-          # Use `npm link` to replace it with the working copy (uses junctions on Windows).
+          # Conformance always runs under node — it validates the published
+          # node-consumer API contract and we want regressions there caught
+          # independently of the bun runner.  No coverage collected.
+          #
+          # Root package is named "mechatron" but can't itself be a workspace,
+          # so mechatron-robot-js's `"mechatron": "*"` dep resolves from the
+          # registry.  `npm link` replaces it with the working copy
+          # (uses junctions on Windows).
           npm link
           npm link mechatron -w mechatron-robot-js
 
-          # Run conformance tests and append result to JUnit XML
+          # Run conformance tests and write a standalone JUnit XML file.
           node -e "
             const { execFileSync } = require('child_process');
             const fs = require('fs');
@@ -236,22 +508,21 @@ jobs:
             }
             const elapsed = ((Date.now() - start) / 1000).toFixed(3);
             process.stdout.write(output);
-            if (fs.existsSync(junitFile)) {
-              const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              let tc;
-              if (rc === 0) {
-                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>';
-              } else {
-                const fails = output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ');
-                tc = '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(fails) + '\"/></testcase>';
-              }
-              const xml = fs.readFileSync(junitFile, 'utf8');
-              fs.writeFileSync(junitFile, xml.replace('</testsuite>', tc + '</testsuite>'));
-            }
+            const esc = s => s.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const tc = rc === 0
+              ? '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"/>'
+              : '<testcase name=\"robot-js compat\" classname=\"conformance\" time=\"' + elapsed + '\"><failure message=\"' + esc(output.split('\\n').filter(l => l.includes('FAIL:')).slice(0,5).join(' ')) + '\"/></testcase>';
+            const xml = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n'
+              + '<testsuites tests=\"1\" failures=\"' + (rc === 0 ? 0 : 1) + '\" time=\"' + elapsed + '\">\n'
+              + '  <testsuite name=\"conformance\" tests=\"1\" failures=\"' + (rc === 0 ? 0 : 1) + '\" time=\"' + elapsed + '\">\n'
+              + '    ' + tc + '\n'
+              + '  </testsuite>\n'
+              + '</testsuites>\n';
+            fs.writeFileSync(junitFile, xml);
             process.exit(rc);
           "
         env:
-          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml
+          JUNIT_FILE: ${{ runner.temp }}/junit/mechatron-${{ matrix.os }}-${{ matrix.arch }}-conformance.xml
 
       - uses: actions/upload-artifact@v7
         if: always()

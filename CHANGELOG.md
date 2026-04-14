@@ -2,6 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.5] - 2026-04-14
+
+### Added
+- **Bun FFI backend** — pure-TypeScript implementation of all seven subsystems
+  (keyboard, mouse, clipboard, screen, window, process, memory) on Linux,
+  Windows, and macOS, using `bun:ffi` to dlopen system libraries directly:
+  libX11/libXtst/libXrandr on Linux, user32/gdi32/kernel32/psapi on Windows,
+  CoreGraphics/AppKit/AXUIElement/libproc/mach on macOS.  No native binary
+  is downloaded for Bun consumers — Bun loads the package's TypeScript
+  directly via the `"bun"` exports condition in `package.json`
+- **Unified native loader** (`lib/napi.ts`) — resolves each subsystem to
+  either the NAPI prebuild (`@mechatronic/napi-<sub>`) or the pure-TS FFI
+  module under `lib/ffi/<sub>.ts`.  Under Bun, NAPI is preferred when the
+  prebuild is installed; FFI is the fallback.  `MECHATRON_BACKEND=napi|ffi`
+  forces a specific backend; `getBackend(subsystem)` introspects the choice
+- **Dual-engine test runner** — `test/test.js` now runs the shared subsystem
+  test factories under up to three engines: `node-napi`, `bun-ffi`, and
+  `bun-napi`.  `test/bun.test.ts` wraps the same factories in a `bun:test`
+  harness so they can run standalone under Bun
+- **CI coverage aggregation** — per-cell lcov results from both backends
+  are merged into a combined report posted to each PR, with an aggregate
+  line-coverage badge across all six platform/arch cells
+- **LD_PRELOAD dlopen-block shim** (`test/dlopen-block.c`) — selectively
+  refuses `dlopen` for sonames matching a substring list, used in CI to
+  exercise the `libXtst`/`libXrandr` unavailable catch arms in `lib/ffi/x11.ts`
+  without physically uninstalling the libraries
+- **Kernel-failure error-arm probes** — dedicated tests for
+  `task_for_pid`-denied (hardened-binary target on macOS) and
+  `XGetWindowProperty` non-zero status (invalid-window handle on Linux) to
+  cover the genuine-failure branches that the black-box API tests can't reach
+- **CI display harness for Linux** — Xvfb + openbox + xmessage provide a
+  compositor-less display with a single mapped test window, enabling the
+  window-enumeration and screen-capture tests to assert real geometry
+  rather than falling back to "no display" skips
+- **macOS x64 CI via Rosetta 2** — the `macos-15` arm64 runner now also
+  executes the x64 cell under Rosetta, giving both Bun backends full x64
+  exercise without needing the deprecated Intel runner pool
+
+### Changed
+- **XRandR 1.5 replaces Xinerama** in both the FFI and NAPI screen backends
+  — `XRRGetMonitors` is used for primary-monitor identification and
+  per-output geometry; `XDefaultScreen` bounds are the fallback when
+  libXrandr is not available
+- **`mechatron-robot-js` robot-js shim** is now a full legacy compatibility
+  layer built on top of the modern mechatron API, rather than a one-line
+  re-export — restores `callableClass` Proxies, `ROBOT_VERSION`,
+  top-level `sleep`/`clock`, `KEY_*` / `BUTTON_*` globals, and
+  `Module.Segment` / `Memory.Stats` / `Memory.Region` nested references
+  that were removed from the modern surface in v0.0.4
+- **`package.json` `exports`** adds a `"bun"` condition pointing at
+  `./lib/index.ts` so Bun consumes TypeScript directly while Node.js
+  continues to load `./dist/index.js`
+
+### Fixed
+- **FFI/Linux X11 pointer ABI** — XRandR and XImage result pointers are
+  now consistently declared as `T.u64` in the `bun:ffi` signatures and
+  coerced to `Number` before passing back into pointer-accepting
+  functions, fixing intermittent `bigint` rejection crashes under Bun
+- **FFI/Linux silent Xlib error handler** — installs an `XSetErrorHandler`
+  callback during FFI init so X protocol errors (e.g. `BadWindow` on a
+  stale handle) do not tear down the Bun process
+- **FFI/macOS clipboard text** — uses `NSData` / `writeObjects:` inside an
+  autorelease pool and resolves `NSPasteboardTypeString` via an AppKit
+  `dlopen` handle, avoiding the tagged-pointer CFString corruption that
+  `bun:ffi` surfaced on Apple Silicon
+- **FFI/Windows clipboard image** — uses `bun:ffi`'s `toArrayBuffer` for
+  clipboard reads and writes so large bitmaps are copied without the
+  truncation seen via generic pointer deref
+- **Screen oversize-grab guard** — `grabScreen` in all backends now
+  explicitly validates the `Uint32Array` allocation before handing it to
+  the native copy, throwing a clean `RangeError` instead of crashing on
+  4-billion-pixel requests
+
 ## [v0.0.4] - 2026-04-13
 
 ### Added

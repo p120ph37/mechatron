@@ -58,9 +58,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(list[i].getPID() > 0, "list[" + i + "] pid > 0");
 		}
 
-		// Regex filter
-		var filtered = Process.getList(".*node.*");
-		assert(filtered.length > 0, "filtered has node");
+		// Regex filter — pattern derived from the current process so the test
+		// works under any runtime (node, bun, …).
+		var ownName = curr.getName().replace(/[\\.+*?^$()[\]{}|]/g, "\\$&");
+		var filtered = Process.getList(".*" + ownName + ".*");
+		assert(filtered.length > 0, "filtered has " + ownName);
 
 		// --- isSys64Bit ---
 		assert(typeof Process.isSys64Bit() === "boolean", "isSys64Bit bool");

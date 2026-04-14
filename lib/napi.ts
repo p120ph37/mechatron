@@ -1,9 +1,25 @@
 /**
  * Unified native module loader.
  *
- * Each subsystem's NAPI binary lives in its own optional package
- * (`@mechatronic/napi-keyboard`, etc.).  This module resolves and loads them
- * on demand, with graceful fallback when a native package is absent.
+ * Two backends are supported:
+ *
+ *   - **NAPI**: per-subsystem `.node` binary loaded from
+ *     `@mechatronic/napi-<sub>`.  Standard for Node.js.  Also works in Bun.
+ *
+ *   - **FFI** (Bun only): pure-TypeScript wrapper around `bun:ffi` that
+ *     dlopens the platform's system libraries directly (libX11/libXtst on
+ *     Linux, user32.dll on Windows).  No native build step on the consumer
+ *     end and no `.node` / `.so` / `.dll` shipped — Bun loads our raw
+ *     TypeScript via the `"bun"` exports condition in package.json.
+ *
+ * Backend selection: when running in Bun, NAPI is preferred (it's usually
+ * faster and better tested) and falls back to FFI if the appropriate
+ * `@mechatronic/napi-<sub>` prebuild isn't installed for the current
+ * platform.  In Node.js, NAPI is the only option.  The `MECHATRON_BACKEND`
+ * environment variable can force a specific choice (`napi` or `ffi`).
+ *
+ * Regardless of backend, callers see a uniform object whose method names
+ * match the napi `js_name` exports (e.g. `keyboard_getKeyState`).
  */
 
 const SUBSYSTEMS = [
@@ -11,8 +27,16 @@ const SUBSYSTEMS = [
 ] as const;
 
 export type Subsystem = typeof SUBSYSTEMS[number];
+export type Backend = "napi" | "ffi";
 
-function getNodeFile(subsystem: string): string {
+const IS_BUN = typeof (globalThis as any).Bun !== "undefined";
+
+function envBackend(): Backend | null {
+  const v = (process.env.MECHATRON_BACKEND || "").toLowerCase();
+  return v === "napi" || v === "ffi" ? v : null;
+}
+
+function napiNodeFile(subsystem: string): string {
   const p = process.platform;
   const a = process.arch;
   const map: Record<string, string> = {
@@ -27,40 +51,74 @@ function getNodeFile(subsystem: string): string {
 }
 
 const _cache: Partial<Record<Subsystem, any>> = {};
-const _errors: Partial<Record<Subsystem, Error>> = {};
+const _backend: Partial<Record<Subsystem, Backend>> = {};
 
-function tryLoad(subsystem: Subsystem): any {
-  if (_cache[subsystem]) return _cache[subsystem];
-  if (_errors[subsystem]) return null;
-
-  const path = require("path");
-  const nodeFile = getNodeFile(subsystem);
-
-  // Resolve from @mechatronic/napi-<sub> package (installed via optionalDependencies,
-  // or linked via npm workspaces during development)
+function tryLoadNapi(subsystem: Subsystem): any | null {
   try {
+    const path = require("path");
     const pkgDir = path.dirname(
       require.resolve(`@mechatronic/napi-${subsystem}/package.json`)
     );
-    _cache[subsystem] = require(path.join(pkgDir, nodeFile));
-    return _cache[subsystem];
-  } catch (_) {}
+    return require(path.join(pkgDir, napiNodeFile(subsystem)));
+  } catch (_) {
+    return null;
+  }
+}
 
-  _errors[subsystem] = new Error(
-    `mechatron: native module for "${subsystem}" is not available. ` +
-    `Install @mechatronic/napi-${subsystem} or build from source.`
-  );
+function tryLoadFfi(subsystem: Subsystem): any | null {
+  if (!IS_BUN) return null;
+  // Each FFI module is a sibling .ts file under ./ffi/.  Any subsystem
+  // that hasn't been ported yet simply doesn't exist as a module, and
+  // require() throws — returning null lets the caller fall back to napi.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require(`./ffi/${subsystem}`);
+  } catch (_) {
+    return null;
+  }
+}
+
+function tryLoad(subsystem: Subsystem): any | null {
+  if (_cache[subsystem]) return _cache[subsystem];
+
+  const forced = envBackend();
+  const order: Backend[] =
+    forced === "ffi"  ? ["ffi"]  :
+    forced === "napi" ? ["napi"] :
+    IS_BUN            ? ["napi", "ffi"] :
+                        ["napi"];
+
+  for (const be of order) {
+    const mod = be === "ffi" ? tryLoadFfi(subsystem) : tryLoadNapi(subsystem);
+    if (mod) {
+      _cache[subsystem] = mod;
+      _backend[subsystem] = be;
+      return mod;
+    }
+  }
+
   return null;
 }
 
 /** Load the native module for a subsystem, throwing if unavailable. */
 export function getNative(subsystem: Subsystem): any {
   const mod = tryLoad(subsystem);
-  if (!mod) throw _errors[subsystem]!;
-  return mod;
+  if (mod) return mod;
+  throw new Error(
+    `mechatron: native module for "${subsystem}" is not available. ` +
+    `Install @mechatronic/napi-${subsystem} or build from source` +
+    (IS_BUN ? `, or use a Bun runtime with the FFI backend implemented for this subsystem` : "") +
+    "."
+  );
 }
 
 /** Check whether a subsystem's native module can be loaded. */
 export function isAvailable(subsystem: Subsystem): boolean {
   return tryLoad(subsystem) !== null;
+}
+
+/** Identify which backend is in use for a loaded subsystem (or null). */
+export function getBackend(subsystem: Subsystem): Backend | null {
+  tryLoad(subsystem);
+  return _backend[subsystem] || null;
 }

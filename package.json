@@ -4,6 +4,19 @@
   "description": "Node.js native addon for desktop automation (keyboard, mouse, screen, process, memory, window)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": {
+        "types": "./lib/index.ts",
+        "default": "./lib/index.ts"
+      },
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "workspaces": [
     "packages/@mechatronic/napi-keyboard",
     "packages/@mechatronic/napi-mouse",
@@ -18,8 +31,10 @@
     "build:native": "cd napi && cargo build --release",
     "build:test-helper": "clang -O2 test/memory-child.c -o test/memory-child",
     "build": "tsc",
-    "test": "node test/test.js types timer",
-    "test:all": "node test/test.js all"
+    "test": "bun test",
+    "test:napi": "MECHATRON_BACKEND=napi bun test",
+    "test:ffi": "MECHATRON_BACKEND=ffi bun test",
+    "test:node": "node test/test.js all --backend napi"
   },
   "repository": {
     "type": "git",
@@ -33,7 +48,8 @@
     "win32"
   ],
   "files": [
-    "dist/"
+    "dist/",
+    "lib/"
   ],
   "optionalDependencies": {
     "@mechatronic/napi-clipboard": "*",
@@ -46,7 +62,6 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "c8": "^11.0.0",
     "pngjs": "^6.0.0",
     "readline-sync": "~1.4",
     "sprintf-js": "~1.1",

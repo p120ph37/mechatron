@@ -14,3 +14,5 @@ packages/@mechatronic/*/mechatron-*.node
 coverage/
 test/memory-child
 test/memory-child.exe
+test/dlopen-block.so
+

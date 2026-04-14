@@ -108,12 +108,26 @@ Or depend on `mechatron-robot-js` directly — it provides the full robot-js
 
 ## Architecture
 
-All TypeScript lives in the root `mechatron` package under `lib/`.  The native
-backend is a Cargo workspace (`napi/`) of seven per-subsystem `cdylib` crates
-built with napi-rs, each exposing minimal FFI — platform syscall wrappers with
-no business logic.  At runtime, `lib/napi.ts` resolves each subsystem's
-`.node` binary from its `@mechatronic/napi-*` optional dependency (workspace
-symlinks provide resolution during development).
+All TypeScript lives in the root `mechatron` package under `lib/`.  The
+default native backend is a Cargo workspace (`napi/`) of seven per-subsystem
+`cdylib` crates built with napi-rs, each exposing minimal FFI — platform
+syscall wrappers with no business logic.  At runtime, `lib/napi.ts` resolves
+each subsystem's `.node` binary from its `@mechatronic/napi-*` optional
+dependency (workspace symlinks provide resolution during development).
+
+### Bun runtime
+
+Under Bun, the loader still prefers the NAPI backend when the appropriate
+`@mechatronic/napi-<sub>` prebuild is installed — it's faster and better
+tested.  When the NAPI prebuild is missing, the loader falls back to a
+pure-TypeScript `bun:ffi` backend in `lib/ffi/` that dlopens the underlying
+system libraries (libX11/libXtst/libXrandr, user32.dll, etc.) directly.
+This lets Bun consumers install mechatron without any native binary at all
+(`bun install mechatron --omit=optional`) — Bun loads the package's
+TypeScript directly via the `"bun"` exports condition.
+
+Force a specific backend with `MECHATRON_BACKEND=napi|ffi`.  Query the
+selected backend with `getBackend("keyboard")`.
 
 ## Build from Source
 

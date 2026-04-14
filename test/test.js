@@ -3,24 +3,23 @@
 //                                                                            //
 //                    Mechatron Modern API Test Suite                          //
 //                                                                            //
-//  Exercises all subsystems using the modern mechatron API surface.           //
-//  For robot-js legacy API tests, see packages/mechatron-robot-js/test/.     //
+//  Single-backend Node.js runner for the modern mechatron API surface.       //
+//  This is the legacy fallback used in CI for the matrix cells where Bun     //
+//  isn't usable: Windows ia32 (no 32-bit Bun build) and macOS x64 cross-     //
+//  compiled on arm64 (Bun's macOS x64 binary SIGILLs under Rosetta).         //
+//  Every other cell runs `bun test test/bun.test.ts`, which exercises both   //
+//  the napi and ffi backends and produces JavaScriptCore-based coverage.    //
+//                                                                            //
+//  For robot-js legacy API tests, see packages/mechatron-robot-js/test/.    //
 //                                                                            //
 //  Usage:                                                                    //
-//    node test/test.js [tests...] [--backend rust]                           //
-//    node test/test.js all                                                   //
-//    node test/test.js types timer          (headless subset)                //
+//    node test/test.js [tests...] --backend napi [--junit <path>]            //
+//    node test/test.js all --backend napi                                    //
 //                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
 
 "use strict";
-
-//----------------------------------------------------------------------------//
-// Backend selection & dual-backend runner                                     //
-//----------------------------------------------------------------------------//
-
-var _allArgs = process.argv.slice(2);
 
 // Parse named flags: --backend <val>, --junit <path>
 function extractFlag(args, flag) {
@@ -31,78 +30,18 @@ function extractFlag(args, flag) {
 	return { value: val, rest: rest };
 }
 
+var _allArgs = process.argv.slice(2);
 var _b = extractFlag(_allArgs, "--backend");
-var _backendArg = _b.value;
+var _backendArg = _b.value || "napi";
 var _j = extractFlag(_b.rest, "--junit");
 var _junitPath = _j.value;
 var _testArgs = _j.rest;
 
-// When no --backend specified, run as dual-backend coordinator
-if (!_backendArg) {
-	var _child_process = require("child_process");
-	var _path = require("path");
-
-	var _backends = [];
-
-	// Probe Rust backend
-	try {
-		var _probe = require(_path.resolve(__dirname, ".."));
-		new _probe.Keyboard();
-		_backends.push("rust");
-	} catch (_e) {
-		process.stdout.write("  [skip] Rust backend not available (" + _e.message + ")\n");
-	}
-
-	if (_backends.length === 0) {
-		process.stdout.write("\nERROR: No backends available to test!\n");
-		process.exitCode = 2;
-	} else {
-		var _overallFailed = false;
-		process.stdout.write("\n==============================\n");
-		process.stdout.write("MECHATRON TEST RUNNER\n");
-		process.stdout.write("Backends: " + _backends.join(", ") + "\n");
-		process.stdout.write("==============================\n");
-
-		for (var _bi = 0; _bi < _backends.length; ++_bi) {
-			var _be = _backends[_bi];
-			process.stdout.write("\n>>> Running tests with " + _be.toUpperCase() + " backend...\n");
-
-			var _childArgs = [__filename].concat(_testArgs).concat(["--backend", _be]);
-			if (_junitPath) _childArgs.push("--junit", _junitPath.replace(/\.xml$/, "-" + _be + ".xml"));
-			var _result = _child_process.spawnSync(process.execPath, _childArgs, {
-				stdio: "inherit",
-				env: process.env,
-				cwd: _path.resolve(__dirname, ".."),
-				timeout: 120000,
-			});
-
-			if (_result.status !== 0) {
-				_overallFailed = true;
-				process.stdout.write(">>> " + _be.toUpperCase() + " backend: FAILED (exit " + _result.status + ")\n");
-			} else {
-				process.stdout.write(">>> " + _be.toUpperCase() + " backend: PASSED\n");
-			}
-		}
-
-		process.stdout.write("\n==============================\n");
-		if (_overallFailed) {
-			process.stdout.write("RESULT: SOME BACKENDS FAILED\n");
-			process.exitCode = 2;
-		} else {
-			process.stdout.write("RESULT: ALL BACKENDS PASSED\n");
-		}
-		process.stdout.write("==============================\n\n");
-	}
-	return;
-}
-
-// --backend was specified — load mechatron and run tests
-var _path = require("path");
-if (_backendArg !== "rust") {
+if (_backendArg !== "napi" && _backendArg !== "ffi") {
 	process.stderr.write("Unknown backend: " + _backendArg + "\n");
-	process.exitCode = 2;
-	return;
+	process.exit(2);
 }
+process.env.MECHATRON_BACKEND = _backendArg;
 var mechatron = require("..");
 
 ////////////////////////////////////////////////////////////////////////////////

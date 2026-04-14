@@ -109,17 +109,22 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Install dependencies and build
-        # Run against the UNMODIFIED package*.json files so `npm ci` can
-        # verify the lockfile.  The "Set package versions" step below
-        # edits package.json (including pinning mechatron-robot-js's
-        # dependency on mechatron to an exact version that doesn't exist
-        # on the registry yet), which would make `npm ci` fail with
-        # ETARGET.  `npm publish` reads package.json directly at publish
-        # time, so the edits still apply to the published artifacts.
+        # Run against the UNMODIFIED package*.json files so `bun install
+        # --frozen-lockfile` can verify the lockfile.  The "Set package
+        # versions" step below edits package.json (including pinning
+        # mechatron-robot-js's dependency on mechatron to an exact
+        # version that doesn't exist on the registry yet), which would
+        # make a frozen install fail.  `npm publish` reads package.json
+        # directly at publish time, so the edits still apply to the
+        # published artifacts.
         run: |
-          npm ci --ignore-scripts
-          npx tsc
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build
 
       - name: Set package versions (all workspaces)
         run: |

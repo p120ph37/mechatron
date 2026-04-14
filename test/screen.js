@@ -125,6 +125,25 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(typeof r6 === "boolean", "grabScreen Bounds + window-like");
 		}
 
+		// --- Oversize grab (handle-allocation failure path) ---
+		// Pushes CreateCompatibleBitmap / CGBitmapContextCreate / XGetImage past
+		// what the host can allocate.  The FFI backends each have a null-check
+		// arm for the allocation result; this test reaches it without crashing
+		// the process.  The Windows NAPI backend aborts at C++ level on
+		// impossibly large requests (exit 3 bypasses JS try/catch), so
+		// restrict this probe to the FFI backend where we control the
+		// allocation path.
+		if (mechatron.getBackend("screen") === "ffi") {
+			var imgHuge = new Image();
+			var rHuge;
+			try {
+				rHuge = Screen.grabScreen(imgHuge, 0, 0, 100000, 100000);
+			} catch (_) {
+				rHuge = false;
+			}
+			assert(typeof rHuge === "boolean", "oversize grabScreen returns boolean or throws");
+		}
+
 		// --- Async variants ---
 		var pa1 = Screen.synchronizeAsync();
 		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");

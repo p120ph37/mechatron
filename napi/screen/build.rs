@@ -6,7 +6,7 @@ fn main() {
     #[cfg(target_os = "linux")]
     {
         println!("cargo:rustc-link-lib=X11");
-        println!("cargo:rustc-link-lib=Xinerama");
+        println!("cargo:rustc-link-lib=Xrandr");
         println!("cargo:rustc-link-lib=rt");
     }
 
