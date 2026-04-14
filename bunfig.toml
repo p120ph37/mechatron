@@ -11,7 +11,12 @@
 # than Bun's default 5 s timeout.
 timeout = 60000
 # Don't bill the test files themselves against coverage.
+# `coverageSkipTestFiles` only catches the *.test.*/*.spec.* naming convention;
+# our per-subsystem helpers (test/keyboard.js, test/mouse.js, …) are deliberately
+# named without `.test.` so Bun doesn't load them directly.  Add an explicit
+# path-glob exclusion so they're also excluded from coverage instrumentation.
 coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["test/**"]
 # We use require()/process.execPath for spawning helpers; preloading is unused.
 
 # Don't run bun's package-lifecycle scripts when installing dev tooling — the
