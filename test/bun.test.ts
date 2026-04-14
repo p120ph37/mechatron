@@ -56,6 +56,10 @@ const _blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
 if (_blocked.includes("libxtst")) {
   gExpect.keyboardSim = false;
   gExpect.mouseSim = false;
+  // linux_mouse_setPos short-circuits on !isXTestAvailable() even though
+  // XWarpPointer itself lives in libX11 (lib/ffi/mouse.ts:131), so the
+  // getPos/setPos round-trip observes no movement when libXtst is blocked.
+  gExpect.mousePos = false;
 }
 
 const log = (msg: string) => process.stdout.write(msg);
