@@ -226,6 +226,47 @@ jobs:
 
           run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
 
+          # run_bun LABEL JUNIT_FILE -- <bun test command> ...
+          # Wraps run_and_log with: (1) a visible progress marker so CI
+          # logs show exactly which invocation the script is on, and
+          # (2) a single retry when bun exits non-zero with an empty
+          # JUnit file (i.e. crashed before a single testcase could
+          # execute).  The ubuntu-22.04-arm runner has intermittently
+          # killed bun at --coverage instrumentation setup time with
+          # zero stdout/stderr; a single retry clears this without
+          # masking real test failures (which always produce testcases
+          # and thus skip the retry).
+          run_bun() {
+            local LABEL="$1"; shift
+            local JUNIT_FILE="$1"; shift
+            [ "$1" = "--" ] && shift
+            local ATTEMPT RC OUT_BEFORE OUT_AFTER
+            OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
+            for ATTEMPT in 1 2; do
+              echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
+              RC=0
+              run_and_log "$@" || RC=$?
+              if [ "$RC" = 0 ]; then return 0; fi
+              OUT_AFTER=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
+              # If bun produced any testcase output, this is a real
+              # test failure — don't retry.  Otherwise it's a startup
+              # crash on a pristine junit file; retry once.
+              if [ -s "$JUNIT_FILE" ] && grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+                echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
+                return "$RC"
+              fi
+              if [ "$ATTEMPT" = 2 ]; then
+                echo ">>> [$LABEL] retry also failed (rc=$RC), giving up" | tee -a "$TEST_LOG"
+                return "$RC"
+              fi
+              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying once" | tee -a "$TEST_LOG"
+              # Clear the empty junit so the second attempt gets a
+              # clean file and our "no testcase" detection works below.
+              rm -f "$JUNIT_FILE"
+              sleep 2
+            done
+          }
+
           # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             NODE_VERSION=$(node -v)
@@ -323,7 +364,7 @@ jobs:
             mkdir -p "$BE_COV_DIR"
             BE_RC=0
             MECHATRON_BACKEND="$be" \
-              run_and_log "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+              run_bun "$be" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
                 --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
                 --reporter=junit --reporter-outfile="$JUNIT_FILE" \
               || BE_RC=$?
@@ -368,7 +409,7 @@ jobs:
               MECHATRON_BACKEND=ffi \
               MECHATRON_BLOCK_DLOPEN="$block" \
               LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
-                run_and_log "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                run_bun "ffi-$label" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
                   --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
                   --reporter=junit --reporter-outfile="$JUNIT_FILE" \
                 || BE_RC=$?
