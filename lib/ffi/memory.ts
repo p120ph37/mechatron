@@ -14,9 +14,17 @@ import * as fs from "fs";
 
 import { libc, libcFFI, _SC_PAGESIZE, makeIovec, makeRemoteIovec } from "./linux";
 import { kernel32, winFFI } from "./win";
+import {
+  libc as mac, macFFI,
+  VM_REGION_BASIC_INFO_64, VM_REGION_BASIC_INFO_COUNT_64,
+  VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE,
+  MAC_MIN_VM, MAC_MAX_VM_64,
+  PROC_PIDT_SHORTBSDINFO, _SC_PAGESIZE as MAC_SC_PAGESIZE,
+} from "./mac";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 
 // ── Region shape (matches napi region_to_obj) ──────────────────────────
 
@@ -103,6 +111,116 @@ function linuxWrite(pid: number, addr: number, buf: Uint8Array): number {
   const remote = makeRemoteIovec(BigInt(addr), buf.length);
   const n = c.process_vm_writev(pid, F.ptr(local.iov) as any, 1n, F.ptr(remote) as any, 1n, 0n);
   return n < 0n ? 0 : Number(n);
+}
+
+// ── macOS internals ───────────────────────────────────────────────────
+
+function macGetTask(pid: number): number {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || pid <= 0) return 0;
+  const self = m.mach_task_self();
+  const out = new Uint32Array(1);
+  if (m.task_for_pid(self, pid, F.ptr(out)) !== 0) return 0;
+  return out[0];
+}
+
+function macProcessExists(pid: number): boolean {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || pid <= 0) return false;
+  if (m.kill(pid, 0) === 0) return true;
+  // Fallback: proc_pidpath returns > 0 if the pid is valid.
+  const buf = new Uint8Array(16);
+  return m.proc_pidpath(pid, F.ptr(buf), buf.length) > 0;
+}
+
+/**
+ * Read a single VM region using `mach_vm_region`.  Returns a RegionInfo
+ * whose `bound` flag is true when the queried address falls within the
+ * region, or false when `mach_vm_region` skipped past an unmapped gap.
+ */
+function macGetRegion(task: number, address: number): RegionInfo {
+  const r = emptyRegion();
+  if (task === 0) return r;
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F) return r;
+
+  const base = new BigUint64Array(1);
+  const size = new BigUint64Array(1);
+  // vm_region_basic_info_64: 9 u32-words = 36 bytes.
+  const info = new Uint8Array(36);
+  const count = new Uint32Array([VM_REGION_BASIC_INFO_COUNT_64]);
+  const port = new Uint32Array(1);
+  base[0] = BigInt(address);
+  if (m.mach_vm_region(
+    task, F.ptr(base), F.ptr(size),
+    VM_REGION_BASIC_INFO_64,
+    F.ptr(info), F.ptr(count), F.ptr(port),
+  ) !== 0) return r;
+
+  const iv = new DataView(info.buffer);
+  const protection = iv.getInt32(0, true);
+  const shared = iv.getUint32(12, true);
+  const start = Number(base[0]);
+  const stop = start + Number(size[0]);
+
+  if (stop > MAC_MAX_VM_64) return r;
+
+  r.valid = true;
+  r.start = address;
+  if (start <= address && address < stop) {
+    r.bound = true;
+    r.stop = stop;
+    r.size = stop - address;
+    r.access = protection >>> 0;
+    r.readable = (protection & VM_PROT_READ) !== 0;
+    r.writable = (protection & VM_PROT_WRITE) !== 0;
+    r.executable = (protection & VM_PROT_EXECUTE) !== 0;
+    r.private = shared === 0;
+  } else {
+    // Unbound gap — address sits before this region.
+    r.stop = start;
+    r.size = start - address;
+  }
+  return r;
+}
+
+function macRead(task: number, address: number, buf: Uint8Array): number {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || task === 0 || buf.length === 0) return 0;
+  const outSize = new BigUint64Array(1);
+  const r = m.mach_vm_read_overwrite(
+    task, BigInt(address), BigInt(buf.length),
+    BigInt(F.ptr(buf) as any), F.ptr(outSize),
+  );
+  return r === 0 ? Number(outSize[0]) : 0;
+}
+
+function macWrite(task: number, address: number, buf: Uint8Array): number {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || task === 0 || buf.length === 0) return 0;
+  const r = m.mach_vm_write(task, BigInt(address), BigInt(F.ptr(buf) as any), buf.length);
+  return r === 0 ? buf.length : 0;
+}
+
+/** Walk all VM regions, returning those that intersect [start, stop). */
+function macQueryRegions(task: number, start: number, stop: number): RegionInfo[] {
+  const out: RegionInfo[] = [];
+  if (task === 0) return out;
+  let addr = Math.max(start, 0);
+  for (;;) {
+    if (addr >= stop) break;
+    const r = macGetRegion(task, addr);
+    if (!r.valid) break;
+    if (r.bound) out.push(r);
+    if (r.stop === 0 || r.stop <= addr) break;
+    addr = r.stop;
+  }
+  return out;
 }
 
 // ── Windows internals ─────────────────────────────────────────────────
@@ -298,6 +416,7 @@ export function memory_isValid(pid: number): boolean {
     winClose(h);
     return true;
   }
+  if (IS_MAC) return macProcessExists(pid);
   return false;
 }
 
@@ -336,6 +455,11 @@ export function memory_getRegion(pid: number, address: number): RegionInfo {
       winClose(h);
     }
   }
+  if (IS_MAC) {
+    const task = macGetTask(pid);
+    if (task === 0) return emptyRegion();
+    return macGetRegion(task, address);
+  }
   return emptyRegion();
 }
 
@@ -348,11 +472,23 @@ export function memory_getRegions(pid: number, start?: number, stop?: number): R
   if (IS_WIN) {
     return winQueryRegions(pid, startAddr, stopAddr);
   }
+  if (IS_MAC) {
+    const task = macGetTask(pid);
+    if (task === 0) return [];
+    return macQueryRegions(task, startAddr, Math.min(stopAddr, MAC_MAX_VM_64));
+  }
   return [];
 }
 
 export function memory_setAccess(pid: number, regionStart: number, readable: boolean, writable: boolean, executable: boolean): boolean {
   if (IS_LINUX) return false;
+  if (IS_MAC) {
+    let access = 0;
+    if (readable)   access |= VM_PROT_READ;
+    if (writable)   access |= VM_PROT_WRITE;
+    if (executable) access |= VM_PROT_EXECUTE;
+    return memory_setAccessFlags(pid, regionStart, access);
+  }
   if (IS_WIN) {
     let access: number;
     if (executable) {
@@ -369,6 +505,15 @@ export function memory_setAccess(pid: number, regionStart: number, readable: boo
 
 export function memory_setAccessFlags(pid: number, regionStart: number, flags: number): boolean {
   if (IS_LINUX) return false;
+  if (IS_MAC) {
+    const m = mac();
+    if (!m) return false;
+    const task = macGetTask(pid);
+    if (task === 0) return false;
+    const region = macGetRegion(task, regionStart);
+    if (!region.valid || !region.bound) return false;
+    return m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, flags | 0) === 0;
+  }
   if (IS_WIN) {
     const k = kernel32();
     const F = winFFI();
@@ -389,6 +534,24 @@ export function memory_setAccessFlags(pid: number, regionStart: number, flags: n
 }
 
 export function memory_getPtrSize(pid: number): number {
+  if (IS_MAC) {
+    const m = mac();
+    const F = macFFI();
+    if (!m || !F || pid <= 0) return 0;
+    // proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO=13, 0, buf, 232) fills a
+    // 232-byte proc_bsdshortinfo.  Bit 0x04 of pbsi_flags (@offset 48) is
+    // P_LP64; on modern arm64 macOS the kernel doesn't reliably set it,
+    // so treat any successful call as 64-bit.
+    const buf = new Uint8Array(232);
+    const ret = m.proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0n, F.ptr(buf), buf.length);
+    if (ret > 0) {
+      const flags = new DataView(buf.buffer).getUint32(48, true);
+      if ((flags & 0x04) !== 0) return 8;
+      // Fall back to "64-bit on modern macOS".
+      return 8;
+    }
+    return 8;
+  }
   if (IS_LINUX) {
     if (!isProcValid(pid)) return 0;
     try {
@@ -425,6 +588,7 @@ export function memory_getMinAddress(pid: number): number {
     return regions.length > 0 ? regions[0].start : 0;
   }
   if (IS_WIN) return winSysInfo().minAddr;
+  if (IS_MAC) return MAC_MIN_VM;
   return 0;
 }
 
@@ -434,6 +598,7 @@ export function memory_getMaxAddress(pid: number): number {
     return regions.length > 0 ? regions[regions.length - 1].stop : 0;
   }
   if (IS_WIN) return winSysInfo().maxAddr;
+  if (IS_MAC) return MAC_MAX_VM_64;
   return 0;
 }
 
@@ -444,6 +609,10 @@ export function memory_getPageSize(_pid: number): number {
     return Number(c.sysconf(_SC_PAGESIZE));
   }
   if (IS_WIN) return winSysInfo().pageSize;
+  if (IS_MAC) {
+    const m = mac();
+    return m ? Number(m.sysconf(MAC_SC_PAGESIZE)) : 16384;
+  }
   return 4096;
 }
 
@@ -459,11 +628,16 @@ export function memory_find(
   const out: number[] = [];
   if (pat.length === 0) return out;
 
+  const macTask = IS_MAC ? macGetTask(pid) : 0;
   const regions = IS_LINUX ? parseMaps(pid)
     : IS_WIN ? winQueryRegions(pid, startAddr, stopAddr)
+    : IS_MAC ? macQueryRegions(macTask, startAddr, Math.min(stopAddr, MAC_MAX_VM_64))
     : [];
 
-  const reader = IS_LINUX ? linuxRead : IS_WIN ? winRead : null;
+  const reader = IS_LINUX ? linuxRead
+    : IS_WIN ? winRead
+    : IS_MAC ? ((_pid: number, addr: number, buf: Uint8Array) => macRead(macTask, addr, buf))
+    : null;
   if (!reader) return out;
 
   const CHUNK_CAP = 256 * 1024 * 1024;
@@ -527,6 +701,54 @@ export function memory_readData(pid: number, address: number, length: number, fl
       bytes += regionLen;
       a = end;
       idx++;
+    }
+    bytes += Math.max(0, stop - a);
+    return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
+  }
+
+  if (IS_MAC) {
+    const task = macGetTask(pid);
+    if (task === 0) return null;
+    if (f === FLAG_DEFAULT) {
+      const buf = new Uint8Array(len);
+      const got = macRead(task, address, buf);
+      return got > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
+    }
+    // SkipErrors / AutoAccess — walk regions one at a time via mach_vm_region.
+    const m = mac();
+    const buf = new Uint8Array(len);
+    const stop = address + len;
+    let bytes = 0;
+    let a = address;
+    while (a < stop) {
+      const region = macGetRegion(task, a);
+      if (!region.valid) break;
+      if (!region.bound) {
+        const gapEnd = Math.min(region.stop, stop);
+        bytes += gapEnd - a;
+        a = gapEnd;
+        if (a === 0 || region.stop === 0) break;
+        continue;
+      }
+      const end = Math.min(region.stop, stop);
+      const regionLen = end - a;
+      const offset = a - address;
+      let readable = region.readable;
+      if (!readable && f === FLAG_AUTO_ACCESS && m) {
+        if (m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, VM_PROT_READ) === 0) {
+          readable = true;
+          const slice = new Uint8Array(regionLen);
+          const n = macRead(task, a, slice);
+          if (n > 0) buf.set(slice.subarray(0, n), offset);
+          m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, region.access | 0);
+        }
+      } else if (readable) {
+        const slice = new Uint8Array(regionLen);
+        const n = macRead(task, a, slice);
+        if (n > 0) buf.set(slice.subarray(0, n), offset);
+      }
+      bytes += regionLen;
+      a = end;
     }
     bytes += Math.max(0, stop - a);
     return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
@@ -616,6 +838,44 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
       const offset = a - address;
       if (region.writable) {
         linuxWrite(pid, a, buf.subarray(offset, offset + regionLen));
+      }
+      bytes += regionLen;
+      a = end;
+    }
+    bytes += Math.max(0, stop - a);
+    return bytes;
+  }
+
+  if (IS_MAC) {
+    const task = macGetTask(pid);
+    if (task === 0) return 0;
+    if (f === FLAG_DEFAULT) return macWrite(task, address, buf);
+    const m = mac();
+    const stop = address + len;
+    let bytes = 0;
+    let a = address;
+    while (a < stop) {
+      const region = macGetRegion(task, a);
+      if (!region.valid) break;
+      if (!region.bound) {
+        const gapEnd = Math.min(region.stop, stop);
+        bytes += gapEnd - a;
+        a = gapEnd;
+        if (a === 0 || region.stop === 0) break;
+        continue;
+      }
+      const end = Math.min(region.stop, stop);
+      const regionLen = end - a;
+      const offset = a - address;
+      let writable = region.writable;
+      if (!writable && f === FLAG_AUTO_ACCESS && m) {
+        if (m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, VM_PROT_READ | VM_PROT_WRITE) === 0) {
+          writable = true;
+          macWrite(task, a, buf.subarray(offset, offset + regionLen));
+          m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, region.access | 0);
+        }
+      } else if (writable) {
+        macWrite(task, a, buf.subarray(offset, offset + regionLen));
       }
       bytes += regionLen;
       a = end;

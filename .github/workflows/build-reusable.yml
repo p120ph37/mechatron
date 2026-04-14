@@ -246,12 +246,7 @@ jobs:
           fi
 
           # ── Backends per platform ─────────────────────────────────────────
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            # FFI not yet implemented on macOS; only exercise napi.
-            BACKENDS=(napi)
-          else
-            BACKENDS=(napi ffi)
-          fi
+          BACKENDS=(napi ffi)
 
           # ── Run each backend in its own bun process (loader caches the
           #    backend choice on first access) ────────────────────────────────

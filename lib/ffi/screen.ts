@@ -8,7 +8,11 @@
  * Windows: EnumDisplayMonitors + MONITORINFO for layout; BitBlt + GetDIBits
  * for capture.
  *
- * macOS: not implemented.
+ * macOS: CGMainDisplayID + CGDisplayPixelsWide/High for layout (single-
+ * display primary only — NSScreen.frame/visibleFrame returns NSRect by
+ * value, which `bun:ffi` can't retrieve).  Capture uses CGDisplayCreateImage
+ * + CGBitmapContextCreate (BGRA premultiplied) with a negative draw offset
+ * to crop the desired subregion out of the full-display image.
  */
 
 import {
@@ -16,10 +20,12 @@ import {
   ZPixmap, AllPlanes, XA_CARDINAL, AnyPropertyType, True, False,
 } from "./x11";
 import { user32, kernel32, gdi32, winFFI } from "./win";
+import { cg, macFFI, BITMAP_INFO_BGRA_PMA } from "./mac";
 import { cstr } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 
 interface RawRect { x: number; y: number; w: number; h: number; }
 export interface ScreenInfo { bounds: RawRect; usable: RawRect; }
@@ -281,16 +287,75 @@ function winGrabScreen(x: number, y: number, w: number, h: number, windowHandle?
   }
 }
 
+// ── macOS: synchronize via CoreGraphics ──────────────────────────────
+
+function macSynchronize(): ScreenInfo[] | null {
+  const CG = cg();
+  if (!CG) return null;
+  const id = CG.CGMainDisplayID();
+  const w = Number(CG.CGDisplayPixelsWide(id));
+  const h = Number(CG.CGDisplayPixelsHigh(id));
+  if (w <= 0 || h <= 0) return null;
+  // Can't access NSScreen.visibleFrame (NSRect by-value return unsupported),
+  // so report usable == bounds for the primary display.
+  const bounds: RawRect = { x: 0, y: 0, w, h };
+  return [{ bounds, usable: bounds }];
+}
+
+// ── macOS: grabScreen via CGDisplayCreateImage + CGBitmapContext ─────
+
+function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle?: number): Uint32Array | null {
+  const CG = cg();
+  const F = macFFI();
+  if (!CG || !F || w <= 0 || h <= 0) return null;
+
+  const id = CG.CGMainDisplayID();
+  const cgImg = CG.CGDisplayCreateImage(id);
+  if (!cgImg || cgImg === 0n) return null;
+  try {
+    const fullH = Number(CG.CGImageGetHeight(cgImg));
+    const fullW = Number(CG.CGImageGetWidth(cgImg));
+    if (fullW <= 0 || fullH <= 0) return null;
+
+    const pixels = new Uint32Array(w * h);
+    const cs = CG.CGColorSpaceCreateDeviceRGB();
+    if (!cs) return null;
+    const ctx = CG.CGBitmapContextCreate(
+      F.ptr(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
+      cs, BITMAP_INFO_BGRA_PMA,
+    );
+    CG.CGColorSpaceRelease(cs);
+    if (!ctx || ctx === 0n) return null;
+    try {
+      // Draw the full display image at an offset so that display pixel
+      // (x, y) ends up at context (0, 0) in memory order (top-left).
+      // CG draw coords are y-up with origin bottom-left, and the bitmap
+      // buffer's first row corresponds to the highest y in context:
+      //   dx = -x, dy = y + h - fullH
+      const dx = -x;
+      const dy = y + h - fullH;
+      CG.CGContextDrawImage(ctx, dx, dy, fullW, fullH, cgImg);
+    } finally {
+      CG.CGContextRelease(ctx);
+    }
+    return pixels;
+  } finally {
+    CG.CGImageRelease(cgImg);
+  }
+}
+
 // ── NAPI-compatible exports ──────────────────────────────────────────
 
 export function screen_synchronize(): ScreenInfo[] | null {
   if (IS_LINUX) return linuxSynchronize();
   if (IS_WIN) return winSynchronize();
+  if (IS_MAC) return macSynchronize();
   return null;
 }
 
 export function screen_grabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Uint32Array | null {
   if (IS_LINUX) return linuxGrabScreen(x, y, w, h, windowHandle);
   if (IS_WIN) return winGrabScreen(x, y, w, h, windowHandle);
+  if (IS_MAC) return macGrabScreen(x, y, w, h, windowHandle);
   return null;
 }

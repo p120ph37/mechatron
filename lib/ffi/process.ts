@@ -2,7 +2,8 @@
  * Process subsystem — pure FFI implementation.
  *
  * Linux: /proc filesystem (read via Node `fs`) + libc.kill().  Windows: psapi
- * + kernel32.  macOS: not implemented (throws).
+ * + kernel32.  macOS: libproc (proc_pidpath/proc_name/proc_listallpids) +
+ * mach (task_for_pid, task_info/TASK_DYLD_INFO, task_get_exception_ports).
  *
  * Mirrors the napi-rs `process_*` exports (js_name) one-for-one so the
  * unified loader can swap in this module transparently.
@@ -20,9 +21,17 @@ import {
   x11, ffi as x11ffi, getDisplay,
   atom, getWindowProperty, getWindowAttributes, IsViewable,
 } from "./x11";
+import {
+  libc as mac, macFFI, bufToStr,
+  TASK_DYLD_INFO, TASK_DYLD_INFO_COUNT,
+  EXC_MASK_ALL, EXC_MASK_RESOURCE, EXC_MASK_GUARD, EXC_TYPES_COUNT,
+} from "./mac";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
+
+interface ModuleEntry { valid: boolean; name: string; path: string; base: number; size: number; pid: number; }
 
 // ── Helpers (Linux) ─────────────────────────────────────────────────────
 
@@ -124,6 +133,220 @@ function winHasExited(pid: number): boolean {
   } finally {
     winCloseHandle(h);
   }
+}
+
+// ── Helpers (macOS) ────────────────────────────────────────────────────
+
+// Mach port of the target process's task.  Requires the calling process to
+// have the `com.apple.security.cs.debugger` entitlement (or be root, or be
+// running a signed debugger target); otherwise `task_for_pid` returns a
+// non-zero error and we fall back to "task == 0" paths that still let PID
+// enumeration / paths / names work.
+function macGetTask(pid: number): number {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || pid <= 0) return 0;
+  const self = m.mach_task_self();
+  const out = new Uint32Array(1);
+  if (m.task_for_pid(self, pid, F.ptr(out)) !== 0) return 0;
+  return out[0];
+}
+
+function macProcessExists(pid: number): boolean {
+  const m = mac();
+  if (!m || pid <= 0) return false;
+  // kill(pid, 0) → 0 if we can signal, -1 otherwise.  EPERM means process
+  // exists but we lack permission; ESRCH means no such process.  We don't
+  // have a clean way to read errno from libSystem via bun:ffi, so accept
+  // both "exists" and "permission denied" cases by treating any outcome
+  // from proc_pidpath as authoritative — if proc_pidpath returns > 0, the
+  // PID is valid regardless of whether kill() succeeded.
+  if (m.kill(pid, 0) === 0) return true;
+  // kill failed — check whether it's EPERM (process exists but permission
+  // denied) by probing proc_pidpath, which doesn't require a task port.
+  const buf = new Uint8Array(16);
+  const F = macFFI();
+  if (!F) return false;
+  return m.proc_pidpath(pid, F.ptr(buf), buf.length) > 0;
+}
+
+function macGetPath(pid: number): string {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || pid <= 0) return "";
+  const PATH_MAX = 1024;
+  const buf = new Uint8Array(PATH_MAX);
+  const len = m.proc_pidpath(pid, F.ptr(buf), buf.length);
+  return len > 0 ? bufToStr(buf, len) : "";
+}
+
+function macGetName(pid: number): string {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F || pid <= 0) return "";
+  const buf = new Uint8Array(256);
+  const len = m.proc_name(pid, F.ptr(buf), buf.length);
+  if (len > 0) return bufToStr(buf, len);
+  const p = macGetPath(pid);
+  return p ? p.substring(p.lastIndexOf("/") + 1) : "";
+}
+
+function macIsDebugged(pid: number): boolean {
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F) return false;
+  const task = macGetTask(pid);
+  if (task === 0) return false;
+  const masks = new Uint32Array(EXC_TYPES_COUNT);
+  const ports = new Uint32Array(EXC_TYPES_COUNT);
+  const behaviors = new Uint32Array(EXC_TYPES_COUNT);
+  const flavors = new Uint32Array(EXC_TYPES_COUNT);
+  const count = new Uint32Array(1);
+  const excMask = (EXC_MASK_ALL & ~(EXC_MASK_RESOURCE | EXC_MASK_GUARD)) >>> 0;
+  if (m.task_get_exception_ports(
+    task, excMask,
+    F.ptr(masks), F.ptr(count),
+    F.ptr(ports), F.ptr(behaviors), F.ptr(flavors),
+  ) !== 0) return false;
+  const n = count[0];
+  for (let i = 0; i < n; i++) {
+    const p = ports[i];
+    if (p !== 0 && p !== 0xFFFFFFFF) return true;
+  }
+  return false;
+}
+
+function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
+  const out: ModuleEntry[] = [];
+  const m = mac();
+  const F = macFFI();
+  if (!m || !F) return out;
+  const task = macGetTask(pid);
+  if (task === 0) return out;
+
+  // TASK_DYLD_INFO — count is in "natural_t" (u32) units of 4 bytes each;
+  // the struct is 24 bytes so TASK_DYLD_INFO_COUNT = 6.  But we want to
+  // transfer two u64s + one i32 = 20 bytes; we zero the last 4 bytes and
+  // let task_info overwrite only what it needs.
+  const dyld = new BigUint64Array(3); // 24 bytes
+  const dyldCount = new Uint32Array([TASK_DYLD_INFO_COUNT]);
+  if (m.task_info(task, TASK_DYLD_INFO, F.ptr(dyld), F.ptr(dyldCount)) !== 0) return out;
+  const allImageInfoAddr = dyld[0];
+  const allImageInfoSize = dyld[1];
+  if (allImageInfoAddr === 0n || allImageInfoSize === 0n) return out;
+
+  // Read dyld_all_image_infos.  We only need version(u32), count(u32),
+  // array(u64) — the first 16 bytes — but let's read up to 64 bytes to be
+  // safe on newer dyld layouts.
+  const headerSize = 16;
+  const readSize = Number(allImageInfoSize) < headerSize ? Number(allImageInfoSize) : headerSize;
+  const header = new Uint8Array(headerSize);
+  const outSize = new BigUint64Array(1);
+  if (m.mach_vm_read_overwrite(
+    task, allImageInfoAddr, BigInt(readSize),
+    BigInt(F.ptr(header) as any), F.ptr(outSize),
+  ) !== 0 || outSize[0] < BigInt(readSize)) return out;
+  const hdv = new DataView(header.buffer);
+  const imgCount = hdv.getUint32(4, true);
+  // array pointer is u64 at offset 8
+  const arrayAddr = hdv.getBigUint64(8, true);
+  if (imgCount === 0 || arrayAddr === 0n) return out;
+
+  // Read ImageInfo64[count]: { addr:u64, path:u64, date:u64 } = 24 bytes each.
+  const infoStride = 24;
+  const infosBytes = infoStride * imgCount;
+  const infos = new Uint8Array(infosBytes);
+  const outInfos = new BigUint64Array(1);
+  if (m.mach_vm_read_overwrite(
+    task, arrayAddr, BigInt(infosBytes),
+    BigInt(F.ptr(infos) as any), F.ptr(outInfos),
+  ) !== 0 || outInfos[0] < BigInt(infosBytes)) return out;
+  const idv = new DataView(infos.buffer);
+
+  // First entry is the executable itself; use proc_pidpath for name/path
+  const procPath = macGetPath(pid);
+
+  const PATH_MAX = 1024;
+  const pathBuf = new Uint8Array(PATH_MAX);
+  const outPath = new BigUint64Array(1);
+
+  interface Row { addr: bigint; name: string; p: string; }
+  const rows: Row[] = [];
+  for (let i = 0; i < imgCount; i++) {
+    const off = i * infoStride;
+    const addr = idv.getBigUint64(off, true);
+    const pathAddr = idv.getBigUint64(off + 8, true);
+
+    let resolved = "";
+    let name = "";
+    if (i === 0 && procPath) {
+      resolved = procPath;
+      name = procPath.substring(procPath.lastIndexOf("/") + 1);
+    } else {
+      if (pathAddr === 0n) continue;
+      outPath[0] = 0n;
+      if (m.mach_vm_read_overwrite(
+        task, pathAddr, BigInt(PATH_MAX),
+        BigInt(F.ptr(pathBuf) as any), F.ptr(outPath),
+      ) !== 0 || outPath[0] === 0n) continue;
+      const raw = bufToStr(pathBuf, Number(outPath[0]));
+      if (!raw) continue;
+      // Resolve via realpath (frees the returned buffer).
+      try {
+        const cstrBuf = new TextEncoder().encode(raw);
+        const zeroTerm = new Uint8Array(cstrBuf.length + 1);
+        zeroTerm.set(cstrBuf);
+        const rp = m.realpath(F.ptr(zeroTerm), null);
+        if (rp && (rp as any) !== 0n) {
+          // Read the returned C string via the FFI CString helper.
+          const CString = (F as any).CString;
+          resolved = CString ? new CString(rp) as string : raw;
+          m.free(rp);
+        } else {
+          resolved = raw;
+        }
+      } catch { resolved = raw; }
+      name = resolved.substring(resolved.lastIndexOf("/") + 1);
+    }
+
+    if (re && !re.test(name)) continue;
+    rows.push({ addr, name, p: resolved });
+  }
+
+  // Sort + dedupe by address, matching the napi implementation.
+  rows.sort((a, b) => (a.addr < b.addr ? -1 : a.addr > b.addr ? 1 : 0));
+  let lastAddr: bigint | null = null;
+  for (const r of rows) {
+    if (lastAddr !== null && r.addr === lastAddr) continue;
+    lastAddr = r.addr;
+    out.push({ valid: true, name: r.name, path: r.p, base: Number(r.addr), size: 0, pid });
+  }
+  return out;
+}
+
+function macGetList(re: RegExp | null): number[] {
+  const m = mac();
+  const F = macFFI();
+  const out: number[] = [];
+  if (!m || !F) return out;
+  // First call with null to get count
+  const count = m.proc_listallpids(null, 0);
+  if (count <= 0) return out;
+  const bufI32 = new Int32Array(count + 64);
+  const bufBytes = bufI32.byteLength;
+  const actual = m.proc_listallpids(F.ptr(bufI32), bufBytes);
+  if (actual <= 0) return out;
+  const n = (actual / 4) | 0;
+  for (let i = 0; i < n; i++) {
+    const pid = bufI32[i];
+    if (pid <= 0) continue;
+    if (re) {
+      const name = macGetName(pid);
+      if (!name || !re.test(name)) continue;
+    }
+    out.push(pid);
+  }
+  return out;
 }
 
 // ── Linux X11 window enumeration (PID-filtered) ────────────────────────
@@ -230,6 +453,7 @@ export function process_open(pid: number): boolean {
     winCloseHandle(h);
     return true;
   }
+  if (IS_MAC) return macProcessExists(pid);
   throw new Error("process: not implemented on this platform");
 }
 
@@ -243,6 +467,7 @@ export function process_isValid(pid: number): boolean {
     winCloseHandle(h);
     return true;
   }
+  if (IS_MAC) return macProcessExists(pid);
   return false;
 }
 
@@ -265,6 +490,7 @@ export function process_is64Bit(pid: number): boolean {
       winCloseHandle(h);
     }
   }
+  if (IS_MAC) return true; // macOS dropped 32-bit processes in Catalina
   return false;
 }
 
@@ -294,6 +520,7 @@ export function process_isDebugged(pid: number): boolean {
       winCloseHandle(h);
     }
   }
+  if (IS_MAC) return macIsDebugged(pid);
   return false;
 }
 
@@ -309,18 +536,21 @@ export function process_getHandle(pid: number): number {
     winCloseHandle(h);
     return v;
   }
+  if (IS_MAC) return macGetTask(pid);
   return 0;
 }
 
 export function process_getName(pid: number): string {
   if (IS_LINUX) return procInfo(pid)?.name || "";
   if (IS_WIN) return winGetName(pid);
+  if (IS_MAC) return macGetName(pid);
   return "";
 }
 
 export function process_getPath(pid: number): string {
   if (IS_LINUX) return procInfo(pid)?.path || "";
   if (IS_WIN) return winGetPath(pid);
+  if (IS_MAC) return macGetPath(pid);
   return "";
 }
 
@@ -328,6 +558,11 @@ export function process_exit(pid: number): void {
   if (IS_LINUX) {
     const c = libc();
     if (c && pid > 0) c.kill(pid, SIGTERM);
+    return;
+  }
+  if (IS_MAC) {
+    const m = mac();
+    if (m && pid > 0) m.kill(pid, SIGTERM);
     return;
   }
   if (IS_WIN) {
@@ -366,6 +601,11 @@ export function process_kill(pid: number): void {
     if (c && pid > 0) c.kill(pid, SIGKILL);
     return;
   }
+  if (IS_MAC) {
+    const m = mac();
+    if (m && pid > 0) m.kill(pid, SIGKILL);
+    return;
+  }
   if (IS_WIN) {
     const k = kernel32();
     if (!k) return;
@@ -380,10 +620,9 @@ export function process_kill(pid: number): void {
 export function process_hasExited(pid: number): boolean {
   if (IS_LINUX) return procHasExited(pid);
   if (IS_WIN) return winHasExited(pid);
+  if (IS_MAC) return !macProcessExists(pid);
   return true;
 }
-
-interface ModuleEntry { valid: boolean; name: string; path: string; base: number; size: number; pid: number; }
 
 export function process_getModules(pid: number, regexStr?: string): ModuleEntry[] {
   const re = makeRegex(regexStr);
@@ -410,6 +649,8 @@ export function process_getModules(pid: number, regexStr?: string): ModuleEntry[
     }
     return out;
   }
+
+  if (IS_MAC) return macGetModules(pid, re);
 
   if (IS_WIN) {
     const k = kernel32();
@@ -482,6 +723,8 @@ export function process_getList(regexStr?: string): number[] {
     return out;
   }
 
+  if (IS_MAC) return macGetList(re);
+
   if (IS_WIN) {
     const ps = psapi();
     const F = winFFI();
@@ -513,6 +756,10 @@ export function process_getCurrent(): number {
     const k = kernel32();
     return k ? k.GetCurrentProcessId() : process.pid;
   }
+  if (IS_MAC) {
+    const m = mac();
+    return m ? m.getpid() : process.pid;
+  }
   return process.pid;
 }
 
@@ -521,6 +768,17 @@ export function process_isSys64Bit(): boolean {
     // posix uname not bound here; rely on os.arch which returns the kernel arch
     const a = process.arch;
     return a === "x64" || a === "arm64";
+  }
+  if (IS_MAC) {
+    const m = mac();
+    const F = macFFI();
+    if (!m || !F) return process.arch === "x64" || process.arch === "arm64";
+    // `struct utsname` on macOS has 5 fields of 256 chars each = 1280 bytes;
+    // machine is the 5th field at offset 4*256.  We zero-fill and read back.
+    const buf = new Uint8Array(1280);
+    if (m.uname(F.ptr(buf)) !== 0) return process.arch === "x64" || process.arch === "arm64";
+    const machine = bufToStr(buf.subarray(4 * 256), 256);
+    return machine === "x86_64" || machine === "aarch64" || machine === "arm64";
   }
   if (IS_WIN) {
     const k = kernel32();

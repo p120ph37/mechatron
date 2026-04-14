@@ -8,12 +8,24 @@
  * Windows uses CF_UNICODETEXT (UTF-16LE NUL-terminated) and CF_DIB
  * (BITMAPINFOHEADER + pixel rows).  Memory is allocated with GMEM_MOVEABLE
  * and ownership transfers to the clipboard on a successful SetClipboardData.
+ *
+ * macOS dispatches to `NSPasteboard` / `NSImage` via dlopen'd
+ * `objc_msgSend`.  `msgSendTyped()` (from ./mac.ts) wraps the raw pointer
+ * with per-signature CFunctions so we can call methods with whatever arg
+ * layout they need without dlopening the symbol multiple times.
  */
 
 import { user32, kernel32, winFFI, w2js, js2w } from "./win";
+import {
+  cg, cf, macFFI, hasAppKit,
+  cls, sel, msgSendTyped, cfStringFromJS, cfStringToJS,
+  BITMAP_INFO_BGRA_PMA,
+} from "./mac";
+import type { Pointer } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 
 // ── Windows constants ─────────────────────────────────────────────────
 
@@ -232,52 +244,288 @@ function winSequence(): number {
   return u ? u.GetClipboardSequenceNumber() >>> 0 : 0;
 }
 
+// ── macOS helpers ─────────────────────────────────────────────────────
+
+function macGeneralPasteboard(): Pointer {
+  const F = macFFI(); if (!F) return null;
+  const T = F.FFIType;
+  const send = msgSendTyped([T.ptr, T.ptr], T.ptr);
+  if (!send) return null;
+  return send(cls("NSPasteboard"), sel("generalPasteboard"));
+}
+
+/** Build an NSArray containing a single object. */
+function macArrayWithOne(obj: Pointer): Pointer {
+  const F = macFFI(); if (!F) return null;
+  const T = F.FFIType;
+  const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+  if (!send) return null;
+  return send(cls("NSArray"), sel("arrayWithObject:"), obj);
+}
+
+/** [obj release] — balance +alloc/+initWith when no autorelease pool is present. */
+function macRelease(obj: Pointer): void {
+  const F = macFFI(); if (!F || !obj) return;
+  const T = F.FFIType;
+  const send = msgSendTyped([T.ptr, T.ptr], T.void);
+  if (send) send(obj, sel("release"));
+}
+
+// ── macOS implementations ─────────────────────────────────────────────
+
+function macClear(): boolean {
+  if (!hasAppKit()) return false;
+  const F = macFFI(); if (!F) return false;
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return false;
+  const send = msgSendTyped([T.ptr, T.ptr], T.void);
+  if (!send) return false;
+  send(board, sel("clearContents"));
+  return true;
+}
+
+function macHasText(): boolean {
+  if (!hasAppKit()) return false;
+  const F = macFFI(); const C = cf();
+  if (!F || !C) return false;
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return false;
+  const typeStr = cfStringFromJS("public.utf8-plain-text");
+  if (!typeStr) return false;
+  const arr = macArrayWithOne(typeStr);
+  try {
+    if (!arr) return false;
+    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+    if (!send) return false;
+    const r = send(board, sel("availableTypeFromArray:"), arr);
+    return !!r && r !== 0n;
+  } finally {
+    C.CFRelease(typeStr);
+  }
+}
+
+function macGetText(): string {
+  if (!hasAppKit()) return "";
+  const F = macFFI(); const C = cf();
+  if (!F || !C) return "";
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return "";
+  const typeStr = cfStringFromJS("public.utf8-plain-text");
+  if (!typeStr) return "";
+  try {
+    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+    if (!send) return "";
+    const nsStr = send(board, sel("stringForType:"), typeStr);
+    if (!nsStr || nsStr === 0n) return "";
+    // NSString is toll-free bridged with CFStringRef.
+    return cfStringToJS(nsStr);
+  } finally {
+    C.CFRelease(typeStr);
+  }
+}
+
+function macSetText(text: string): boolean {
+  if (!hasAppKit()) return false;
+  const F = macFFI(); const C = cf();
+  if (!F || !C) return false;
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return false;
+  const typeStr = cfStringFromJS("public.utf8-plain-text");
+  if (!typeStr) return false;
+  const str = cfStringFromJS(text);
+  if (!str) { C.CFRelease(typeStr); return false; }
+  try {
+    const clear = msgSendTyped([T.ptr, T.ptr], T.void);
+    if (clear) clear(board, sel("clearContents"));
+    const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
+    if (!send) return false;
+    const r = send(board, sel("setString:forType:"), str, typeStr);
+    return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
+  } finally {
+    C.CFRelease(str);
+    C.CFRelease(typeStr);
+  }
+}
+
+function macHasImage(): boolean {
+  if (!hasAppKit()) return false;
+  const F = macFFI(); if (!F) return false;
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return false;
+  const imgCls = cls("NSImage"); if (!imgCls) return false;
+  const arr = macArrayWithOne(imgCls); if (!arr) return false;
+  const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
+  if (!send) return false;
+  const r = send(board, sel("canReadObjectForClasses:options:"), arr, null);
+  return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
+}
+
+function macGetImage(): { width: number; height: number; data: Uint32Array } | null {
+  if (!hasAppKit()) return null;
+  const F = macFFI(); const C = cf(); const CG = cg();
+  if (!F || !C || !CG) return null;
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return null;
+
+  // [[NSImage alloc] initWithPasteboard:board]
+  const alloc = msgSendTyped([T.ptr, T.ptr], T.ptr);
+  const initPB = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+  if (!alloc || !initPB) return null;
+  const raw = alloc(cls("NSImage"), sel("alloc"));
+  if (!raw || raw === 0n) return null;
+  const nsImg = initPB(raw, sel("initWithPasteboard:"), board);
+  if (!nsImg || nsImg === 0n) return null;
+
+  try {
+    // [nsImg CGImageForProposedRect:NULL context:nil hints:nil]
+    const getCG = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr, T.ptr], T.ptr);
+    if (!getCG) return null;
+    const cgImg = getCG(nsImg, sel("CGImageForProposedRect:context:hints:"), null, null, null);
+    if (!cgImg || cgImg === 0n) return null;
+
+    const w = Number(CG.CGImageGetWidth(cgImg));
+    const h = Number(CG.CGImageGetHeight(cgImg));
+    if (w <= 0 || h <= 0) return null;
+
+    const pixels = new Uint32Array(w * h);
+    const cs = CG.CGColorSpaceCreateDeviceRGB();
+    if (!cs) return null;
+    const ctx = CG.CGBitmapContextCreate(
+      F.ptr(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
+      cs, BITMAP_INFO_BGRA_PMA,
+    );
+    CG.CGColorSpaceRelease(cs);
+    if (!ctx || ctx === 0n) return null;
+    try {
+      CG.CGContextDrawImage(ctx, 0, 0, w, h, cgImg);
+    } finally {
+      CG.CGContextRelease(ctx);
+    }
+    return { width: w, height: h, data: pixels };
+  } finally {
+    macRelease(nsImg);
+  }
+}
+
+function macSetImage(width: number, height: number, data: Uint32Array): boolean {
+  if (!hasAppKit()) return false;
+  const F = macFFI(); const C = cf(); const CG = cg();
+  if (!F || !C || !CG) return false;
+  const T = F.FFIType;
+  if (width <= 0 || height <= 0) return false;
+
+  // Own a stable copy of the pixel data — CGBitmapContextCreate keeps a
+  // pointer to the buffer and we need it alive until CreateImage runs.
+  const pixels = new Uint32Array(width * height);
+  pixels.set(data.subarray(0, Math.min(data.length, pixels.length)));
+
+  const cs = CG.CGColorSpaceCreateDeviceRGB();
+  if (!cs) return false;
+  const ctx = CG.CGBitmapContextCreate(
+    F.ptr(pixels), BigInt(width), BigInt(height), 8n, BigInt(width * 4),
+    cs, BITMAP_INFO_BGRA_PMA,
+  );
+  CG.CGColorSpaceRelease(cs);
+  if (!ctx || ctx === 0n) return false;
+
+  const cgImg = CG.CGBitmapContextCreateImage(ctx);
+  CG.CGContextRelease(ctx);
+  if (!cgImg || cgImg === 0n) return false;
+
+  try {
+    // [[NSImage alloc] initWithCGImage:cgImg size:NSZeroSize]
+    const alloc = msgSendTyped([T.ptr, T.ptr], T.ptr);
+    const initCG = msgSendTyped([T.ptr, T.ptr, T.ptr, T.f64, T.f64], T.ptr);
+    if (!alloc || !initCG) return false;
+    const raw = alloc(cls("NSImage"), sel("alloc"));
+    if (!raw || raw === 0n) return false;
+    const nsImg = initCG(raw, sel("initWithCGImage:size:"), cgImg, 0.0, 0.0);
+    if (!nsImg || nsImg === 0n) return false;
+
+    try {
+      const board = macGeneralPasteboard();
+      if (!board) return false;
+      const clear = msgSendTyped([T.ptr, T.ptr], T.void);
+      if (clear) clear(board, sel("clearContents"));
+      const arr = macArrayWithOne(nsImg);
+      if (!arr) return false;
+      const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.i8);
+      if (!send) return false;
+      const r = send(board, sel("writeObjects:"), arr);
+      return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
+    } finally {
+      macRelease(nsImg);
+    }
+  } finally {
+    CG.CGImageRelease(cgImg);
+  }
+}
+
+function macSequence(): number {
+  if (!hasAppKit()) return 0;
+  const F = macFFI(); if (!F) return 0;
+  const T = F.FFIType;
+  const board = macGeneralPasteboard(); if (!board) return 0;
+  const send = msgSendTyped([T.ptr, T.ptr], T.i64);
+  if (!send) return 0;
+  const r = send(board, sel("changeCount"));
+  return typeof r === "bigint" ? Number(r) : (r as number);
+}
+
 // ── NAPI-compatible exports ───────────────────────────────────────────
 
 export function clipboard_clear(): boolean {
   if (IS_LINUX) return linuxClear();
   if (IS_WIN) return winClear();
+  if (IS_MAC) return macClear();
   return false;
 }
 
 export function clipboard_hasText(): boolean {
   if (IS_LINUX) return linuxHasText();
   if (IS_WIN) return winHasText();
+  if (IS_MAC) return macHasText();
   return false;
 }
 
 export function clipboard_getText(): string {
   if (IS_LINUX) return linuxGetText();
   if (IS_WIN) return winGetText();
+  if (IS_MAC) return macGetText();
   return "";
 }
 
 export function clipboard_setText(text: string): boolean {
   if (IS_LINUX) return linuxSetText(text);
   if (IS_WIN) return winSetText(text);
+  if (IS_MAC) return macSetText(text);
   return false;
 }
 
 export function clipboard_hasImage(): boolean {
   if (IS_LINUX) return linuxHasImage();
   if (IS_WIN) return winHasImage();
+  if (IS_MAC) return macHasImage();
   return false;
 }
 
 export function clipboard_getImage(): { width: number; height: number; data: Uint32Array } | null {
   if (IS_LINUX) return linuxGetImage();
   if (IS_WIN) return winGetImage();
+  if (IS_MAC) return macGetImage();
   return null;
 }
 
 export function clipboard_setImage(width: number, height: number, data: Uint32Array): boolean {
   if (IS_LINUX) return linuxSetImage(width, height, data);
   if (IS_WIN) return winSetImage(width, height, data);
+  if (IS_MAC) return macSetImage(width, height, data);
   return false;
 }
 
 export function clipboard_getSequence(): number {
   if (IS_LINUX) return linuxSequence();
   if (IS_WIN) return winSequence();
+  if (IS_MAC) return macSequence();
   return 0;
 }

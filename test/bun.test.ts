@@ -12,8 +12,7 @@
  *
  * Backend selection: required via `MECHATRON_BACKEND=ffi|napi`.  Each backend
  * is a separate `bun test` invocation in CI (because the loader caches the
- * choice on first access).  This file is a no-op on macOS when the FFI
- * backend is requested — FFI is not yet implemented there.
+ * choice on first access).
  *
  * The legacy `test/test.js` runner is retained for the Windows ia32 cell
  * (Bun has no 32-bit Windows build) and for any direct `node` invocations.
@@ -21,19 +20,16 @@
 
 import { describe, test } from "bun:test";
 
-// Default backend when none specified: ffi on Linux/Windows (where it's
-// implemented), napi elsewhere.  CI explicitly sets MECHATRON_BACKEND for
-// each invocation; this default is for `npm test` / `bun test` ergonomics.
+// Default backend when none specified: ffi on every supported platform.
+// CI explicitly sets MECHATRON_BACKEND for each invocation; this default
+// is for `npm test` / `bun test` ergonomics.
 const _envBackend = (process.env.MECHATRON_BACKEND || "").toLowerCase();
 const backend: "ffi" | "napi" =
-  _envBackend === "ffi" || _envBackend === "napi" ? _envBackend :
-  process.platform === "darwin" ? "napi" : "ffi";
+  _envBackend === "ffi" || _envBackend === "napi" ? _envBackend : "ffi";
 process.env.MECHATRON_BACKEND = backend;
 
-// FFI is not implemented on macOS; skip the whole suite there so the cell
-// still exits 0.  CI normally avoids invoking with backend=ffi on darwin.
-const SKIP_PLATFORM = backend === "ffi" && process.platform === "darwin";
-const describeMaybe = SKIP_PLATFORM ? describe.skip : describe;
+const SKIP_PLATFORM = false;
+const describeMaybe = describe;
 
 // ── Test helpers (mirrors test/test.js) ──────────────────────────────────────
 

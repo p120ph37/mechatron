@@ -12,9 +12,10 @@
  *     end and no `.node` / `.so` / `.dll` shipped — Bun loads our raw
  *     TypeScript via the `"bun"` exports condition in package.json.
  *
- * Backend selection: when running in Bun, FFI is preferred and falls back
- * to NAPI if a particular subsystem is not yet implemented in pure FFI.
- * In Node.js, NAPI is the only option.  The `MECHATRON_BACKEND`
+ * Backend selection: when running in Bun, NAPI is preferred (it's usually
+ * faster and better tested) and falls back to FFI if the appropriate
+ * `@mechatronic/napi-<sub>` prebuild isn't installed for the current
+ * platform.  In Node.js, NAPI is the only option.  The `MECHATRON_BACKEND`
  * environment variable can force a specific choice (`napi` or `ffi`).
  *
  * Regardless of backend, callers see a uniform object whose method names
@@ -92,7 +93,7 @@ function tryLoad(subsystem: Subsystem): any | null {
   const order: Backend[] =
     forced === "ffi"  ? ["ffi"]  :
     forced === "napi" ? ["napi"] :
-    IS_BUN            ? ["ffi", "napi"] :
+    IS_BUN            ? ["napi", "ffi"] :
                         ["napi"];
 
   for (const be of order) {
