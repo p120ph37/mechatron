@@ -50,8 +50,9 @@ export type { Subsystem, Backend } from "./napi";
 // backend mechanism is in use per capability, and manage cacheable
 // permission handles for mechanisms that use them.
 export {
-  Platform, listMechanisms, getMechanism, setMechanism, resetMechanism,
-  getCapabilities, saveScreenPermission, loadScreenPermission,
+  Platform, listMechanisms, getMechanism, getPreferredMechanisms,
+  setMechanism, resetMechanism, getCapabilities,
+  saveScreenPermission, loadScreenPermission,
 } from "./platform";
 export type {
   PlatformCapability, MechanismInfo, CapabilitySummary,

@@ -19,24 +19,44 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var Image = mechatron.Image;
 
 		if (process.platform === "linux") {
-			// Linux X11 clipboard without a clipboard manager
-			assert(Clipboard.clear() === false, "linux clear");
-			assert(Clipboard.hasText() === false, "linux hasText");
-			assert(Clipboard.getText().length === 0, "linux getText");
-			assert(Clipboard.setText("Hello") === false, "linux setText");
-
+			// Linux clipboard is mechanism-dependent (wl-clipboard / xclip /
+			// xsel — see PLAN.md §6b).  Test both the "no tools installed"
+			// path and (if a tool *is* available) a basic round-trip.
+			var Platform = mechatron.Platform;
+			var caps = Platform.getCapabilities("clipboard");
 			var img = new Image();
+
+			if (!caps.active || caps.active === "none") {
+				// No clipboard tool is available — old stub behaviour.
+				assert(Clipboard.clear() === false, "linux clear (no tool)");
+				assert(Clipboard.hasText() === false, "linux hasText (no tool)");
+				assert(Clipboard.getText().length === 0, "linux getText (no tool)");
+				assert(Clipboard.setText("Hello") === false, "linux setText (no tool)");
+				log("OK (linux - no clipboard tool installed)\n");
+				return true;
+			}
+
+			// Text round-trip through whichever mechanism auto-selected.
+			assert(Clipboard.setText("Hello"), "linux setText Hello via " + caps.active);
+			assert(Clipboard.hasText(), "linux hasText after set via " + caps.active);
+			assert(Clipboard.getText() === "Hello", "linux getText Hello via " + caps.active);
+
+			// Image support isn't implemented for the subprocess bridge yet
+			// (requires PNG encode/decode); these should still return false
+			// cleanly rather than throw.
 			assert(Clipboard.hasImage() === false, "linux hasImage");
 			assert(Clipboard.getImage(img) === false, "linux getImage");
 			assert(Clipboard.setImage(img) === false, "linux setImage");
 
-			assert(Clipboard.getSequence() === 0, "linux getSequence");
+			// Sequence is process-local but monotonic after setText.
+			var seq = Clipboard.getSequence();
+			assert(typeof seq === "number", "linux getSequence returns number");
 
-			// Async variants still return Promises (even if ops fail on linux)
+			// Async variants still return Promises.
 			assert(Clipboard.getTextAsync() instanceof Promise, "linux getTextAsync Promise");
 			assert(Clipboard.setTextAsync("x") instanceof Promise, "linux setTextAsync Promise");
 
-			log("OK (linux - no clipboard manager)\n");
+			log("OK (linux - " + caps.active + ")\n");
 			return true;
 		}
 

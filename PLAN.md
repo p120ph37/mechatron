@@ -360,11 +360,22 @@ Platform.getCapabilities("screen");  // { offScreenCapture: true, requiresUserAp
 
 Selection priority for each capability is:
 
-1. Explicit `Platform.setMechanism(...)` call at runtime.
-2. Environment variable: `MECHATRON_INPUT_MECHANISM`, `MECHATRON_SCREEN_MECHANISM`,
-   `MECHATRON_CLIPBOARD_MECHANISM` (comma-separated fallback list accepted).
+1. Explicit `Platform.setMechanism(capability, "xclip")` or
+   `Platform.setMechanism(capability, ["wl-clipboard", "xclip"])` call at
+   runtime.  A list pins the allowed set: runtime fallback never escapes
+   into mechanisms the caller excluded, which is useful both for tests
+   (force-select a specific implementation) and for production
+   deployments that need to exclude a path for security/audit reasons.
+2. Environment variable: `MECHATRON_INPUT_MECHANISM`,
+   `MECHATRON_SCREEN_MECHANISM`, `MECHATRON_CLIPBOARD_MECHANISM`
+   (comma-separated priority list accepted, same semantics as the
+   `setMechanism` list form).
 3. Auto-detection — probe each mechanism in a defined priority order and
    pick the first that self-reports available.
+
+Query the current selection and pinned preference list with
+`Platform.getMechanism(capability)` and
+`Platform.getPreferredMechanisms(capability)` respectively.
 
 Each mechanism exposes a `probe()` that returns a `MechanismInfo`:
 
@@ -384,27 +395,58 @@ This gives app authors a principled way to decide (e.g.) whether to prompt
 the user for elevated privileges up front, or to skip Wayland's portal
 dialog by pre-caching a permission handle.
 
-### 6b. Linux Clipboard Support (COMPLETE — bridge)
+### 6b. Linux Clipboard Support (COMPLETE — subprocess bridge)
 
 X11 has no clipboard manager; content only persists while the owning client
-is alive.  Rather than run our own EWMH-compliant persistent background
-thread (the approach used by some other Linux clipboard libraries and one
-that conflicts badly with short-lived CLI processes), we shell out to a
-small set of well-established helpers detected at runtime:
+is alive.  The in-process alternatives all have caveats that make them
+unattractive as the *default* path:
+
+- **libX11 + libXfixes + background thread** works on X11 but requires
+  process-lifetime thread management and fights short-lived CLI scripts.
+- **Wayland `wlr-data-control`** works on wlroots + KWin but not on
+  GNOME/Mutter — currently the biggest Wayland installed base.
+- **`org.freedesktop.portal.Clipboard`** (part of xdg-desktop-portal)
+  requires a RemoteDesktop session and full D-Bus integration; it's new
+  enough (2024+) to still have implementation gaps.
+
+Instead we shell out to a small set of well-established helpers that
+already handle the per-compositor protocol quirks and maintain their own
+persistent owner processes:
 
 | Mechanism | Backing tool(s) | Notes |
 |-----------|-----------------|-------|
-| `wl-clipboard` | `wl-copy`, `wl-paste` | Wayland sessions |
-| `xclip` | `xclip` | Classic X11 |
+| `wl-clipboard` | `wl-copy`, `wl-paste` | Wayland (wlroots + KWin) |
+| `xclip` | `xclip` | Classic X11 (also reaches GNOME via XWayland) |
 | `xsel` | `xsel` | X11 alternative |
 
-The first tool present in `$PATH` wins; override via
-`MECHATRON_CLIPBOARD_MECHANISM=wl-clipboard|xclip|xsel|none`.  Both text and
-image (PNG round-trip) are supported where the underlying tool does.
+Auto-selection considers session type + `$XDG_CURRENT_DESKTOP`:
+GNOME-Wayland specifically is routed to `xclip` / `xsel` via XWayland
+because `wl-copy` exits 0 but silently no-ops against Mutter.  Override
+via `MECHATRON_CLIPBOARD_MECHANISM=wl-clipboard|xclip|xsel|none`.  At
+call time, if the active mechanism *throws*, the dispatcher falls
+through to the next available one and promotes it to active for the
+rest of the process's life; an empty read, by contrast, is treated as
+a legitimate "clipboard is empty" signal and not a failure.
 
 Implementation lives in TypeScript (`lib/clipboard/linux.ts`) so it works
 for both the napi and ffi backends unchanged — the napi stubs still live
-as a last-resort fallback when no tool is installed.
+as a last-resort when no tool is installed.
+
+**Image support** (both read and write) requires a small PNG
+encoder/decoder to round-trip ARGB through `--type image/png`.  Deferred
+but tracked; the text path works today and covers the overwhelming
+majority of clipboard use.
+
+**Portal-based clipboard (future work)**: once
+`org.freedesktop.portal.Clipboard` reaches universal support across
+GNOME, KDE, and wlroots (likely 2026+), a `portal-clipboard` mechanism
+can be added that shares session-creation, D-Bus wiring, and
+permission-handle caching with the `portal-pipewire` screen-capture
+mechanism (6f).  Both use the same `RemoteDesktop` session, so the
+heavy lifting — D-Bus method-call scaffolding, `restore_token`
+persistence via `Platform.saveScreenPermission` / `loadScreenPermission`,
+`CreateSession` request plumbing — is already on the roadmap and will
+be re-used rather than re-implemented.
 
 ### 6c. uinput Virtual Input Device Fallback (COMPLETE — skeleton)
 

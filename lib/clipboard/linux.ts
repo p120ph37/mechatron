@@ -134,44 +134,97 @@ function seq(): number { return _seq; }
 function bumpSeq(): void { _seq++; }
 
 // ── Dispatcher ────────────────────────────────────────────────────────
+//
+// Portability note: wl-copy / wl-paste use the wlroots `wlr-data-control`
+// protocol, which is implemented by wlroots-based compositors (Sway,
+// Hyprland, …) and KDE/KWin — but *not* by GNOME/Mutter.  On GNOME-Wayland
+// sessions `wl-copy` will still run and report success but the content
+// never actually reaches the clipboard.  Mitigation: if the currently-
+// selected mechanism fails (or we can't verify it succeeded), fall back
+// to the next available mechanism.  GNOME-Wayland almost always has
+// XWayland running, so `xclip` / `xsel` transparently work there too.
+//
+// Explicit override stays in effect: if the user set
+// `MECHATRON_CLIPBOARD_MECHANISM=wl-clipboard`, we don't silently rewrite
+// that to `xclip` on failure — we report the failure honestly and let the
+// caller deal with it.
 
-function activeMechanism(): string {
-  const m = getMechanism("clipboard");
-  return m || "none";
+import { listMechanisms, setMechanism, getPreferredMechanisms } from "../platform";
+
+function dispatchOrder(): string[] {
+  // If the user pinned a specific list (via env var or
+  // Platform.setMechanism([...])), respect it exactly — never fall back
+  // to mechanisms they excluded.  Otherwise build a priority-ordered
+  // list of available mechanisms for runtime fallback on exceptions.
+  const pinned = getPreferredMechanisms("clipboard");
+  if (pinned) return pinned;
+
+  const primary = getMechanism("clipboard") || "none";
+  const rest = listMechanisms("clipboard")
+    .filter(m => m.available && m.name !== primary)
+    .map(m => m.name);
+  return [primary, ...rest];
+}
+
+interface Impl {
+  clear: () => boolean;
+  hasText: () => boolean;
+  getText: () => string;
+  setText: (s: string) => boolean;
+}
+
+const IMPLS: Record<string, Impl> = {
+  "wl-clipboard": { clear: wlClear,              hasText: wlHasText,    getText: wlGetText,    setText: wlSetText },
+  "xclip":        { clear: () => xclipSetText(""), hasText: xclipHasText, getText: xclipGetText, setText: xclipSetText },
+  "xsel":         { clear: () => xselSetText(""),  hasText: xselHasText,  getText: xselGetText,  setText: xselSetText },
+};
+
+/**
+ * Invoke a clipboard operation against the currently-active mechanism,
+ * falling through to the next available one only if the primary call
+ * *threw* — an empty string / `false` return is a legitimate answer
+ * ("no text is on the clipboard") and must not trigger cascade.
+ *
+ * For the GNOME-Wayland case where wl-copy silently succeeds but
+ * doesn't actually reach the clipboard, auto-detection at probe time
+ * already prefers `xclip` over `wl-clipboard` when `$XDG_CURRENT_DESKTOP`
+ * indicates GNOME (see `probeWlClipboard` / `probeXclip`), so we don't
+ * land on `wl-clipboard` there to begin with.
+ */
+function runWithFallback<T>(op: (impl: Impl) => T, fallback: T): T {
+  const order = dispatchOrder();
+  for (const name of order) {
+    const impl = IMPLS[name];
+    if (!impl) continue;
+    try {
+      const r = op(impl);
+      // First mechanism that didn't throw wins; promote it so
+      // subsequent calls go straight there.
+      if (name !== (getMechanism("clipboard") || "")) {
+        try { setMechanism("clipboard", name); } catch { /* ignore */ }
+      }
+      return r;
+    } catch { /* try next mechanism */ }
+  }
+  return fallback;
 }
 
 export function linux_clipboard_clear(): boolean {
-  const m = activeMechanism();
-  const ok = m === "wl-clipboard" ? wlClear()
-           : m === "xclip"        ? xclipSetText("")
-           : m === "xsel"         ? xselSetText("")
-           : false;
+  const ok = runWithFallback(i => i.clear(), false);
   if (ok) bumpSeq();
   return ok;
 }
 
 export function linux_clipboard_hasText(): boolean {
-  const m = activeMechanism();
-  return m === "wl-clipboard" ? wlHasText()
-       : m === "xclip"        ? xclipHasText()
-       : m === "xsel"         ? xselHasText()
-       : false;
+  return runWithFallback(i => i.hasText(), false);
 }
 
 export function linux_clipboard_getText(): string {
-  const m = activeMechanism();
-  return m === "wl-clipboard" ? wlGetText()
-       : m === "xclip"        ? xclipGetText()
-       : m === "xsel"         ? xselGetText()
-       : "";
+  return runWithFallback(i => i.getText(), "");
 }
 
 export function linux_clipboard_setText(text: string): boolean {
-  const m = activeMechanism();
-  const ok = m === "wl-clipboard" ? wlSetText(text)
-           : m === "xclip"        ? xclipSetText(text)
-           : m === "xsel"         ? xselSetText(text)
-           : false;
+  const ok = runWithFallback(i => i.setText(text), false);
   if (ok) bumpSeq();
   return ok;
 }

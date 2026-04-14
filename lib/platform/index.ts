@@ -31,9 +31,14 @@ import { CAPABILITY_MECHANISMS } from "./mechanisms";
 
 export type { CapabilitySummary, MechanismInfo, PlatformCapability } from "./types";
 
-// Per-capability cache: probe results + currently selected mechanism.
+// Per-capability cache: probe results, currently-active mechanism, and the
+// caller-supplied preference list (from env var or setMechanism([...])).
+// When a preference list is set we honour it strictly: auto-detection only
+// considers those names, and runtime fallback inside a dispatcher (e.g.
+// clipboard) is bounded to that same list.
 const _probed: Partial<Record<PlatformCapability, MechanismInfo[]>> = {};
 const _active: Partial<Record<PlatformCapability, string>> = {};
+const _pinnedList: Partial<Record<PlatformCapability, string[]>> = {};
 
 function envForCapability(capability: PlatformCapability): string[] {
   const envName =
@@ -43,6 +48,11 @@ function envForCapability(capability: PlatformCapability): string[] {
   const v = process.env[envName];
   if (!v) return [];
   return v.split(",").map(s => s.trim()).filter(Boolean);
+}
+
+function pinnedList(capability: PlatformCapability): string[] {
+  if (_pinnedList[capability]) return _pinnedList[capability]!;
+  return envForCapability(capability);
 }
 
 function probeAll(capability: PlatformCapability): MechanismInfo[] {
@@ -70,10 +80,11 @@ function probeAll(capability: PlatformCapability): MechanismInfo[] {
 function selectActive(capability: PlatformCapability): string | null {
   if (_active[capability]) return _active[capability]!;
   const infos = probeAll(capability);
-  const envList = envForCapability(capability);
+  const preferred = pinnedList(capability);
 
-  // Forced preference via env var: try each listed mechanism in order.
-  for (const wanted of envList) {
+  // Forced preference (env var or setMechanism([...])): try each listed
+  // mechanism in order.
+  for (const wanted of preferred) {
     if (wanted === "none") {
       _active[capability] = "none";
       return "none";
@@ -84,12 +95,12 @@ function selectActive(capability: PlatformCapability): string | null {
       return m.name;
     }
   }
-  // If the env var forced a specific non-available mechanism we still
+  // If the user pinned a specific non-available mechanism we still
   // respect the caller's intent: record it and let them observe the
   // failure through `getCapabilities`.
-  if (envList.length > 0) {
-    _active[capability] = envList[0];
-    return envList[0];
+  if (preferred.length > 0) {
+    _active[capability] = preferred[0];
+    return preferred[0];
   }
 
   // Auto-select: first `available: true`.
@@ -112,26 +123,58 @@ export function getMechanism(capability: PlatformCapability): string | null {
 }
 
 /**
- * Force a specific mechanism.  Throws if the requested name is unknown for
- * this capability.  Passing an unavailable mechanism is allowed (useful for
- * forcing a path that *should* work if permissions are fixed) — inspect
- * `getCapabilities(capability).mechanisms` to see the underlying state.
+ * Pin one or more mechanisms for a capability.
+ *
+ * Accepts either a single name (`"xclip"`) or a priority-ordered list
+ * (`["wl-clipboard", "xclip"]`).  When multiple names are given, the
+ * first *available* mechanism from the list is selected as active; if
+ * none are available, the first named mechanism is recorded as active
+ * so `getCapabilities()` can surface the failure.
+ *
+ * Runtime fallback (e.g. the Linux clipboard dispatcher's per-call
+ * retry on exception) is bounded to the pinned list — fallback will
+ * never escape into mechanisms the caller explicitly excluded.
+ *
+ * Passing `"none"` suppresses the capability entirely (useful in tests
+ * to validate stub behaviour).  Unknown names throw.
  */
-export function setMechanism(capability: PlatformCapability, name: string): void {
+export function setMechanism(
+  capability: PlatformCapability,
+  nameOrList: string | string[],
+): void {
   const infos = probeAll(capability);
-  if (!infos.find(i => i.name === name) && name !== "none") {
-    const known = infos.map(i => i.name).join(", ");
-    throw new Error(
-      `mechatron: unknown ${capability} mechanism "${name}" (known: ${known || "<none>"})`,
-    );
+  const list = (Array.isArray(nameOrList) ? nameOrList : [nameOrList])
+    .map(s => s.trim()).filter(Boolean);
+  if (list.length === 0) {
+    throw new Error(`mechatron: setMechanism(${capability}) requires at least one name`);
   }
-  _active[capability] = name;
+  const known = new Set(infos.map(i => i.name));
+  for (const n of list) {
+    if (n !== "none" && !known.has(n)) {
+      const knownStr = [...known].join(", ");
+      throw new Error(
+        `mechatron: unknown ${capability} mechanism "${n}" (known: ${knownStr || "<none>"})`,
+      );
+    }
+  }
+  _pinnedList[capability] = list;
+  delete _active[capability];   // re-select from the new list
+}
+
+/**
+ * Return the caller-pinned preference list (from env or `setMechanism`),
+ * or `null` if no override is in effect (auto-detection is running).
+ */
+export function getPreferredMechanisms(capability: PlatformCapability): string[] | null {
+  const list = pinnedList(capability);
+  return list.length > 0 ? list.slice() : null;
 }
 
 /** Reset selection so the next call re-runs auto-detection. */
 export function resetMechanism(capability: PlatformCapability): void {
   delete _active[capability];
   delete _probed[capability];
+  delete _pinnedList[capability];
 }
 
 /** Summary: active mechanism + every probed mechanism + capability flags. */
@@ -207,6 +250,7 @@ export function _setSavedScreenHandle(v: unknown): void { _savedScreenHandle = v
 export const Platform = {
   listMechanisms,
   getMechanism,
+  getPreferredMechanisms,
   setMechanism,
   resetMechanism,
   getCapabilities,

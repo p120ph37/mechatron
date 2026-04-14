@@ -332,13 +332,32 @@ function probeCoreGraphics(): MechanismInfo {
 // Clipboard mechanisms
 // =============================================================================
 
+/**
+ * GNOME/Mutter does not implement the `wlr-data-control` Wayland
+ * protocol that wl-clipboard relies on; `wl-copy` will run and even
+ * exit 0 there, but the content never actually reaches any other
+ * client's paste buffer.  GNOME-Wayland almost always has XWayland
+ * running, so xclip/xsel (via `$DISPLAY`) work — we therefore mark
+ * wl-clipboard as unavailable on GNOME so auto-selection falls
+ * through to xclip/xsel transparently.  A user who knows their
+ * setup can still force it via `MECHATRON_CLIPBOARD_MECHANISM`.
+ */
+function isGnome(): boolean {
+  const xdg = (process.env.XDG_CURRENT_DESKTOP || "").toUpperCase();
+  if (/\bGNOME\b/.test(xdg)) return true;
+  if (process.env.GNOME_SHELL_SESSION_MODE) return true;
+  if (process.env.GNOME_DESKTOP_SESSION_ID) return true;
+  return false;
+}
+
 function probeWlClipboard(): MechanismInfo {
   const hasCopy = IS_LINUX && canExec("wl-copy");
   const hasPaste = IS_LINUX && canExec("wl-paste");
-  const available = hasCopy && hasPaste && hasWayland();
+  const gnome = isGnome();
+  const available = hasCopy && hasPaste && hasWayland() && !gnome;
   return {
     name: "wl-clipboard",
-    description: "wl-clipboard (wl-copy/wl-paste) — Wayland clipboard bridge",
+    description: "wl-clipboard (wl-copy/wl-paste) — Wayland clipboard bridge via wlr-data-control",
     available,
     requiresElevatedPrivileges: false,
     requiresUserApproval: false,
@@ -346,6 +365,7 @@ function probeWlClipboard(): MechanismInfo {
     reason: !IS_LINUX ? "not Linux"
       : !hasCopy || !hasPaste ? "wl-copy / wl-paste not installed"
       : !hasWayland() ? "not a Wayland session"
+      : gnome ? "GNOME/Mutter doesn't implement wlr-data-control (use xclip/xsel via XWayland)"
       : undefined,
   };
 }
