@@ -119,8 +119,8 @@ interface XRandR {
   ) => number;
   XRRGetMonitors: (
     display: Pointer, window: bigint, getActive: number, nmonitorsRet: Pointer,
-  ) => Pointer;
-  XRRFreeMonitors: (monitors: Pointer) => number;
+  ) => bigint;
+  XRRFreeMonitors: (monitors: bigint) => number;
 }
 
 let _opened = false;
@@ -262,15 +262,12 @@ function tryDlopen(): void {
     const xrr = _ffi.dlopen<XRandR>("libXrandr.so.2", {
       XRRQueryExtension: { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
       XRRQueryVersion:   { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
-      // window is u64 (XID); matches the XQueryTree / XRootWindow handles
-      // we hold as bigint elsewhere.  Return is XRRMonitorInfo* array,
-      // which we read through F.read.* — keep as T.ptr so Bun returns a
-      // native Pointer (not bigint) we can normalise to Number below.
-      XRRGetMonitors:    { args: [T.ptr, T.u64, T.i32, T.ptr], returns: T.ptr },
-      // XRRFreeMonitors takes a pointer we hold as bigint (from T.ptr
-      // return normalised via Number(ptr) into Number form); declare as
-      // u64 so Bun accepts either bigint or Number.
-      XRRFreeMonitors:   { args: [T.u64], returns: T.i32 },
+      // window is u64 (XID).  Return is XRRMonitorInfo* array; we declare
+      // it as u64 so Bun hands us a bigint that the caller can pass to
+      // F.read.* via Number() and round-trip to XRRFreeMonitors unchanged.
+      // Same T.u64-for-pointers trick used for XFree / XScreen* above.
+      XRRGetMonitors:    { args: [T.ptr, T.u64, T.i32, T.ptr], returns: T.u64 },
+      XRRFreeMonitors:   { args: [T.u64],                      returns: T.i32 },
     });
     _xrandr = xrr.symbols;
   } catch (_) {

@@ -66,9 +66,9 @@ function linuxSynchronize(): ScreenInfo[] | null {
       const nOut = new Int32Array(1);
       // get_active=1 filters out disabled outputs so we don't enumerate
       // monitors that aren't currently driving a display.
-      const info = xrr.XRRGetMonitors(d, root, True, F.ptr(nOut)) as bigint | number | null;
+      const info = xrr.XRRGetMonitors(d, root, True, F.ptr(nOut));
       const n = nOut[0];
-      if (info && (info as bigint | number) !== 0n && (info as bigint | number) !== 0 && n > 0) {
+      if (info !== 0n && n > 0) {
         // Bun's read.* rejects bigint ptr args; convert to Number (userspace
         // VAs fit in 48 bits on Linux so this is lossless).
         const infoN = Number(info);
@@ -86,7 +86,9 @@ function linuxSynchronize(): ScreenInfo[] | null {
         //   (4 bytes padding    @ 44)
         //   RROutput *outputs    @ 48 (u64)
         const STRIDE = 56;
-        let primaryIdx: number | null = null;
+        // Primary first to match Windows/macOS convention + legacy
+        // XDefaultScreen ordering; any subsequent monitor appends.
+        let primarySeen = false;
         for (let i = 0; i < n; i++) {
           const off = i * STRIDE;
           const primary = F.read.i32(infoN, off + 8);
@@ -95,16 +97,11 @@ function linuxSynchronize(): ScreenInfo[] | null {
           const w = F.read.i32(infoN, off + 28);
           const h = F.read.i32(infoN, off + 32);
           const bounds: RawRect = { x, y, w, h };
-          if (primary !== 0 && primaryIdx === null) primaryIdx = screens.length;
-          screens.push({ bounds, usable: bounds });
+          const item = { bounds, usable: bounds };
+          if (primary !== 0 && !primarySeen) { screens.unshift(item); primarySeen = true; }
+          else                               { screens.push(item); }
         }
-        // Put primary first to match Windows/macOS convention + legacy
-        // XDefaultScreen ordering.
-        if (primaryIdx !== null && primaryIdx > 0) {
-          const [p] = screens.splice(primaryIdx, 1);
-          screens.unshift(p);
-        }
-        xrr.XRRFreeMonitors(info as bigint);
+        xrr.XRRFreeMonitors(info);
         usedXrandr = true;
       }
     }
@@ -127,8 +124,11 @@ function linuxSynchronize(): ScreenInfo[] | null {
   const buf = cstr("_NET_WORKAREA");
   const netWorkarea = X.XInternAtom(d, F.ptr(buf), True);
   if (netWorkarea !== 0n) {
+    // When XRandR gave us the geometry, all monitors share the single
+    // X screen indexed by XDefaultScreen — no need to recompute per iteration.
+    const defaultScreen = usedXrandr ? X.XDefaultScreen(d) : -1;
     for (let i = 0; i < screens.length; i++) {
-      const rootScreen = usedXrandr ? X.XDefaultScreen(d) : i;
+      const rootScreen = usedXrandr ? defaultScreen : i;
       const win = X.XRootWindow(d, rootScreen);
 
       const actualType = new BigUint64Array(1);

@@ -57,22 +57,18 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
             let mut n: c_int = 0;
             let info = XRRGetMonitors(display, root, True_, &mut n);
             if !info.is_null() && n > 0 {
-                // XRandR reports primary monitor via a flag — reorder so the
-                // primary appears at index 0, matching the Windows/macOS
-                // convention and the legacy Xinerama+XDefaultScreen behaviour.
-                let mut primary_idx: Option<usize> = None;
+                // XRandR reports primary via a flag; place it at index 0 to
+                // match the Windows/macOS convention and the legacy
+                // Xinerama+XDefaultScreen behaviour.
+                let mut primary_seen = false;
                 for i in 0..n as usize {
                     let mi = &*info.add(i);
                     let bounds = (mi.x, mi.y, mi.width, mi.height);
-                    if mi.primary != 0 && primary_idx.is_none() {
-                        primary_idx = Some(screens.len());
-                    }
-                    screens.push((bounds, bounds));
-                }
-                if let Some(p) = primary_idx {
-                    if p > 0 {
-                        let item = screens.remove(p);
-                        screens.insert(0, item);
+                    if mi.primary != 0 && !primary_seen {
+                        screens.insert(0, (bounds, bounds));
+                        primary_seen = true;
+                    } else {
+                        screens.push((bounds, bounds));
                     }
                 }
                 XRRFreeMonitors(info);
@@ -96,8 +92,11 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         }
 
         if net_workarea != None_ {
+            // Under XRandR every monitor shares the single X screen returned
+            // by XDefaultScreen; no point calling it once per iteration.
+            let default_screen = if used_xrandr { XDefaultScreen(display) } else { -1 };
             for i in 0..screens.len() {
-                let root_screen = if used_xrandr { XDefaultScreen(display) } else { i as c_int };
+                let root_screen = if used_xrandr { default_screen } else { i as c_int };
                 let win = XRootWindow(display, root_screen);
 
                 let mut type_: Atom = 0;
