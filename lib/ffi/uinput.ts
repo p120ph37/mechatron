@@ -183,8 +183,6 @@ export function getUinputDevice(): UInputDevice | null {
       ioctl(UI_DEV_DESTROY, 0n);
       try { closeSync(fd); } catch { /* ignore */ }
       _device = null;
-      _openAttempted = false;
-      _openReason = null;
     },
   };
   return _device;
