@@ -126,6 +126,10 @@ interface Libc {
   dlsym: (handle: Pointer, name: Pointer) => Pointer;
 }
 
+// ── Paths ─────────────────────────────────────────────────────────────
+
+const AK_PATH = "/System/Library/Frameworks/AppKit.framework/AppKit";
+
 // ── State ─────────────────────────────────────────────────────────────
 
 let _opened = false;
@@ -145,10 +149,10 @@ function tryDlopen(): void {
   if (!_ffi) return;
   if (process.platform !== "darwin") return;
   const T = _ffi.FFIType;
+  // AK_PATH is file-scope (referenced by resolveDataSymbol too).
 
   const CG_PATH = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
   const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-  const AK_PATH = "/System/Library/Frameworks/AppKit.framework/AppKit";
   const OBJC_PATH = "/usr/lib/libobjc.A.dylib";
   const LIBC_PATH = "/usr/lib/libSystem.B.dylib";
 
