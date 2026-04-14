@@ -24,8 +24,13 @@
  * the XTest path (see lib/ffi/keyboard.ts / mouse.ts dispatch).
  */
 
-import { openSync, writeSync, closeSync, existsSync } from "fs";
-import { getBunFFI, type BunFFI, type Pointer } from "./bun";
+import { openSync, writeSync, closeSync } from "fs";
+import { getBunFFI, type BunFFI } from "./bun";
+import { getMechanism } from "../platform";
+import {
+  BUTTON_LEFT as BTN_IDX_LEFT, BUTTON_MID as BTN_IDX_MID,
+  BUTTON_RIGHT as BTN_IDX_RIGHT, BUTTON_X1 as BTN_IDX_X1, BUTTON_X2 as BTN_IDX_X2,
+} from "../mouse/constants";
 import {
   EV_SYN, EV_KEY, EV_REL, SYN_REPORT,
   REL_X, REL_Y, REL_WHEEL, REL_HWHEEL,
@@ -112,10 +117,6 @@ export function getUinputDevice(): UInputDevice | null {
     _openReason = "not Linux";
     return null;
   }
-  if (!existsSync("/dev/uinput")) {
-    _openReason = "/dev/uinput not present";
-    return null;
-  }
   openLibc();
   if (!_libc || !_ffi) {
     _openReason = "bun:ffi / libc not available";
@@ -130,7 +131,6 @@ export function getUinputDevice(): UInputDevice | null {
     return null;
   }
 
-  // From this point on any error path needs to close(fd) before returning.
   const closeOnErr = (reason: string): null => {
     _openReason = reason;
     try { closeSync(fd); } catch { /* ignore */ }
@@ -144,7 +144,7 @@ export function getUinputDevice(): UInputDevice | null {
   // UI_SET_EVBIT — advertise EV_KEY, EV_REL, EV_SYN.
   for (const ev of [EV_KEY, EV_REL, EV_SYN]) {
     if (ioctl(UI_SET_EVBIT, ev) < 0) {
-      return closeOnErr(`UI_SET_EVBIT ${ev} failed (errno visible to strace)`);
+      return closeOnErr(`UI_SET_EVBIT ${ev} failed`);
     }
   }
   // UI_SET_KEYBIT — every keycode we might emit, including mouse buttons.
@@ -160,12 +160,7 @@ export function getUinputDevice(): UInputDevice | null {
     }
   }
 
-  // UI_DEV_SETUP — submit the uinput_setup struct.  We write the buffer
-  // to a Node-allocated Uint8Array and pass its address to ioctl via
-  // bun:ffi.  `BigInt(ptr)` would lose precision past 2^53 but Linux
-  // userspace addresses are well within that on every mainstream arch;
-  // bun:ffi actually returns bigint directly via F.ptr() so there's no
-  // conversion hazard.
+  // UI_DEV_SETUP — submit the uinput_setup struct.
   const setupBuf = encodeUinputSetup("mechatron virtual input", {
     vendor: 0x1209,   // pid.codes block (we have no assigned PID, this is a test/dev range)
     product: 0x7070,  // arbitrary stable product id
@@ -185,9 +180,11 @@ export function getUinputDevice(): UInputDevice | null {
   _device = {
     fd,
     close(): void {
-      try { ioctl(UI_DEV_DESTROY, 0n); } catch { /* ignore */ }
+      ioctl(UI_DEV_DESTROY, 0n);
       try { closeSync(fd); } catch { /* ignore */ }
       _device = null;
+      _openAttempted = false;
+      _openReason = null;
     },
   };
   return _device;
@@ -263,11 +260,11 @@ export function injectMouseButton(button: number, press: boolean): boolean {
   if (!dev) return false;
   let code: number;
   switch (button) {
-    case 0: code = BTN_LEFT; break;
-    case 1: code = BTN_MIDDLE; break;
-    case 2: code = BTN_RIGHT; break;
-    case 3: code = BTN_SIDE; break;
-    case 4: code = BTN_EXTRA; break;
+    case BTN_IDX_LEFT:  code = BTN_LEFT; break;
+    case BTN_IDX_MID:   code = BTN_MIDDLE; break;
+    case BTN_IDX_RIGHT: code = BTN_RIGHT; break;
+    case BTN_IDX_X1:    code = BTN_SIDE; break;
+    case BTN_IDX_X2:    code = BTN_EXTRA; break;
     default: return false;
   }
   return writeEvents(dev.fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]);
@@ -321,6 +318,16 @@ export function injectScrollH(amount: number): boolean {
  */
 export function uinputReady(): boolean {
   return getUinputDevice() !== null;
+}
+
+/**
+ * Is uinput the selected input mechanism AND is the device live?  The
+ * short-circuit avoids the lazy open when the mechanism isn't uinput.
+ * Callers in keyboard/mouse dispatch use this as the gate for routing
+ * events through uinput instead of XTest.
+ */
+export function uinputSelected(): boolean {
+  return getMechanism("input") === "uinput" && uinputReady();
 }
 
 // Re-export a few pure encoding helpers from lib/input/uinput so

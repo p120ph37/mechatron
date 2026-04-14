@@ -40,8 +40,6 @@
  * `ioctl(2)`.  Splitting it this way keeps the encoding layer unit-
  * testable without touching `/dev/uinput`, which is both privilege-
  * gated and impossible to mock portably.
- *
- * See PLAN.md §6c.
  */
 
 import { openSync, closeSync, existsSync } from "fs";
@@ -195,12 +193,13 @@ export function mapKeysymToKeycode(keysym: number): number {
  * simpler than managing two devices (compositors expose both as a single
  * pair of evdev nodes that way too).
  */
+let _evdevCodesCache: number[] | null = null;
 export function allSupportedEvdevCodes(): number[] {
+  if (_evdevCodesCache) return _evdevCodesCache;
   const keys = Object.values(KEYSYM_TO_EVDEV);
   const buttons = [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA];
-  // Dedup — KEYSYM_TO_EVDEV has intentional duplicates for KEY_LEFT_ALT /
-  // KEY_RIGHT_ALT both mapping via the same evdev code occasionally.
-  return Array.from(new Set([...keys, ...buttons])).sort((a, b) => a - b);
+  _evdevCodesCache = Array.from(new Set([...keys, ...buttons])).sort((a, b) => a - b);
+  return _evdevCodesCache;
 }
 
 // =============================================================================
