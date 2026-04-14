@@ -110,7 +110,12 @@ describeMaybe(`mechatron [${backend}]`, () => {
   test("mouse",     () => mouseM.testMouse());
   test("clipboard", () => clipM.testClipboard());
   test("process",   () => procM.testProcess());
-  test("window",    () => winM.testWindow());
+  // Per-test timeout bumped above bun's 5s default: the Linux FFI
+  // stale-handle probe spawns xmessage, waits for the window to be
+  // mapped (≤1.5s), destroys it, then waits for the X server to
+  // drop the handle (≤1.5s).  Combined with the normal window-
+  // enumeration work this can exceed 5s on slow CI runners.
+  test("window",    () => winM.testWindow(), 15000);
   test("screen",    () => scrM.testScreen());
   test("memory",    () => memM.testMemory());
 });
