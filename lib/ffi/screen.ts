@@ -177,7 +177,13 @@ function linuxGrabScreen(x: number, y: number, w: number, h: number, windowHandl
     const greenMask = F.read.u64(imgN, 64);
     const blueMask  = F.read.u64(imgN, 72);
 
-    const pixels = new Uint32Array(iw * ih);
+    // Guard against RangeError on absurd sizes (see macGrabScreen note).
+    let pixels: Uint32Array;
+    try {
+      pixels = new Uint32Array(iw * ih);
+    } catch (_) {
+      return null;
+    }
     for (let yy = 0; yy < ih; yy++) {
       for (let xx = 0; xx < iw; xx++) {
         const pixel = X.XGetPixel(img, xx, yy);
@@ -280,7 +286,13 @@ function winGrabScreen(x: number, y: number, w: number, h: number, windowHandle?
     dv.setUint16(14, 32, true);
     dv.setUint32(16, 0, true);
 
-    const pixels = new Uint32Array(w * h);
+    // Guard against RangeError on absurd sizes (see macGrabScreen note).
+    let pixels: Uint32Array;
+    try {
+      pixels = new Uint32Array(w * h);
+    } catch (_) {
+      return null;
+    }
     g.GetDIBits(hdcMem, hbmp, 0, h, F.ptr(pixels), F.ptr(bmi), DIB_RGB_COLORS);
     // GetDIBits with biBitCount=32, BI_RGB returns BGRX pixels little-endian:
     // each u32 = 0x00RRGGBB.  Set alpha to 0xFF.
@@ -326,7 +338,16 @@ function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle
     const fullW = Number(CG.CGImageGetWidth(cgImg));
     if (fullW <= 0 || fullH <= 0) return null;
 
-    const pixels = new Uint32Array(w * h);
+    // Guard the JS-side buffer allocation.  Uint32Array throws RangeError
+    // on impossibly large requests (e.g. 100000x100000 asks for 40GB),
+    // and we want the same "return null" behaviour the FFI null-checks
+    // below deliver for CG-side allocation failures.
+    let pixels: Uint32Array;
+    try {
+      pixels = new Uint32Array(w * h);
+    } catch (_) {
+      return null;
+    }
     const cs = CG.CGColorSpaceCreateDeviceRGB();
     if (!cs) return null;
     const ctx = CG.CGBitmapContextCreate(
