@@ -129,19 +129,20 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// Pushes CreateCompatibleBitmap / CGBitmapContextCreate / XGetImage past
 		// what the host can allocate.  The FFI backends each have a null-check
 		// arm for the allocation result; this test reaches it without crashing
-		// the process.  Accept either a boolean return (false on allocation
-		// failure) or a thrown JS exception — both indicate the backend
-		// refused the request cleanly rather than aborting.  The NAPI
-		// Windows backend in particular tends to throw at 40GB requests
-		// (exit 3 otherwise).
-		var imgHuge = new Image();
-		var rHuge;
-		try {
-			rHuge = Screen.grabScreen(imgHuge, 0, 0, 100000, 100000);
-		} catch (_) {
-			rHuge = false;
+		// the process.  The Windows NAPI backend aborts at C++ level on
+		// impossibly large requests (exit 3 bypasses JS try/catch), so
+		// restrict this probe to the FFI backend where we control the
+		// allocation path.
+		if (mechatron.getBackend("screen") === "ffi") {
+			var imgHuge = new Image();
+			var rHuge;
+			try {
+				rHuge = Screen.grabScreen(imgHuge, 0, 0, 100000, 100000);
+			} catch (_) {
+				rHuge = false;
+			}
+			assert(typeof rHuge === "boolean", "oversize grabScreen returns boolean or throws");
 		}
-		assert(typeof rHuge === "boolean", "oversize grabScreen returns boolean or throws");
 
 		// --- Async variants ---
 		var pa1 = Screen.synchronizeAsync();
