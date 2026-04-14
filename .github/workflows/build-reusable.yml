@@ -193,6 +193,16 @@ jobs:
             test/memory-child.c -o "test/memory-child$EXT"
           ls -la "test/memory-child$EXT"
 
+      - name: Build dlopen-block LD_PRELOAD shim
+        if: runner.os == 'Linux'
+        # Compile the selective dlopen-interception shim used to force the
+        # FFI backend's "library unavailable" catch arms (lib/ffi/x11.ts
+        # :220, :234, :245) to fire without uninstalling libXtst /
+        # libXinerama from the runner.  See test/dlopen-block.c.
+        run: |
+          clang -shared -fPIC -ldl -o test/dlopen-block.so test/dlopen-block.c
+          ls -la test/dlopen-block.so
+
       - name: Run tests
         run: |
           # Test runner selection per matrix cell:
@@ -326,6 +336,45 @@ jobs:
             fi
             [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
           done
+
+          # ── Linux-only: FFI with selected libraries denied via LD_PRELOAD
+          #    dlopen-block shim.  Drives coverage of the FFI loader's
+          #    library-unavailable catch arms (lib/ffi/x11.ts:234 libXtst,
+          #    :245 libXinerama) without needing to uninstall the libraries.
+          #    Each variant is its own bun process so the loader re-runs
+          #    tryDlopen() with the new LD_PRELOAD policy.  JUnit and lcov
+          #    feed into the same aggregators as the base backends.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            for variant in "no-xtst:libXtst.so.6" "no-xinerama:libXinerama.so.1"; do
+              label="${variant%%:*}"
+              block="${variant#*:}"
+              JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-${label}.xml"
+              BE_COV_DIR="$COV_DIR/ffi-${label}"
+              mkdir -p "$BE_COV_DIR"
+              BE_RC=0
+              MECHATRON_BACKEND=ffi \
+              MECHATRON_BLOCK_DLOPEN="$block" \
+              LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
+                run_and_log "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                  --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                  --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+                || BE_RC=$?
+              if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+                MSG="bun test for ffi-${label} (LD_PRELOAD dlopen-block $block) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+                {
+                  printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                  printf '<testsuites tests="1" failures="1">\n'
+                  printf '  <testsuite name="ffi-%s-backend" tests="1" failures="1">\n' "$label"
+                  printf '    <testcase name="ffi-%s backend startup" classname="backend" time="0">\n' "$label"
+                  printf '      <failure message="%s"/>\n' "$MSG"
+                  printf '    </testcase>\n'
+                  printf '  </testsuite>\n'
+                  printf '</testsuites>\n'
+                } > "$JUNIT_FILE"
+              fi
+              [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+            done
+          fi
 
           if [ "${{ runner.os }}" = "macOS" ]; then
             sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$COV_DIR" 2>/dev/null || true

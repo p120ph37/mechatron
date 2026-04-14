@@ -44,6 +44,20 @@ const gExpected: Record<string, Record<string, boolean>> = {
 const gPlatformKey = process.platform + "-" + process.arch;
 const gExpect: Record<string, boolean> = gExpected[gPlatformKey] || {};
 
+// Honour the LD_PRELOAD `dlopen-block` shim's block list (see
+// test/dlopen-block.c + .github/workflows/build-reusable.yml).  When a
+// library is deliberately denied via MECHATRON_BLOCK_DLOPEN, the
+// capabilities it provides can't be probed, so demote them from
+// "expected to work" to "may skip" on this run.  This lets the FFI
+// backend's dlopen-catch arms (lib/ffi/x11.ts:220, 234, 245) get
+// deterministic coverage without spuriously failing keyboardSim /
+// mouseSim / grabScreen assertions.
+const _blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
+if (_blocked.includes("libxtst")) {
+  gExpect.keyboardSim = false;
+  gExpect.mouseSim = false;
+}
+
 const log = (msg: string) => process.stdout.write(msg);
 const assert = (cond: unknown, msg?: string) => {
   if (!cond) throw new Error("Assertion Failed" + (msg ? ": " + msg : ""));
