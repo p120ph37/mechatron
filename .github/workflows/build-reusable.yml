@@ -26,7 +26,7 @@ jobs:
             arch: x64
           - os: ubuntu-22.04-arm
             arch: arm64
-          - os: macos-14
+          - os: macos-15
             arch: arm64
           # macOS x64: run on the Sequoia arm64 runner and cross-compile +
           # use Rosetta 2 for the test binary.  Rosetta 2 on macOS 15 gained
