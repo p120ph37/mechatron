@@ -208,11 +208,15 @@ function tryDlopen(): void {
     _objc = lib.symbols;
   } catch (_) { _objc = null; }
 
-  // AppKit doesn't export plain-C symbols we need; we dlopen it only so
-  // the Objective-C runtime loads its classes (NSPasteboard, NSImage, etc.)
-  // so that `objc_getClass("NSPasteboard")` succeeds.
+  // We dlopen AppKit only so the Objective-C runtime loads its classes
+  // (NSPasteboard, NSImage, etc.) and `objc_getClass("NSPasteboard")`
+  // succeeds.  `bun:ffi.dlopen` requires at least one symbol to look up,
+  // so we ask for `NSBeep` — a stable plain-C function the framework has
+  // always exported.  We never actually call it.
   try {
-    _ffi.dlopen<any>(AK_PATH, {});
+    _ffi.dlopen<{ NSBeep: () => void }>(AK_PATH, {
+      NSBeep: { args: [], returns: T.void },
+    });
     _appkitLoaded = true;
   } catch (_) { _appkitLoaded = false; }
 
