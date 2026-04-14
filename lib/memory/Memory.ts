@@ -266,7 +266,9 @@ export class Memory {
   writeData(address: number, buffer: Buffer, length?: number, flags?: number): number {
     const len = length !== undefined ? length : buffer.length;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
-    return getNative("memory").memory_writeData(this._pid, address, buffer, flags);
+    if (len === 0) return 0;
+    const buf = len === buffer.length ? buffer : buffer.subarray(0, len);
+    return getNative("memory").memory_writeData(this._pid, address, buf, flags);
   }
 
   async readDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
