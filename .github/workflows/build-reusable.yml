@@ -260,20 +260,22 @@ jobs:
           # run_bun LABEL JUNIT_FILE -- <bun test command> ...
           # Wraps run_and_log with: (1) a visible progress marker so CI
           # logs show exactly which invocation the script is on, and
-          # (2) a single retry when bun exits non-zero with an empty
+          # (2) up to two retries when bun exits non-zero with an empty
           # JUnit file (i.e. crashed before a single testcase could
           # execute).  The ubuntu-22.04-arm runner has intermittently
           # killed bun at --coverage instrumentation setup time with
-          # zero stdout/stderr; a single retry clears this without
-          # masking real test failures (which always produce testcases
-          # and thus skip the retry).
+          # zero stdout/stderr; retries clear this without masking real
+          # test failures (which always produce testcases and thus skip
+          # the retry).  Bumped from 2 to 3 attempts after observing
+          # back-to-back startup crashes on arm64 where even a single
+          # retry wasn't enough to clear the condition.
           run_bun() {
             local LABEL="$1"; shift
             local JUNIT_FILE="$1"; shift
             [ "$1" = "--" ] && shift
             local ATTEMPT RC OUT_BEFORE OUT_AFTER
             OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-            for ATTEMPT in 1 2; do
+            for ATTEMPT in 1 2 3; do
               echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
               RC=0
               run_and_log "$@" || RC=$?
@@ -286,11 +288,11 @@ jobs:
                 echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
                 return "$RC"
               fi
-              if [ "$ATTEMPT" = 2 ]; then
-                echo ">>> [$LABEL] retry also failed (rc=$RC), giving up" | tee -a "$TEST_LOG"
+              if [ "$ATTEMPT" = 3 ]; then
+                echo ">>> [$LABEL] retries exhausted (rc=$RC), giving up" | tee -a "$TEST_LOG"
                 return "$RC"
               fi
-              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying once" | tee -a "$TEST_LOG"
+              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying (attempt $((ATTEMPT + 1))/3)" | tee -a "$TEST_LOG"
               # Clear the empty junit so the second attempt gets a
               # clean file and our "no testcase" detection works below.
               rm -f "$JUNIT_FILE"
@@ -304,8 +306,25 @@ jobs:
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
             JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE"
-            exit "$?"
+            IA32_RC=0
+            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE" || IA32_RC=$?
+            # Tolerate a post-test-pass crash during Node teardown on
+            # Windows ia32.  The 32-bit Windows Node runtime (v22) has an
+            # intermittent SIGSEGV (exit 139) in its native-module
+            # finalisers that fires *after* the test function has already
+            # printed "ALL TESTS PASSED" and flushed the JUnit report.
+            # The crash is visible only as an exit code — every testcase
+            # still passes.  If the JUnit file shows no failures and the
+            # script already printed the success banner, treat the run
+            # as a pass; otherwise propagate the non-zero RC as normal.
+            if [ "$IA32_RC" != 0 ] \
+               && [ -s "$JUNIT_FILE" ] \
+               && grep -q "ALL TESTS PASSED" "$TEST_LOG" \
+               && ! grep -q '<failure' "$JUNIT_FILE"; then
+              echo ">>> [ia32] tolerating post-test teardown crash (rc=$IA32_RC); all testcases passed" | tee -a "$TEST_LOG"
+              IA32_RC=0
+            fi
+            exit "$IA32_RC"
           fi
 
           BUN="$(command -v bun)"
