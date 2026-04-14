@@ -6,15 +6,16 @@
  * we can still synthesise keyboard / mouse events by writing to a virtual
  * input device via `/dev/uinput`:
  *
- *   1. open `/dev/uinput` (RW)
- *   2. ioctl(UI_SET_EVBIT, EV_KEY / EV_REL / EV_SYN)
- *   3. ioctl(UI_SET_KEYBIT, <every keycode we might emit>)
- *   4. ioctl(UI_SET_RELBIT, REL_X / REL_Y / REL_WHEEL / REL_HWHEEL)
- *   5. write(uinput_user_dev { name, id: {bustype, vendor, product, version} })
- *   6. ioctl(UI_DEV_CREATE)
- *   7. for each event, write `struct input_event { sec, usec, type, code, value }`
+ *   1. `open("/dev/uinput", O_RDWR)`
+ *   2. `ioctl(UI_SET_EVBIT, EV_KEY | EV_REL | EV_SYN)`
+ *   3. `ioctl(UI_SET_KEYBIT, <each keycode we might emit>)`
+ *   4. `ioctl(UI_SET_RELBIT, REL_X | REL_Y | REL_WHEEL | REL_HWHEEL)`
+ *   5. `ioctl(UI_DEV_SETUP, &uinput_setup)` (Linux ≥ 4.5; simpler than the
+ *      legacy `write(uinput_user_dev)` path — 92 bytes vs 1116)
+ *   6. `ioctl(UI_DEV_CREATE)`
+ *   7. For each event `write(struct input_event{sec,usec,type,code,value})`
  *      followed by a `SYN_REPORT` to commit.
- *   8. ioctl(UI_DEV_DESTROY) on shutdown.
+ *   8. `ioctl(UI_DEV_DESTROY)` + close on shutdown.
  *
  * The kernel then creates a regular `/dev/input/eventN` node that the
  * display server (X11, Wayland, or a headless evdev consumer) picks up
@@ -32,58 +33,317 @@
  * but isn't writable, so callers can surface the need for elevated
  * privileges up front rather than failing silently at call time.
  *
- * This file is a *skeleton* — probe + selection wiring are complete, the
- * actual write path is scaffolded so the existing NAPI / FFI backends
- * can be left untouched while the uinput mechanism matures.  A full
- * implementation will live partly here (ioctl layout, keycode mapping)
- * and partly in the napi `keyboard`/`mouse` crates (the raw fd handling
- * and event writes that need to be fast-path).  See PLAN.md §6c.
+ * This file holds the **pure-TS half** of the implementation: event and
+ * setup-struct buffer encoding, plus the X11-keysym → evdev-keycode
+ * mapping table.  The ioctl / open / write fd plumbing lives in
+ * `lib/ffi/uinput.ts` (bun:ffi) because Node's `fs` APIs don't expose
+ * `ioctl(2)`.  Splitting it this way keeps the encoding layer unit-
+ * testable without touching `/dev/uinput`, which is both privilege-
+ * gated and impossible to mock portably.
+ *
+ * See PLAN.md §6c.
  */
 
-import { openSync, writeSync, closeSync, existsSync } from "fs";
+import { openSync, closeSync, existsSync } from "fs";
 
-// evdev event types / codes (selected subset from <linux/input-event-codes.h>).
+// =============================================================================
+// evdev event types / codes (subset of <linux/input-event-codes.h>)
+// =============================================================================
+
 export const EV_SYN = 0x00;
 export const EV_KEY = 0x01;
 export const EV_REL = 0x02;
+export const EV_ABS = 0x03;
 
 export const SYN_REPORT = 0;
 
 export const REL_X      = 0x00;
 export const REL_Y      = 0x01;
-export const REL_WHEEL  = 0x08;
 export const REL_HWHEEL = 0x06;
+export const REL_WHEEL  = 0x08;
 
-// uinput ioctl request numbers — values derived from `_IO` / `_IOW` in
-// <linux/uinput.h>.  Only the handful we care about are listed; expand
-// as the mechanism grows.
+// Mouse buttons — evdev codes from <linux/input-event-codes.h> BTN_MOUSE block.
+export const BTN_LEFT   = 0x110;
+export const BTN_RIGHT  = 0x111;
+export const BTN_MIDDLE = 0x112;
+export const BTN_SIDE   = 0x113;
+export const BTN_EXTRA  = 0x114;
+
+// =============================================================================
+// uinput ioctl request numbers (from <linux/uinput.h>)
 //
-// _IOC(dir, type, nr, size) where type='U' (0x55); direction flags
-// align to the kernel's `_IOC_NONE`=0, `_IOC_WRITE`=1 conventions on
-// every Linux arch we target (x86_64, aarch64, arm).  These literal
-// values match what <linux/uinput.h> expands to.
-export const UI_DEV_CREATE  = 0x5501;
-export const UI_DEV_DESTROY = 0x5502;
-// UI_SET_EVBIT/KEYBIT/RELBIT are `_IOW('U', 100|101|102, int)`.
-export const UI_SET_EVBIT   = 0x40045564;
-export const UI_SET_KEYBIT  = 0x40045565;
-export const UI_SET_RELBIT  = 0x40045566;
+// `_IO('U', nr)`        → (0 << 30) | (0 << 16) | ('U' << 8) | nr = 0x00005500 | nr
+// `_IOW('U', nr, int)`  → (1 << 30) | (4 << 16) | ('U' << 8) | nr = 0x40045500 | nr
+// `_IOW('U', nr, uinput_setup)` → (1 << 30) | (92 << 16) | ('U' << 8) | nr
+//
+// Every Linux arch we target (x86_64, aarch64, arm, riscv64) uses these
+// identical encodings.  alpha/mips/powerpc/sparc have different _IOC_SIZEBITS
+// layouts but are not in our supported set.
+// =============================================================================
 
-export interface UInputDevice {
-  fd: number;
-  close(): void;
+export const UI_DEV_CREATE   = 0x5501;   // _IO('U', 1)
+export const UI_DEV_DESTROY  = 0x5502;   // _IO('U', 2)
+export const UI_SET_EVBIT    = 0x40045564; // _IOW('U', 100, int)
+export const UI_SET_KEYBIT   = 0x40045565; // _IOW('U', 101, int)
+export const UI_SET_RELBIT   = 0x40045566; // _IOW('U', 102, int)
+export const UI_SET_ABSBIT   = 0x40045567; // _IOW('U', 103, int)
+// UI_DEV_SETUP takes a uinput_setup struct (92 bytes): _IOW('U', 3, uinput_setup)
+// = (1 << 30) | (92 << 16) | (0x55 << 8) | 3 = 0x405c5503
+export const UI_DEV_SETUP    = 0x405c5503;
+
+// Bus types (from <linux/input.h>) — BUS_VIRTUAL avoids collisions with
+// real USB/PS/2 hardware IDs on the compositor side.
+export const BUS_VIRTUAL = 0x06;
+
+// =============================================================================
+// X11 keysym → Linux evdev keycode mapping.
+//
+// mechatron's platform-independent KEYS.* table on Linux holds X11 keysym
+// values (see lib/keyboard/constants.ts's linuxKeys map).  Translating to
+// uinput requires a second lookup: X11 keysym → evdev KEY_* code.
+//
+// Values below are the kernel's `KEY_A` / `KEY_1` / etc. from
+// <linux/input-event-codes.h>.  We only list the entries in mechatron's
+// public KEYS.* surface (constants.ts's KeyTable interface); unknown
+// keysyms fall back to `mapKeysymToKeycode()` returning 0, which the
+// caller should skip.
+// =============================================================================
+
+export const KEYSYM_TO_EVDEV: Record<number, number> = {
+  // Letters (X11 lowercase latin keysyms = ASCII)
+  0x0061: 30, 0x0062: 48, 0x0063: 46, 0x0064: 32, 0x0065: 18, // a-e
+  0x0066: 33, 0x0067: 34, 0x0068: 35, 0x0069: 23, 0x006A: 36, // f-j
+  0x006B: 37, 0x006C: 38, 0x006D: 50, 0x006E: 49, 0x006F: 24, // k-o
+  0x0070: 25, 0x0071: 16, 0x0072: 19, 0x0073: 31, 0x0074: 20, // p-t
+  0x0075: 22, 0x0076: 47, 0x0077: 17, 0x0078: 45, 0x0079: 21, // u-y
+  0x007A: 44,                                                  // z
+  // Digits (row above letters)
+  0x0030: 11, 0x0031: 2,  0x0032: 3,  0x0033: 4,  0x0034: 5,  // 0-4
+  0x0035: 6,  0x0036: 7,  0x0037: 8,  0x0038: 9,  0x0039: 10, // 5-9
+  // Punctuation
+  0x0020: 57, // space
+  0x0060: 41, // grave `
+  0x002D: 12, // minus -
+  0x003D: 13, // equal =
+  0x005B: 26, // [
+  0x005D: 27, // ]
+  0x005C: 43, // backslash
+  0x003B: 39, // ;
+  0x0027: 40, // '
+  0x002C: 51, // ,
+  0x002E: 52, // .
+  0x002F: 53, // /
+  // Navigation / editing (X11 0xFF keysyms)
+  0xFF08: 14,  // BackSpace
+  0xFF09: 15,  // Tab
+  0xFF0D: 28,  // Return
+  0xFF13: 119, // Pause
+  0xFF14: 70,  // Scroll_Lock
+  0xFF1B: 1,   // Escape
+  0xFF50: 102, // Home
+  0xFF51: 105, // Left
+  0xFF52: 103, // Up
+  0xFF53: 106, // Right
+  0xFF54: 108, // Down
+  0xFF55: 104, // Prior (Page_Up)
+  0xFF56: 109, // Next (Page_Down)
+  0xFF57: 107, // End
+  0xFF61: 99,  // Print
+  0xFF63: 110, // Insert
+  0xFFFF: 111, // Delete
+  // Function keys
+  0xFFBE: 59, 0xFFBF: 60, 0xFFC0: 61, 0xFFC1: 62, // F1-F4
+  0xFFC2: 63, 0xFFC3: 64, 0xFFC4: 65, 0xFFC5: 66, // F5-F8
+  0xFFC6: 67, 0xFFC7: 68, 0xFFC8: 87, 0xFFC9: 88, // F9-F12
+  // Numpad
+  0xFFAB: 78,  // KP_Add (+)
+  0xFFAD: 74,  // KP_Subtract (-)
+  0xFFAA: 55,  // KP_Multiply (*)
+  0xFFAF: 98,  // KP_Divide (/)
+  0xFFAE: 83,  // KP_Decimal (.)
+  0xFF8D: 96,  // KP_Enter
+  0xFFB0: 82, 0xFFB1: 79, 0xFFB2: 80, 0xFFB3: 81, 0xFFB4: 75, // KP_0-4
+  0xFFB5: 76, 0xFFB6: 77, 0xFFB7: 71, 0xFFB8: 72, 0xFFB9: 73, // KP_5-9
+  // Modifiers
+  0xFFE1: 42,  // Shift_L
+  0xFFE2: 54,  // Shift_R
+  0xFFE3: 29,  // Control_L
+  0xFFE4: 97,  // Control_R
+  0xFFE5: 58,  // Caps_Lock
+  0xFF7F: 69,  // Num_Lock
+  0xFFE9: 56,  // Alt_L
+  0xFFEA: 100, // Alt_R
+  0xFFEB: 125, // Super_L (LeftMeta)
+  0xFFEC: 126, // Super_R (RightMeta)
+};
+
+/**
+ * Translate an X11 keysym (as stored in mechatron's platform-independent
+ * `KEYS.*` table on Linux) to a Linux evdev keycode.  Returns 0 when no
+ * mapping exists — callers should skip un-mappable events rather than
+ * emitting a KEY_RESERVED (evdev code 0), which would be an actual event
+ * the kernel would happily deliver.
+ */
+export function mapKeysymToKeycode(keysym: number): number {
+  return KEYSYM_TO_EVDEV[keysym] || 0;
 }
 
 /**
- * Open `/dev/uinput` and prepare a virtual input device.  The actual
- * device-creation ioctls live in the native layer (napi backend's
- * `keyboard` / `mouse` crates) because `node:fs` doesn't expose ioctl.
+ * All evdev keycodes that this module might ever emit — registered once at
+ * device-create time via UI_SET_KEYBIT.  Includes the BTN_* mouse buttons
+ * so a single uinput device can multiplex keyboard + mouse, which is
+ * simpler than managing two devices (compositors expose both as a single
+ * pair of evdev nodes that way too).
+ */
+export function allSupportedEvdevCodes(): number[] {
+  const keys = Object.values(KEYSYM_TO_EVDEV);
+  const buttons = [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA];
+  // Dedup — KEYSYM_TO_EVDEV has intentional duplicates for KEY_LEFT_ALT /
+  // KEY_RIGHT_ALT both mapping via the same evdev code occasionally.
+  return Array.from(new Set([...keys, ...buttons])).sort((a, b) => a - b);
+}
+
+// =============================================================================
+// Pure buffer encoders (testable without a real uinput fd)
+// =============================================================================
+
+/**
+ * Encode a `struct input_event` (24 bytes on a 64-bit kernel —
+ * `seconds:i64`, `microseconds:i64`, `type:u16`, `code:u16`, `value:i32`).
  *
- * This TS-side helper is used by:
- *   - mechanism probing (is /dev/uinput writable?);
- *   - diagnostic output (the `reason` strings in MechanismInfo);
- *   - planned `Platform.checkUinput()` convenience wrapper that
- *     emits a clear actionable error if the fd can't be opened.
+ * The `input_event` layout changed to the 64-bit-time variant in Linux 5.1
+ * (commit 152194fe1400); every Linux version we support is post that
+ * transition.  On 32-bit arches the kernel's compat layer re-expands
+ * userspace's 64-bit layout, so the same encoding works there too.
+ *
+ * `timestampMs` defaults to `Date.now()`.  Passing an explicit value makes
+ * this function deterministic for unit tests.
+ */
+export function encodeInputEvent(
+  type: number, code: number, value: number,
+  timestampMs: number = Date.now(),
+): Buffer {
+  const buf = Buffer.alloc(24);
+  // tv_sec (i64)  @ 0
+  // tv_usec (i64) @ 8
+  // type (u16)    @ 16
+  // code (u16)    @ 18
+  // value (i32)   @ 20
+  buf.writeBigInt64LE(BigInt(Math.floor(timestampMs / 1000)), 0);
+  buf.writeBigInt64LE(BigInt((timestampMs % 1000) * 1000), 8);
+  buf.writeUInt16LE(type & 0xFFFF, 16);
+  buf.writeUInt16LE(code & 0xFFFF, 18);
+  buf.writeInt32LE(value | 0, 20);
+  return buf;
+}
+
+/**
+ * Encode a `struct uinput_setup` (92 bytes, Linux ≥ 4.5) for the
+ * `UI_DEV_SETUP` ioctl.  Layout:
+ *
+ *   struct input_id {
+ *     __u16 bustype;
+ *     __u16 vendor;
+ *     __u16 product;
+ *     __u16 version;
+ *   };                        // 8 bytes
+ *   struct uinput_setup {
+ *     struct input_id id;     // 8
+ *     char name[80];          // 8+80 = 88
+ *     __u32 ff_effects_max;   // 88+4 = 92
+ *   };
+ *
+ * `name` is padded with NUL bytes to 80 bytes; over-length names are
+ * silently truncated to fit with a trailing NUL.  We pick `BUS_VIRTUAL`
+ * + an arbitrary-but-stable vendor/product quartet so a long-running
+ * application doesn't register as a different device on each restart.
+ */
+export function encodeUinputSetup(
+  name: string,
+  opts: { bustype?: number; vendor?: number; product?: number; version?: number; ffEffectsMax?: number } = {},
+): Buffer {
+  const buf = Buffer.alloc(92);
+  buf.writeUInt16LE((opts.bustype ?? BUS_VIRTUAL) & 0xFFFF, 0);
+  buf.writeUInt16LE((opts.vendor ?? 0x1209) & 0xFFFF, 2);   // 0x1209 = pid.codes block
+  buf.writeUInt16LE((opts.product ?? 0x7070) & 0xFFFF, 4);  // arbitrary stable product
+  buf.writeUInt16LE((opts.version ?? 1) & 0xFFFF, 6);
+  const nameBytes = Buffer.from(name, "utf8");
+  const nameLen = Math.min(nameBytes.length, 79); // leave 1 for NUL
+  nameBytes.copy(buf, 8, 0, nameLen);
+  // bytes 8+nameLen .. 88 are already zero-filled by Buffer.alloc.
+  buf.writeUInt32LE((opts.ffEffectsMax ?? 0) >>> 0, 88);
+  return buf;
+}
+
+/**
+ * Encode the legacy `struct uinput_user_dev` (1116 bytes) for pre-4.5
+ * kernels where UI_DEV_SETUP isn't available.  Written to the fd with
+ * `write(2)` rather than via ioctl — the old compat path.
+ *
+ * Layout:
+ *   char name[80];
+ *   struct input_id id;   // 8
+ *   __u32 ff_effects_max; // 4
+ *   __s32 absmax[64];     // 256
+ *   __s32 absmin[64];     // 256
+ *   __s32 absfuzz[64];    // 256
+ *   __s32 absflat[64];    // 256
+ *
+ * We leave the abs* arrays zero-filled (we don't emit EV_ABS events from
+ * this module — mouse motion is EV_REL only).
+ */
+export function encodeUinputUserDev(
+  name: string,
+  opts: { bustype?: number; vendor?: number; product?: number; version?: number; ffEffectsMax?: number } = {},
+): Buffer {
+  const buf = Buffer.alloc(1116);
+  const nameBytes = Buffer.from(name, "utf8");
+  const nameLen = Math.min(nameBytes.length, 79);
+  nameBytes.copy(buf, 0, 0, nameLen);
+  // input_id @ 80
+  buf.writeUInt16LE((opts.bustype ?? BUS_VIRTUAL) & 0xFFFF, 80);
+  buf.writeUInt16LE((opts.vendor ?? 0x1209) & 0xFFFF, 82);
+  buf.writeUInt16LE((opts.product ?? 0x7070) & 0xFFFF, 84);
+  buf.writeUInt16LE((opts.version ?? 1) & 0xFFFF, 86);
+  // ff_effects_max @ 88
+  buf.writeUInt32LE((opts.ffEffectsMax ?? 0) >>> 0, 88);
+  // absmax/absmin/absfuzz/absflat: 92..1116 — all zero.
+  return buf;
+}
+
+/**
+ * Encode an event burst: the given events followed by a `SYN_REPORT`.
+ *
+ * Callers batch related events (press+release for a click, dx+dy for
+ * diagonal motion) into a single burst so the kernel commits them as
+ * one input update — a "frame" in evdev parlance.  Without the trailing
+ * SYN_REPORT the kernel buffers indefinitely.
+ */
+export interface UInputEvent {
+  type: number;
+  code: number;
+  value: number;
+}
+export function encodeEventBurst(
+  events: UInputEvent[],
+  timestampMs: number = Date.now(),
+): Buffer {
+  const parts: Buffer[] = [];
+  for (const e of events) {
+    parts.push(encodeInputEvent(e.type, e.code, e.value, timestampMs));
+  }
+  parts.push(encodeInputEvent(EV_SYN, SYN_REPORT, 0, timestampMs));
+  return Buffer.concat(parts);
+}
+
+// =============================================================================
+// Probe / availability
+// =============================================================================
+
+/**
+ * Cheap probe: can we open `/dev/uinput` at all?  Used by
+ * `lib/platform/mechanisms.ts` for diagnostic output and by test harnesses
+ * to decide whether to skip the uinput integration tests.
  */
 export function openUinputForProbe(): { ok: boolean; reason?: string } {
   if (!existsSync("/dev/uinput")) {
@@ -103,56 +363,11 @@ export function openUinputForProbe(): { ok: boolean; reason?: string } {
 }
 
 /**
- * Low-level write helper: emit a `struct input_event` (24 bytes on a
- * 64-bit kernel — seconds:i64, microseconds:i64, type:u16, code:u16,
- * value:i32).  The `input_event` layout changed to the 64-bit-time
- * variant in Linux 5.1 (commit 152194fe); every Linux version we
- * support is post that transition.
- */
-export function writeInputEvent(
-  fd: number, type: number, code: number, value: number,
-): void {
-  const buf = Buffer.alloc(24);
-  // tv_sec (i64)     @ 0
-  // tv_usec (i64)    @ 8
-  // type (u16)       @ 16
-  // code (u16)       @ 18
-  // value (i32)      @ 20
-  const now = Date.now();
-  buf.writeBigInt64LE(BigInt(Math.floor(now / 1000)), 0);
-  buf.writeBigInt64LE(BigInt((now % 1000) * 1000), 8);
-  buf.writeUInt16LE(type & 0xFFFF, 16);
-  buf.writeUInt16LE(code & 0xFFFF, 18);
-  buf.writeInt32LE(value | 0, 20);
-  writeSync(fd, buf, 0, 24);
-}
-
-/**
- * Submit a burst of events followed by a SYN_REPORT so the kernel
- * commits them as a single input update.  Callers batch related events
- * (e.g. press+release for a click, or dx+dy for a diagonal motion).
- */
-export function syncReport(fd: number): void {
-  writeInputEvent(fd, EV_SYN, SYN_REPORT, 0);
-}
-
-/**
- * Stub: uinput-based keyboard press.  Full implementation requires:
- *   - a UInputDevice cached at module scope (creates/destroys are
- *     expensive; compositors also dedup based on (bustype,vendor,
- *     product,version), so we pick a stable quartet);
- *   - mapping from our KEYS.* keysym table to Linux evdev keycodes
- *     (EV_KEY codes: KEY_A=30, KEY_1=2, …).  The table lives in the
- *     existing `lib/keyboard/constants.ts` once the Linux mapping
- *     column is added.
- *
- * Until both land, this path falls back to the native backend by
- * returning `false` from `uinputAvailable()`.
+ * Is the full uinput write path wired up?  Returns true only when the
+ * bun:ffi backend layer (`lib/ffi/uinput.ts`) has been loaded AND the
+ * kernel device is writable.  Until the ioctl path lands this stays
+ * `false` so mechanism dispatch transparently falls back to xtest.
  */
 export function uinputAvailable(): boolean {
-  // The full device-create path isn't wired yet (see PLAN.md §6c).
-  // Returning false here means the mechanism is reported as available
-  // only for probe/diagnostic purposes; attempts to use it for real
-  // input injection transparently fall back to the primary (XTest).
   return false;
 }

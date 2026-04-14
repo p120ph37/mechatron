@@ -448,7 +448,7 @@ persistence via `Platform.saveScreenPermission` / `loadScreenPermission`,
 `CreateSession` request plumbing — is already on the roadmap and will
 be re-used rather than re-implemented.
 
-### 6c. uinput Virtual Input Device Fallback (COMPLETE — skeleton)
+### 6c. uinput Virtual Input Device Fallback (IN PROGRESS — pure-TS foundation landed)
 
 When XTest is unavailable or the session is Wayland, input can still be
 synthesised by creating a virtual keyboard/mouse via `/dev/uinput`:
@@ -567,7 +567,7 @@ caching semantics; same `restore_token` idea.
 |------|--------|-------|
 | Platform mechanism introspection (6a) | **Complete** | `getMechanism`, `listMechanisms`, `setMechanism`, `getCapabilities` |
 | Linux clipboard via wl-clipboard/xclip/xsel (6b) | **Complete** | TS bridge with tool auto-detection |
-| uinput fallback (6c) | **Skeleton** | Probe + node-level detection; full write path scaffolded |
+| uinput fallback (6c) | **In progress** | Pure-TS event/setup encoding + X11-keysym → evdev-keycode mapping + unit tests landed; bun:ffi ioctl layer + Keyboard/Mouse dispatch next |
 | Pure X protocol (6d) | **Planned** | Connection-setup parser is the gating work item |
 | Framebuffer / DRM capture (6e) | **Skeleton** | /dev/fb0 probe + mmap path; DRM TBD |
 | Portal+PipeWire screen capture (6f) | **Planned** | D-Bus portal detection landed; capture thread TBD |
