@@ -505,6 +505,36 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		bigReply.writeUInt32LE(5, 4);    // 5 * 4 = 20 extra bytes
 		assert(req.packetTotalLength(bigReply) === 52, "reply with extra bytes");
 
+		// ── encodeGetKeyboardMapping / parseGetKeyboardMappingReply ──
+		var km = req.encodeGetKeyboardMapping(8, 248);
+		assert(km.length === 8, "GetKeyboardMapping is 8 bytes");
+		assert(km.readUInt8(0) === req.OP_GET_KEYBOARD_MAPPING, "opcode 101");
+		assert(km.readUInt16LE(2) === 2, "length = 2 (4-byte units)");
+		assert(km.readUInt8(4) === 8, "first-keycode");
+		assert(km.readUInt8(5) === 248, "count");
+
+		// Reply: 2 keycodes × 4 keysyms-per-keycode = 8 KEYSYMs = 32 bytes
+		var kmReply = Buffer.alloc(32 + 32);
+		kmReply.writeUInt8(1, 0);
+		kmReply.writeUInt8(4, 1);                 // keysyms-per-keycode = 4
+		kmReply.writeUInt32LE(8, 4);              // 8 KEYSYMs trailing
+		// keycode 8: 'a','A',0,0     (keysym 0x61='a', 0x41='A')
+		kmReply.writeUInt32LE(0x61, 32 + 0);
+		kmReply.writeUInt32LE(0x41, 32 + 4);
+		// keycode 9: 'b','B',0,0
+		kmReply.writeUInt32LE(0x62, 32 + 16);
+		kmReply.writeUInt32LE(0x42, 32 + 20);
+		var kmParsed = req.parseGetKeyboardMappingReply(kmReply);
+		assert(kmParsed.keysymsPerKeycode === 4, "keysymsPerKeycode");
+		assert(kmParsed.keysyms.length === 8, "8 keysyms total");
+		assert(kmParsed.keysyms[0] === 0x61, "keycode 8 slot 0 = 'a'");
+		assert(kmParsed.keysyms[5] === 0x42, "keycode 9 slot 1 = 'B'");
+
+		var kmShort = false;
+		try { req.parseGetKeyboardMappingReply(Buffer.alloc(16)); }
+		catch (e) { kmShort = true; }
+		assert(kmShort, "parseGetKeyboardMappingReply rejects short header");
+
 		// ── Mechanism registry: xproto present and probed correctly ──
 		// xproto is in the registry only on Linux (CAPABILITY_MECHANISMS.input
 		// lists it for the Linux row); other platforms don't surface it.
@@ -567,6 +597,20 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					// 8x8 ZPixmap on a 24/32-bit visual = 8*8*4 = 256 bytes
 					assert(img.data.length >= 64, "captured image data >= 64 bytes (got " + img.data.length + ")");
 
+					// Keyboard mapping: first call parses, second returns cache.
+					var km1 = await c.getKeyboardMapping();
+					assert(km1.keysymsPerKeycode > 0, "keysymsPerKeycode > 0");
+					assert(km1.keysyms.length > 0, "keysyms populated");
+					var km2 = await c.getKeyboardMapping();
+					assert(km2 === km1, "getKeyboardMapping cached");
+					// Unknown keysym yields 0 (matches libX11 XKeysymToKeycode).
+					assert(c.keysymToKeycode(0xDEADBEEF) === 0, "unknown keysym -> 0");
+					// 'a' (keysym 0x61) should map to a real keycode on any
+					// standard X.Org layout.
+					var codeA = c.keysymToKeycode(0x61);
+					assert(codeA >= c.info.minKeycode && codeA <= c.info.maxKeycode,
+						"'a' maps to in-range keycode (got " + codeA + ")");
+
 					// RANDR: try GetMonitors but tolerate servers without RandR
 					// (e.g. very old Xvfb builds compiled without it).
 					try {
@@ -589,6 +633,52 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					try { await c.queryExtension("XTEST"); }
 					catch (_) { postCloseThrew = true; }
 					assert(postCloseThrew, "post-close sendRequest rejects");
+
+					// ── FFI bridge: sync→async dispatch via lib/ffi/xproto ──
+					// Only exercise under the FFI backend — the napi backend
+					// doesn't load lib/ffi/xproto.ts and the sync wrappers
+					// would have nothing to forward to.
+					var be = (process.env.MECHATRON_BACKEND || "").toLowerCase();
+					if (be === "ffi") {
+						log("(ffi bridge) ");
+						var Platform = mechatron.Platform;
+						var prior = Platform.getPreferredMechanisms("input");
+						Platform.setMechanism("input", "xproto");
+						assert(Platform.getMechanism("input") === "xproto",
+							"xproto selected as input mechanism");
+						var bridge = require("../lib/ffi/xproto");
+						bridge._resetXprotoForTests();
+						// Sync calls enqueue async work.  Flush to await completion.
+						bridge.xprotoSetPos(42, 51);
+						bridge.xprotoMousePress(mechatron.BUTTON_LEFT);
+						bridge.xprotoMouseRelease(mechatron.BUTTON_LEFT);
+						bridge.xprotoScrollV(1);
+						bridge.xprotoScrollH(-1);
+						// 'a' keysym
+						bridge.xprotoKeyPress(0x61);
+						bridge.xprotoKeyRelease(0x61);
+						await bridge.xprotoFlush();
+						assert(bridge.xprotoReady(),
+							"xproto bridge opened conn and survived press burst");
+						assert(bridge.xprotoOpenReason() === null,
+							"xproto open reason is null (success)");
+
+						// Dispatch through the public API — routes to xproto
+						// because we pinned the mechanism above.
+						var kb = new mechatron.Keyboard();
+						kb.press(0x61);
+						kb.release(0x61);
+						var ms = new mechatron.Mouse();
+						ms.press(mechatron.BUTTON_LEFT);
+						ms.release(mechatron.BUTTON_LEFT);
+						mechatron.Mouse.setPos(123, 234);
+						await bridge.xprotoFlush();
+
+						bridge._resetXprotoForTests();
+						if (prior && prior.length) Platform.setMechanism("input", prior);
+						else Platform.resetMechanism("input");
+					}
+
 					log("OK\n");
 					liveDone = true;
 					return true;

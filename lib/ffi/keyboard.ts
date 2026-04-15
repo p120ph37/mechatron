@@ -19,10 +19,14 @@ import {
   cg, cf, kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
 } from "./mac";
 import { injectKeysym, uinputSelected } from "./uinput";
+import {
+  xprotoSelected, xprotoKeyPress, xprotoKeyRelease,
+} from "./xproto";
 
 // ==================== Linux ====================
 
 function linux_keyboard_press(keycode: number): void {
+  if (xprotoSelected()) { xprotoKeyPress(keycode); return; }
   if (uinputSelected()) {
     // Unmapped keysyms fall through to XTest so niche keys still reach
     // the X server.
@@ -37,6 +41,7 @@ function linux_keyboard_press(keycode: number): void {
 }
 
 function linux_keyboard_release(keycode: number): void {
+  if (xprotoSelected()) { xprotoKeyRelease(keycode); return; }
   if (uinputSelected()) {
     if (injectKeysym(keycode, false)) return;
   }

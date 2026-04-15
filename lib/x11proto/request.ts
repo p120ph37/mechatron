@@ -44,6 +44,7 @@ import { pad4 } from "./wire";
 export const OP_QUERY_EXTENSION = 98;
 export const OP_WARP_POINTER = 41;
 export const OP_GET_IMAGE = 73;
+export const OP_GET_KEYBOARD_MAPPING = 101;
 
 // XTEST extension minor opcodes (we only ever send FakeInput).
 export const XTEST_MINOR_FAKE_INPUT = 2;
@@ -428,6 +429,56 @@ export function parseRRGetMonitorsReply(buf: Buffer): RRGetMonitorsReply {
     off = blockEnd;
   }
   return { timestamp, monitors };
+}
+
+// =============================================================================
+// GetKeyboardMapping (core opcode 101)
+//
+// Wire layout (8 bytes, length = 2):
+//   0   101             opcode
+//   1   unused
+//   2-4 2               length
+//   4   first-keycode   KEYCODE (u8) — typically ServerInfo.minKeycode
+//   5   count           CARD8 — number of consecutive keycodes to fetch
+//   6-8 unused
+//
+// Reply (32 + 4*replyLen bytes):
+//   0   1                reply
+//   1   keysyms-per-keycode  CARD8 — width of the per-keycode row
+//   2-4 seq              u16
+//   4-8 length           CARD32 (count * keysyms-per-keycode, in KEYSYM = u32 units)
+//   8-32 unused
+//   32+ keysyms          count * keysyms-per-keycode KEYSYMs (CARD32 each)
+//
+// Slot j of keycode k's row is the j-th keysym assigned to that keycode
+// (j=0 is unshifted, j=1 is shifted, j=2/3 are modifier combinations).
+// "NoSymbol" (0) fills unused slots.  For keysym→keycode lookup we pick
+// the first keycode whose row contains the target keysym in slot 0 or 1.
+// =============================================================================
+
+export function encodeGetKeyboardMapping(firstKeycode: number, count: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_GET_KEYBOARD_MAPPING, 0);
+  buf.writeUInt8(firstKeycode & 0xFF, 4);
+  buf.writeUInt8(count & 0xFF, 5);
+  return buf;
+}
+
+export interface GetKeyboardMappingReply {
+  keysymsPerKeycode: number;
+  /** Flat count*keysymsPerKeycode array of KEYSYM values (0 = NoSymbol). */
+  keysyms: Uint32Array;
+}
+
+export function parseGetKeyboardMappingReply(buf: Buffer): GetKeyboardMappingReply {
+  if (buf.length < 32) throw new Error("GetKeyboardMapping reply too short");
+  const keysymsPerKeycode = buf.readUInt8(1);
+  const replyLen = buf.readUInt32LE(4);
+  const total = 32 + replyLen * 4;
+  if (buf.length < total) throw new Error("GetKeyboardMapping reply truncated");
+  const keysyms = new Uint32Array(replyLen);
+  for (let i = 0; i < replyLen; i++) keysyms[i] = buf.readUInt32LE(32 + i * 4);
+  return { keysymsPerKeycode, keysyms };
 }
 
 // =============================================================================

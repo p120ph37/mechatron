@@ -31,6 +31,8 @@ import {
   encodeQueryExtension, parseQueryExtensionReply,
   encodeXTestFakeInput, encodeWarpPointer,
   encodeGetImage, parseGetImageReply, type GetImageReply,
+  encodeGetKeyboardMapping, parseGetKeyboardMappingReply,
+  type GetKeyboardMappingReply,
   encodeRRQueryVersion, parseRRQueryVersionReply,
   encodeRRGetMonitors, parseRRGetMonitorsReply,
   type RRQueryVersionReply, type RRGetMonitorsReply, type MonitorInfo,
@@ -41,6 +43,7 @@ import {
 } from "./request";
 
 export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
+  GetKeyboardMappingReply,
   RRQueryVersionReply, RRGetMonitorsReply, MonitorInfo };
 
 export class XProtoError extends Error {
@@ -407,6 +410,47 @@ export class XConnection {
       format: args.format, planeMask: args.planeMask,
     }));
     return parseGetImageReply(reply);
+  }
+
+  // ── Keyboard mapping ─────────────────────────────────────────────────────
+  // X servers report the keyboard layout as a (count x keysymsPerKeycode)
+  // grid of CARD32 keysyms, indexed by (keycode - minKeycode).  We fetch it
+  // once and cache it for keysym→keycode lookup (the inverse direction
+  // libX11's XKeysymToKeycode performs) — no need to track MappingNotify
+  // events because mechatron never observes remap after startup.
+  private keyMapping: GetKeyboardMappingReply | null = null;
+
+  /**
+   * Fetch (or return cached) keyboard mapping covering
+   * [minKeycode, maxKeycode].  Parses lazily on first call.
+   */
+  async getKeyboardMapping(): Promise<GetKeyboardMappingReply> {
+    if (this.keyMapping) return this.keyMapping;
+    const first = this.info.minKeycode;
+    const count = this.info.maxKeycode - this.info.minKeycode + 1;
+    const reply = await this.sendRequest(encodeGetKeyboardMapping(first, count));
+    this.keyMapping = parseGetKeyboardMappingReply(reply);
+    return this.keyMapping;
+  }
+
+  /**
+   * Resolve an X11 keysym to the first keycode that produces it in one of
+   * the first four grid slots (group 1 unshifted/shifted, group 2 u/s).
+   * Returns 0 when no keycode maps to the keysym — callers treat that as
+   * "drop the key event" matching libX11's XKeysymToKeycode behaviour.
+   */
+  keysymToKeycode(keysym: number): number {
+    if (!this.keyMapping) return 0;
+    const { keysyms, keysymsPerKeycode } = this.keyMapping;
+    const groupWidth = Math.min(4, keysymsPerKeycode);
+    const rows = (keysyms.length / keysymsPerKeycode) | 0;
+    for (let row = 0; row < rows; row++) {
+      const base = row * keysymsPerKeycode;
+      for (let j = 0; j < groupWidth; j++) {
+        if (keysyms[base + j] === keysym) return this.info.minKeycode + row;
+      }
+    }
+    return 0;
   }
 
   /** Enumerate connected monitors via RANDR 1.5 RRGetMonitors. */

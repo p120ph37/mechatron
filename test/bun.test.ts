@@ -75,6 +75,17 @@ if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "uinput") {
   gExpect.keyboardSim = false;
   gExpect.mouseSim = false;
 }
+// xproto dispatch is a sync→async bridge: Keyboard.press / Mouse.press
+// enqueue work on a promise chain, so by the time the generic bun.test
+// harness calls Keyboard.getState() the FakeInput may not have been
+// flushed to Xvfb yet (and getState reads go via the XTest sync path
+// regardless).  Demote the three sim flags to "may skip" — the xproto
+// code path is covered end-to-end in test/xproto.js via xprotoFlush().
+if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "xproto") {
+  gExpect.keyboardSim = false;
+  gExpect.mouseSim = false;
+  gExpect.mousePos = false;
+}
 
 const log = (msg: string) => process.stdout.write(msg);
 const assert = (cond: unknown, msg?: string) => {

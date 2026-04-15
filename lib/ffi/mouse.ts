@@ -38,6 +38,10 @@ import {
   injectMouseButton, injectScrollV, injectScrollH,
   uinputSelected,
 } from "./uinput";
+import {
+  xprotoSelected, xprotoMousePress, xprotoMouseRelease,
+  xprotoScrollV, xprotoScrollH, xprotoSetPos,
+} from "./xproto";
 import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "../mouse/constants";
 
 // X11 button mask bits (from <X11/X.h>)
@@ -57,6 +61,7 @@ function linux_xButton(button: number): number | null {
 }
 
 function linux_mouse_press(button: number): void {
+  if (xprotoSelected()) { xprotoMousePress(button); return; }
   if (uinputSelected()) {
     if (injectMouseButton(button, true)) return;
   }
@@ -69,6 +74,7 @@ function linux_mouse_press(button: number): void {
 }
 
 function linux_mouse_release(button: number): void {
+  if (xprotoSelected()) { xprotoMouseRelease(button); return; }
   if (uinputSelected()) {
     if (injectMouseButton(button, false)) return;
   }
@@ -81,6 +87,7 @@ function linux_mouse_release(button: number): void {
 }
 
 function linux_mouse_scrollH(amount: number): void {
+  if (xprotoSelected()) { xprotoScrollH(amount); return; }
   if (uinputSelected()) {
     if (injectScrollH(amount)) return;
   }
@@ -97,6 +104,7 @@ function linux_mouse_scrollH(amount: number): void {
 }
 
 function linux_mouse_scrollV(amount: number): void {
+  if (xprotoSelected()) { xprotoScrollV(amount); return; }
   if (uinputSelected()) {
     if (injectScrollV(amount)) return;
   }
@@ -138,6 +146,7 @@ function linux_mouse_getPos(): { x: number; y: number } {
 }
 
 function linux_mouse_setPos(x: number, y: number): void {
+  if (xprotoSelected()) { xprotoSetPos(x, y); return; }
   if (!isXTestAvailable()) return;
   const X = x11()!;
   const display = getDisplay();
