@@ -51,11 +51,15 @@ const Button3Mask = 1 << 10;
 
 // ==================== Linux ====================
 
-function linux_xButton(button: number): number | null {
+// X11 protocol pointer button numbers (libXtst/core-protocol convention):
+//   1=Left 2=Middle 3=Right 4/5=WheelUp/Down 6/7=WheelLeft/Right 8/9=X1/X2
+export function linux_xButton(button: number): number | null {
   switch (button) {
     case BUTTON_LEFT:  return 1;
     case BUTTON_MID:   return 2;
     case BUTTON_RIGHT: return 3;
+    case BUTTON_X1:    return 8;
+    case BUTTON_X2:    return 9;
     default: return null;
   }
 }

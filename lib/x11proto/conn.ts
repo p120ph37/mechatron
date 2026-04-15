@@ -419,38 +419,46 @@ export class XConnection {
   // libX11's XKeysymToKeycode performs) — no need to track MappingNotify
   // events because mechatron never observes remap after startup.
   private keyMapping: GetKeyboardMappingReply | null = null;
+  private keysymIndex: Map<number, number> | null = null;
 
   /**
    * Fetch (or return cached) keyboard mapping covering
-   * [minKeycode, maxKeycode].  Parses lazily on first call.
+   * [minKeycode, maxKeycode].  Builds an inverse keysym→keycode index
+   * alongside the cache so subsequent `keysymToKeycode` is O(1).
    */
   async getKeyboardMapping(): Promise<GetKeyboardMappingReply> {
     if (this.keyMapping) return this.keyMapping;
     const first = this.info.minKeycode;
     const count = this.info.maxKeycode - this.info.minKeycode + 1;
     const reply = await this.sendRequest(encodeGetKeyboardMapping(first, count));
-    this.keyMapping = parseGetKeyboardMappingReply(reply);
-    return this.keyMapping;
-  }
-
-  /**
-   * Resolve an X11 keysym to the first keycode that produces it in one of
-   * the first four grid slots (group 1 unshifted/shifted, group 2 u/s).
-   * Returns 0 when no keycode maps to the keysym — callers treat that as
-   * "drop the key event" matching libX11's XKeysymToKeycode behaviour.
-   */
-  keysymToKeycode(keysym: number): number {
-    if (!this.keyMapping) return 0;
-    const { keysyms, keysymsPerKeycode } = this.keyMapping;
+    const km = parseGetKeyboardMappingReply(reply);
+    // Build the inverse index: scan the first 4 slots of every row (group 1
+    // unshifted/shifted, group 2 u/s) and record the first keycode for each
+    // keysym, matching libX11's XKeysymToKeycode behaviour.
+    const index = new Map<number, number>();
+    const { keysyms, keysymsPerKeycode } = km;
     const groupWidth = Math.min(4, keysymsPerKeycode);
     const rows = (keysyms.length / keysymsPerKeycode) | 0;
     for (let row = 0; row < rows; row++) {
       const base = row * keysymsPerKeycode;
       for (let j = 0; j < groupWidth; j++) {
-        if (keysyms[base + j] === keysym) return this.info.minKeycode + row;
+        const ks = keysyms[base + j];
+        if (ks !== 0 && !index.has(ks)) index.set(ks, first + row);
       }
     }
-    return 0;
+    this.keyMapping = km;
+    this.keysymIndex = index;
+    return km;
+  }
+
+  /**
+   * Resolve an X11 keysym to a keycode using the cached inverse index.
+   * Returns 0 when no keycode maps to the keysym or the mapping hasn't
+   * been fetched — callers drop the key event in that case, matching
+   * libX11's XKeysymToKeycode.
+   */
+  keysymToKeycode(keysym: number): number {
+    return this.keysymIndex?.get(keysym) ?? 0;
   }
 
   /** Enumerate connected monitors via RANDR 1.5 RRGetMonitors. */

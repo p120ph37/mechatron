@@ -23,33 +23,11 @@
 
 import { XConnection } from "../x11proto/conn";
 import { getMechanism } from "../platform";
-import {
-  BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2,
-} from "../mouse/constants";
+import { linux_xButton } from "./mouse";
 
-// X11 button numbers for XTestFakeInput (same as Xlib pointer buttons):
-//   1=Left, 2=Middle, 3=Right, 4=WheelUp, 5=WheelDown, 6=WheelLeft,
-//   7=WheelRight, 8=X1/back, 9=X2/forward.
-const X_BTN_LEFT = 1;
-const X_BTN_MIDDLE = 2;
-const X_BTN_RIGHT = 3;
-const X_BTN_WHEEL_UP = 4;
-const X_BTN_WHEEL_DOWN = 5;
-const X_BTN_WHEEL_LEFT = 6;
-const X_BTN_WHEEL_RIGHT = 7;
-const X_BTN_X1 = 8;
-const X_BTN_X2 = 9;
-
-function xButton(button: number): number | null {
-  switch (button) {
-    case BUTTON_LEFT:  return X_BTN_LEFT;
-    case BUTTON_MID:   return X_BTN_MIDDLE;
-    case BUTTON_RIGHT: return X_BTN_RIGHT;
-    case BUTTON_X1:    return X_BTN_X1;
-    case BUTTON_X2:    return X_BTN_X2;
-    default: return null;
-  }
-}
+// X11 wheel-button numbers (libXtst convention): 4=up 5=down 6=left 7=right.
+const X_BTN_WHEEL_UP = 4, X_BTN_WHEEL_DOWN = 5;
+const X_BTN_WHEEL_LEFT = 6, X_BTN_WHEEL_RIGHT = 7;
 
 // =============================================================================
 // Connection lifecycle
@@ -124,7 +102,10 @@ export function xprotoReady(): boolean { return _conn !== null; }
 
 /** Flush the fire-and-forget chain — callers use this in tests. */
 export function xprotoFlush(): Promise<void> {
-  return _chain.then(() => ensureConn()).then(() => { /* void */ });
+  // The chain's first step awaits ensureConn() before it runs `fn`, so
+  // waiting on _chain alone covers both connect-in-flight and every
+  // enqueued op.
+  return _chain;
 }
 
 /**
@@ -158,39 +139,40 @@ export function xprotoKeyRelease(keysym: number): void {
 }
 
 export function xprotoMousePress(button: number): void {
-  const b = xButton(button);
+  const b = linux_xButton(button);
   if (b === null) return;
   enqueue((c) => c.fakeButtonPress(b));
 }
 
 export function xprotoMouseRelease(button: number): void {
-  const b = xButton(button);
+  const b = linux_xButton(button);
   if (b === null) return;
   enqueue((c) => c.fakeButtonRelease(b));
 }
 
 /**
- * Vertical scroll: emit `|amount|` press/release pairs on button 4 (up,
- * amount > 0) or button 5 (down, amount < 0).  Matches libXtst's
- * XTestFakeButtonEvent loop used by linux_mouse_scrollV.
+ * Scroll: emit `|amount|` press/release pairs on a wheel button.  Single
+ * enqueue runs the loop in one chain step to avoid microtask spam when
+ * scrolling large amounts.  Matches libXtst's XTestFakeButtonEvent loop.
  */
-export function xprotoScrollV(amount: number): void {
+function xprotoScroll(amount: number, negBtn: number, posBtn: number): void {
   const repeat = Math.abs(amount);
-  const button = amount < 0 ? X_BTN_WHEEL_DOWN : X_BTN_WHEEL_UP;
-  for (let i = 0; i < repeat; i++) {
-    enqueue((c) => c.fakeButtonPress(button));
-    enqueue((c) => c.fakeButtonRelease(button));
-  }
+  if (repeat === 0) return;
+  const button = amount < 0 ? negBtn : posBtn;
+  enqueue(async (c) => {
+    for (let i = 0; i < repeat; i++) {
+      await c.fakeButtonPress(button);
+      await c.fakeButtonRelease(button);
+    }
+  });
 }
 
-/** Horizontal scroll: button 6 (left, amount < 0) / button 7 (right). */
+export function xprotoScrollV(amount: number): void {
+  xprotoScroll(amount, X_BTN_WHEEL_DOWN, X_BTN_WHEEL_UP);
+}
+
 export function xprotoScrollH(amount: number): void {
-  const repeat = Math.abs(amount);
-  const button = amount < 0 ? X_BTN_WHEEL_LEFT : X_BTN_WHEEL_RIGHT;
-  for (let i = 0; i < repeat; i++) {
-    enqueue((c) => c.fakeButtonPress(button));
-    enqueue((c) => c.fakeButtonRelease(button));
-  }
+  xprotoScroll(amount, X_BTN_WHEEL_LEFT, X_BTN_WHEEL_RIGHT);
 }
 
 /** Absolute pointer warp on screen 0's root window. */
@@ -214,7 +196,7 @@ export async function xprotoGrabScreen(
       ? (windowHandle >>> 0)
       : (c.info.screens[0]?.root ?? 0);
     const reply = await c.getImage({ drawable, x, y, width: w, height: h });
-    return zpixmapToArgb(reply.data, w, h, c.info);
+    return zpixmapToArgb(reply.data, w, h);
   } catch {
     return null;
   }
@@ -231,30 +213,16 @@ export async function xprotoGrabScreen(
 // layout.
 // =============================================================================
 
-import type { ServerInfo } from "../x11proto/wire";
-
-function zpixmapToArgb(src: Buffer, w: number, h: number, info: ServerInfo): Uint32Array {
-  const pixels = new Uint32Array(w * h);
-  // Assume 32-bit pixels (our only target — depth 24/32 on TrueColor).
-  // Fast path: native BGRX / BGRA, matches the masks reported by nearly
-  // every X.org visual.  Each u32 on the wire is 0x00RRGGBB (LE),
-  // identical to our canonical ARGB with alpha forced to 0xFF.
-  const strideBytes = w * 4;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const o = y * strideBytes + x * 4;
-      const b = src[o];
-      const g = src[o + 1];
-      const r = src[o + 2];
-      // src[o + 3] is typically 0 (padding byte of BGRX); force alpha to 0xFF
-      pixels[y * w + x] = (0xFF000000 | (r << 16) | (g << 8) | b) >>> 0;
-    }
+function zpixmapToArgb(src: Buffer, w: number, h: number): Uint32Array {
+  // 32-bit ZPixmap on TrueColor BGRX/BGRA visuals (every X server we
+  // target): each source u32 is 0x00RRGGBB (LE), matching our canonical
+  // ARGB once alpha is forced to 0xFF.  No row padding at 32bpp.
+  const n = w * h;
+  const srcU32 = new Uint32Array(src.buffer, src.byteOffset, n);
+  const pixels = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    pixels[i] = (0xFF000000 | (srcU32[i] & 0x00FFFFFF)) >>> 0;
   }
-  // `info` is currently unused because we don't yet consult the visual's
-  // red/green/blue masks — every server we target reports BGRX.  Keeping
-  // the parameter positions callers passing ServerInfo through so we can
-  // implement mask-driven decode later without churning the call sites.
-  void info;
   return pixels;
 }
 
