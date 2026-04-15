@@ -268,27 +268,123 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		try { wire.connReplyTotalLength(Buffer.alloc(4)); } catch (e) { threw = true; }
 		assert(threw, "connReplyTotalLength throws on <8-byte prefix");
 
-		// ── Live connection smoke test (only when $DISPLAY is reachable) ──
-		// We do a one-shot socket connect + handshake to exercise the
-		// encoders against a real server.  Skip silently when there's
-		// no $DISPLAY or the Unix socket isn't present — keeps the
-		// test harness portable across headless CI images.
+		// ── request.ts: header helper ────────────────────────────────
+		var req = require("../lib/x11proto/request");
+		var hdrBuf = Buffer.alloc(8);
+		req.writeRequestHeader(hdrBuf, 98, 0);
+		assert(hdrBuf.readUInt8(0) === 98, "major opcode");
+		assert(hdrBuf.readUInt16LE(2) === 2, "length in 4-byte units");
+
+		var misaligned = false;
+		try { req.writeRequestHeader(Buffer.alloc(7), 98, 0); }
+		catch (e) { misaligned = true; }
+		assert(misaligned, "non-4-aligned buffer rejected");
+
+		// ── encodeQueryExtension ─────────────────────────────────────
+		var qeShort = req.encodeQueryExtension("XTEST");
+		// pad4(8 + 5) = 16; 4 bytes header + 4 bytes (n, unused) + pad4(5)=8 = 16
+		assert(qeShort.length === 16, "QueryExtension 'XTEST' is 16 bytes (got " + qeShort.length + ")");
+		assert(qeShort.readUInt8(0) === req.OP_QUERY_EXTENSION, "opcode = 98");
+		assert(qeShort.readUInt16LE(2) === 4, "length in 4-byte units");
+		assert(qeShort.readUInt16LE(4) === 5, "name length = 5");
+		assert(qeShort.toString("utf8", 8, 13) === "XTEST", "name round-trips");
+		assert(qeShort[13] === 0 && qeShort[14] === 0 && qeShort[15] === 0, "name padded with NUL");
+
+		// ── parseQueryExtensionReply ─────────────────────────────────
+		var qeReply = Buffer.alloc(32);
+		qeReply.writeUInt8(1, 0);         // Reply
+		qeReply.writeUInt16LE(42, 2);     // seq
+		qeReply.writeUInt8(1, 8);         // present
+		qeReply.writeUInt8(144, 9);       // majorOpcode
+		qeReply.writeUInt8(100, 10);      // firstEvent
+		qeReply.writeUInt8(0, 11);        // firstError
+		var parsed = req.parseQueryExtensionReply(qeReply);
+		assert(parsed.present === true, "parsed present");
+		assert(parsed.majorOpcode === 144, "parsed majorOpcode");
+		assert(parsed.firstEvent === 100, "parsed firstEvent");
+		assert(parsed.firstError === 0, "parsed firstError");
+
+		// Absent extension: present=0, rest zero
+		var qeAbs = Buffer.alloc(32);
+		qeAbs.writeUInt8(1, 0);
+		var parsedAbs = req.parseQueryExtensionReply(qeAbs);
+		assert(parsedAbs.present === false, "parsed absent");
+		assert(parsedAbs.majorOpcode === 0, "absent majorOpcode = 0");
+
+		var shortThrew = false;
+		try { req.parseQueryExtensionReply(Buffer.alloc(16)); }
+		catch (e) { shortThrew = true; }
+		assert(shortThrew, "parseQueryExtensionReply rejects short buffer");
+
+		// ── parseError ───────────────────────────────────────────────
+		var errBuf = Buffer.alloc(32);
+		errBuf.writeUInt8(0, 0);           // Error
+		errBuf.writeUInt8(req.ERR_VALUE, 1);
+		errBuf.writeUInt16LE(7, 2);        // seq
+		errBuf.writeUInt32LE(0xDEADBEEF, 4);   // bad value
+		errBuf.writeUInt16LE(13, 8);       // minor
+		errBuf.writeUInt8(98, 10);         // major (QueryExtension)
+		var err = req.parseError(errBuf);
+		assert(err.code === req.ERR_VALUE, "error code");
+		assert(err.sequence === 7, "error seq");
+		assert(err.badValue === 0xDEADBEEF, "bad value");
+		assert(err.majorOpcode === 98, "major opcode");
+		assert(err.minorOpcode === 13, "minor opcode");
+
+		// ── sequenceOf / packetTotalLength ───────────────────────────
+		assert(req.sequenceOf(qeReply) === 42, "sequenceOf reply");
+		assert(req.sequenceOf(errBuf) === 7, "sequenceOf error");
+		var ev = Buffer.alloc(32); ev.writeUInt8(12, 0);  // event code
+		assert(req.sequenceOf(ev) === -1, "sequenceOf event = -1");
+		assert(req.packetTotalLength(errBuf) === 32, "error is 32 bytes");
+		// Reply with extra bytes
+		var bigReply = Buffer.alloc(8);
+		bigReply.writeUInt8(1, 0);
+		bigReply.writeUInt32LE(5, 4);    // 5 * 4 = 20 extra bytes
+		assert(req.packetTotalLength(bigReply) === 52, "reply with extra bytes");
+
+		// ── Live connection smoke test ──────────────────────────────
+		// When $DISPLAY is reachable, the Bun environment gives us a
+		// real end-to-end exerciser: handshake, QueryExtension on a
+		// known-good extension (XTEST is present on every Xvfb since
+		// X.Org 1.0), and on a known-bad extension name.  Falls
+		// through silently when there's no X server.
+		var liveDone = false;
 		if (process.platform === "linux" && process.env.DISPLAY) {
 			var ep = wire.parseDisplay(process.env.DISPLAY);
 			var fs = require("fs");
 			if (ep && ep.kind === "unix" && fs.existsSync(ep.path)) {
-				// (The live handshake exercises all three of parseDisplay,
-				//  encodeConnectionSetup, and parseConnectionSetupReply.)
 				log("(live X) ");
-				var cookies = wire.loadXauthority();
-				var cook = wire.findXauthCookie(cookies, ep);
-				var setupBuf = wire.encodeConnectionSetup(
-					cook ? cook.name : "",
-					cook ? cook.data : Buffer.alloc(0),
-				);
-				assert(setupBuf.length >= 12, "live setup ≥ 12 bytes");
-				// Actual I/O lives in lib/x11proto/conn.ts (Phase 6d part 2);
-				// here we only confirm the encoding didn't blow up.
+				var conn = require("../lib/x11proto/conn");
+				return (async function () {
+					var c;
+					try {
+						c = await conn.XConnection.connect();
+					} catch (e) {
+						// Auth failures, permission issues: skip the live
+						// portion rather than failing the whole test.
+						log("(live skip: " + e.message + ") ");
+						log("OK\n");
+						return true;
+					}
+					assert(c.info && typeof c.info.vendor === "string", "live vendor");
+					assert(c.info.screens.length >= 1, "at least one screen");
+					assert(c.info.screens[0].widthPx > 0, "screen has width");
+					var xt = await c.queryExtension("XTEST");
+					assert(xt.present === true, "XTEST present");
+					assert(xt.majorOpcode > 0, "XTEST majorOpcode > 0");
+					var bad = await c.queryExtension("NOT-AN-EXTENSION");
+					assert(bad.present === false, "bogus extension absent");
+					c.close();
+					// Post-close rejection
+					var postCloseThrew = false;
+					try { await c.queryExtension("XTEST"); }
+					catch (_) { postCloseThrew = true; }
+					assert(postCloseThrew, "post-close sendRequest rejects");
+					log("OK\n");
+					liveDone = true;
+					return true;
+				})();
 			}
 		}
 

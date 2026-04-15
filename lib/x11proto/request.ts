@@ -1,0 +1,175 @@
+/**
+ * Pure-TS X11 request encoders and reply parsers.
+ *
+ * Every X11 request shares the same 4-byte header:
+ *
+ *   byte 0:  major opcode
+ *   byte 1:  opcode-specific byte (minor opcode for extensions, a
+ *            flags byte for some core requests, or just 0)
+ *   byte 2:  request length LO  (CARD16 LE)
+ *   byte 3:  request length HI  (CARD16 LE)
+ *
+ * `length` is in 4-byte units and **includes** the header, so a
+ * bare-header request has length=1 (4 bytes).
+ *
+ * Replies always start with:
+ *   byte 0:  1  (distinguishes from events = 2..34 and errors = 0)
+ *   byte 1:  opcode-specific
+ *   bytes 2-4: sequence number (u16 LE)
+ *   bytes 4-8: reply length — CARD32 in 4-byte units *beyond* the
+ *              fixed 32-byte reply header (so 0 for small replies).
+ *   bytes 8-32: opcode-specific
+ *   bytes 32+: opcode-specific, length controlled by the field above
+ *
+ * Errors are always 32 bytes and look like:
+ *   byte 0:  0  (Error)
+ *   byte 1:  error code
+ *   bytes 2-4: sequence number
+ *   bytes 4-8: bad-value / bad-resource-id
+ *   bytes 8-10: minor-opcode
+ *   byte 10: major-opcode
+ *   bytes 11-32: unused
+ *
+ * Only the pure buffer-shaping is here; the async dispatch layer
+ * (sequence-number → pending promise, socket read loop) lives in
+ * `lib/x11proto/conn.ts`.
+ */
+
+import { pad4 } from "./wire";
+
+// =============================================================================
+// Core opcodes we use
+// =============================================================================
+
+export const OP_QUERY_EXTENSION = 98;
+export const OP_WARP_POINTER = 41;
+export const OP_GET_IMAGE = 73;
+
+// Error codes (core, from X11 protocol spec appendix B)
+export const ERR_REQUEST = 1;
+export const ERR_VALUE = 2;
+export const ERR_WINDOW = 3;
+export const ERR_PIXMAP = 4;
+export const ERR_ATOM = 5;
+export const ERR_CURSOR = 6;
+export const ERR_FONT = 7;
+export const ERR_MATCH = 8;
+export const ERR_DRAWABLE = 9;
+export const ERR_ACCESS = 10;
+export const ERR_ALLOC = 11;
+export const ERR_COLORMAP = 12;
+export const ERR_GCONTEXT = 13;
+export const ERR_IDCHOICE = 14;
+export const ERR_NAME = 15;
+export const ERR_LENGTH = 16;
+export const ERR_IMPLEMENTATION = 17;
+
+// =============================================================================
+// Request header helpers
+// =============================================================================
+
+/** Write a standard request header into `buf` at offset 0 and return it. */
+export function writeRequestHeader(buf: Buffer, major: number, data1: number): Buffer {
+  if (buf.length % 4 !== 0) throw new Error("request buffer must be 4-aligned");
+  buf.writeUInt8(major, 0);
+  buf.writeUInt8(data1 & 0xFF, 1);
+  buf.writeUInt16LE(buf.length / 4, 2);
+  return buf;
+}
+
+// =============================================================================
+// QueryExtension (opcode 98)
+//
+// Wire layout:
+//   0   98           major opcode
+//   1   0            unused
+//   2-4 length       (2 + pad4(n)/4)
+//   4-6 n            name length
+//   6-8 unused
+//   8+  name + pad
+//
+// Reply (32 bytes, reply-length = 0):
+//   0   1            reply
+//   1   0            unused
+//   2-4 seq          sequence
+//   4-8 0            reply length
+//   8   present      0/1
+//   9   major-opcode (for XTestFakeInput etc.)
+//   10  first-event  (for events originated by this extension)
+//   11  first-error  (for errors originated by this extension)
+//   12-32 unused
+// =============================================================================
+
+export function encodeQueryExtension(name: string): Buffer {
+  const nameBuf = Buffer.from(name, "utf8");
+  const total = pad4(8 + nameBuf.length);
+  const buf = Buffer.alloc(total);
+  writeRequestHeader(buf, OP_QUERY_EXTENSION, 0);
+  buf.writeUInt16LE(nameBuf.length, 4);
+  // bytes 6..8 unused
+  nameBuf.copy(buf, 8);
+  return buf;
+}
+
+export interface QueryExtensionReply {
+  present: boolean;
+  majorOpcode: number;
+  firstEvent: number;
+  firstError: number;
+}
+
+export function parseQueryExtensionReply(buf: Buffer): QueryExtensionReply {
+  if (buf.length < 32) throw new Error("QueryExtension reply too short");
+  return {
+    present: buf.readUInt8(8) !== 0,
+    majorOpcode: buf.readUInt8(9),
+    firstEvent: buf.readUInt8(10),
+    firstError: buf.readUInt8(11),
+  };
+}
+
+// =============================================================================
+// Error decoding (shared across all requests)
+// =============================================================================
+
+export interface XError {
+  code: number;
+  sequence: number;
+  badValue: number;
+  minorOpcode: number;
+  majorOpcode: number;
+}
+
+export function parseError(buf: Buffer): XError {
+  if (buf.length < 32) throw new Error("error packet too short");
+  return {
+    code: buf.readUInt8(1),
+    sequence: buf.readUInt16LE(2),
+    badValue: buf.readUInt32LE(4),
+    minorOpcode: buf.readUInt16LE(8),
+    majorOpcode: buf.readUInt8(10),
+  };
+}
+
+/** Extract the sequence number from a reply/error header. Returns -1 for events. */
+export function sequenceOf(buf: Buffer): number {
+  if (buf.length < 4) return -1;
+  const kind = buf.readUInt8(0);
+  if (kind === 0 || kind === 1) return buf.readUInt16LE(2);
+  return -1;   // event
+}
+
+/**
+ * How many total bytes does a reply / error / event packet occupy?
+ * All events and errors are 32 bytes; replies are `32 + 4 * length`.
+ * The caller passes the first 8 bytes (enough to read the length field).
+ */
+export function packetTotalLength(prefix: Buffer): number {
+  if (prefix.length < 8) throw new Error("packet prefix too short");
+  const kind = prefix.readUInt8(0);
+  if (kind === 1) {
+    const extra = prefix.readUInt32LE(4);
+    return 32 + extra * 4;
+  }
+  return 32;  // error or event
+}
