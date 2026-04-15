@@ -506,10 +506,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(req.packetTotalLength(bigReply) === 52, "reply with extra bytes");
 
 		// ── Mechanism registry: xproto present and probed correctly ──
-		var inputMechs = mechatron.listMechanisms("input");
-		var xpMech = inputMechs.find(function (m) { return m.name === "xproto"; });
-		assert(xpMech, "xproto registered as input mechanism");
+		// xproto is in the registry only on Linux (CAPABILITY_MECHANISMS.input
+		// lists it for the Linux row); other platforms don't surface it.
 		if (process.platform === "linux") {
+			var inputMechs = mechatron.listMechanisms("input");
+			var xpMech = inputMechs.find(function (m) { return m.name === "xproto"; });
+			assert(xpMech, "xproto registered as input mechanism");
 			// Reachability matches whether $DISPLAY's socket exists; we
 			// just verify the probe did *something* (not the stale stub
 			// "not yet implemented (Phase 6d)" reason).
