@@ -473,6 +473,39 @@ jobs:
             [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
           fi
 
+          # ── Linux-only: FFI with MECHATRON_INPUT_MECHANISM=xproto.
+          #    Drives coverage of lib/ffi/xproto.ts (sync→async bridge
+          #    onto lib/x11proto) and the xproto branches in
+          #    lib/ffi/keyboard.ts + lib/ffi/mouse.ts.  xproto talks the
+          #    core X11 protocol directly over $DISPLAY's socket, so it
+          #    works under Xvfb; no device-capability gate needed.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-xproto.xml"
+            BE_COV_DIR="$COV_DIR/ffi-xproto"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND=ffi \
+            MECHATRON_INPUT_MECHANISM=xproto \
+              run_bun "ffi-xproto" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for ffi-xproto (MECHATRON_INPUT_MECHANISM=xproto) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="ffi-xproto-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="ffi-xproto backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          fi
+
           if [ "${{ runner.os }}" = "Linux" ]; then
             for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
               label="${variant%%:*}"
