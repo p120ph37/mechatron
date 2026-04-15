@@ -25,7 +25,7 @@
  */
 
 import { openSync, writeSync, closeSync } from "fs";
-import { libc, libcFFI, libcOpenReason } from "./libc";
+import { libc, libcFFI, libcOpenReason, O_RDWR } from "./libc";
 import { getMechanism } from "../platform";
 import {
   BUTTON_LEFT as BTN_IDX_LEFT, BUTTON_MID as BTN_IDX_MID,
@@ -37,8 +37,7 @@ import {
   BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA,
   UI_DEV_CREATE, UI_DEV_DESTROY, UI_DEV_SETUP,
   UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT,
-  O_RDWR,
-  encodeInputEvent, encodeEventBurst, encodeUinputSetup,
+  encodeEventBurst, encodeUinputSetup,
   allSupportedEvdevCodes, mapKeysymToKeycode,
   type UInputEvent,
 } from "../input/uinput";
@@ -149,11 +148,9 @@ export function closeUinputDevice(): void {
 }
 
 // Best-effort auto-teardown on process exit so we don't leak virtual
-// input devices across test runs.  Compositors dedupe by
-// (bustype,vendor,product,version) so a leak just means the kernel
-// keeps the evdev node around until it reaps the fd anyway — this is
-// a cleanup nicety, not a correctness requirement.
-if (typeof process !== "undefined" && typeof process.on === "function") {
+// input devices across test runs.  Only registered on Linux — other
+// platforms never open the device, so there's nothing to clean up.
+if (process.platform === "linux" && typeof process.on === "function") {
   process.on("exit", () => {
     if (_device) {
       try { _device.close(); } catch { /* ignore */ }
@@ -163,18 +160,12 @@ if (typeof process !== "undefined" && typeof process.on === "function") {
 
 // =============================================================================
 // Event-emission helpers
-//
-// Kept as thin wrappers over the pure `encodeEventBurst` + node:fs write
-// so the "which bytes go out" portion stays unit-testable in uinput.ts
-// without needing a real device.
 // =============================================================================
 
-/**
- * Write a batch of events plus a trailing `SYN_REPORT` so the kernel
- * commits them as a single input frame.  Returns true on success, false
- * if the write failed (device was torn down mid-call, EAGAIN, etc.).
- */
-export function writeEvents(fd: number, events: UInputEvent[]): boolean {
+// Write a batch of events plus a trailing `SYN_REPORT` so the kernel
+// commits them as a single input frame.  Returns true on success, false
+// if the write failed (device was torn down mid-call, EAGAIN, etc.).
+function writeEvents(fd: number, events: UInputEvent[]): boolean {
   try {
     const buf = encodeEventBurst(events);
     writeSync(fd, buf, 0, buf.length);
@@ -184,9 +175,9 @@ export function writeEvents(fd: number, events: UInputEvent[]): boolean {
   }
 }
 
-function withDevice(fn: (fd: number) => boolean): boolean {
+function emit(events: UInputEvent[]): boolean {
   const dev = getUinputDevice();
-  return dev ? fn(dev.fd) : false;
+  return dev ? writeEvents(dev.fd, events) : false;
 }
 
 /**
@@ -199,7 +190,7 @@ function withDevice(fn: (fd: number) => boolean): boolean {
 export function injectKeysym(keysym: number, press: boolean): boolean {
   const code = mapKeysymToKeycode(keysym);
   if (code === 0) return false;
-  return withDevice((fd) => writeEvents(fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]));
+  return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
 }
 
 /**
@@ -216,7 +207,7 @@ export function injectMouseButton(button: number, press: boolean): boolean {
     case BTN_IDX_X2:    code = BTN_EXTRA; break;
     default: return false;
   }
-  return withDevice((fd) => writeEvents(fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]));
+  return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
 }
 
 /**
@@ -224,17 +215,18 @@ export function injectMouseButton(button: number, press: boolean): boolean {
  * pixels — a value of 1 is "one notch up" which the compositor then
  * maps to pixels via its own scroll acceleration curves.  mechatron's
  * public scroll* API is discrete notches too, so a straight pass-through
- * is correct.
+ * is correct.  Zero-amount is an inert success — skip the device-open
+ * trigger entirely.
  */
 export function injectScrollV(amount: number): boolean {
-  if (amount === 0) return withDevice(() => true);
-  return withDevice((fd) => writeEvents(fd, [{ type: EV_REL, code: REL_WHEEL, value: amount }]));
+  if (amount === 0) return true;
+  return emit([{ type: EV_REL, code: REL_WHEEL, value: amount }]);
 }
 
 /** Horizontal scroll — same discrete-notches semantics as `injectScrollV`. */
 export function injectScrollH(amount: number): boolean {
-  if (amount === 0) return withDevice(() => true);
-  return withDevice((fd) => writeEvents(fd, [{ type: EV_REL, code: REL_HWHEEL, value: amount }]));
+  if (amount === 0) return true;
+  return emit([{ type: EV_REL, code: REL_HWHEEL, value: amount }]);
 }
 
 /**
@@ -258,6 +250,3 @@ export function uinputSelected(): boolean {
   return getMechanism("input") === "uinput" && uinputReady();
 }
 
-// Re-export a few pure encoding helpers from lib/input/uinput so
-// downstream modules don't need to import from two places.
-export { encodeInputEvent, encodeEventBurst, encodeUinputSetup };

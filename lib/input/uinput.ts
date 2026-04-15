@@ -42,7 +42,7 @@
  * gated and impossible to mock portably.
  */
 
-import { openSync, closeSync, existsSync } from "fs";
+import { openSync, closeSync } from "fs";
 
 // =============================================================================
 // evdev event types / codes (subset of <linux/input-event-codes.h>)
@@ -54,9 +54,10 @@ export const EV_REL = 0x02;
 
 export const SYN_REPORT = 0;
 
-// O_RDWR for the open(2) flags arg.  Linux-specific value (Linux defines
-// it as 2 unconditionally; libc on every supported arch agrees).
-export const O_RDWR = 0x0002;
+// O_RDWR for the open(2) flags arg used by openUinputForProbe below.
+// Linux defines it as 2 unconditionally on every arch.  The FFI layer
+// imports its own copy from lib/ffi/libc.
+const O_RDWR = 0x0002;
 
 export const REL_X      = 0x00;
 export const REL_Y      = 0x01;
@@ -195,13 +196,10 @@ export function mapKeysymToKeycode(keysym: number): number {
  * simpler than managing two devices (compositors expose both as a single
  * pair of evdev nodes that way too).
  */
-let _evdevCodesCache: number[] | null = null;
 export function allSupportedEvdevCodes(): number[] {
-  if (_evdevCodesCache) return _evdevCodesCache;
   const keys = Object.values(KEYSYM_TO_EVDEV);
   const buttons = [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA];
-  _evdevCodesCache = Array.from(new Set([...keys, ...buttons])).sort((a, b) => a - b);
-  return _evdevCodesCache;
+  return Array.from(new Set([...keys, ...buttons])).sort((a, b) => a - b);
 }
 
 // =============================================================================
@@ -224,12 +222,9 @@ export function encodeInputEvent(
   type: number, code: number, value: number,
   timestampMs: number = Date.now(),
 ): Buffer {
-  const buf = Buffer.alloc(24);
-  // tv_sec (i64)  @ 0
-  // tv_usec (i64) @ 8
-  // type (u16)    @ 16
-  // code (u16)    @ 18
-  // value (i32)   @ 20
+  // Layout: tv_sec@0, tv_usec@8, type@16, code@18, value@20.  All 24
+  // bytes are assigned, so allocUnsafe (no zero-fill) is safe.
+  const buf = Buffer.allocUnsafe(24);
   buf.writeBigInt64LE(BigInt(Math.floor(timestampMs / 1000)), 0);
   buf.writeBigInt64LE(BigInt((timestampMs % 1000) * 1000), 8);
   buf.writeUInt16LE(type & 0xFFFF, 16);
@@ -299,7 +294,8 @@ export function encodeEventBurst(
   timestampMs: number = Date.now(),
 ): Buffer {
   const total = (events.length + 1) * 24;
-  const buf = Buffer.alloc(total);
+  // Every byte is written (24 × (events + SYN)), so allocUnsafe is safe.
+  const buf = Buffer.allocUnsafe(total);
   const secBig = BigInt(Math.floor(timestampMs / 1000));
   const usecBig = BigInt((timestampMs % 1000) * 1000);
   const writeAt = (off: number, type: number, code: number, value: number) => {
@@ -327,9 +323,6 @@ export function encodeEventBurst(
  * to decide whether to skip the uinput integration tests.
  */
 export function openUinputForProbe(): { ok: boolean; reason?: string } {
-  if (!existsSync("/dev/uinput")) {
-    return { ok: false, reason: "/dev/uinput not present" };
-  }
   let fd: number;
   try {
     fd = openSync("/dev/uinput", O_RDWR);

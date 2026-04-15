@@ -241,13 +241,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(typeof ffi.injectMouseButton === "function", "ffi.injectMouseButton");
 		assert(typeof ffi.injectScrollV === "function", "ffi.injectScrollV");
 		assert(typeof ffi.injectScrollH === "function", "ffi.injectScrollH");
-		assert(typeof ffi.writeEvents === "function", "ffi.writeEvents");
 		assert(typeof ffi.closeUinputDevice === "function", "ffi.closeUinputDevice");
-
-		// Re-exported encoding helpers match the pure-TS originals.
-		assert(ffi.encodeInputEvent === ui.encodeInputEvent, "re-export encodeInputEvent");
-		assert(ffi.encodeEventBurst === ui.encodeEventBurst, "re-export encodeEventBurst");
-		assert(ffi.encodeUinputSetup === ui.encodeUinputSetup, "re-export encodeUinputSetup");
 
 		var ready = ffi.uinputReady();
 		assert(typeof ready === "boolean", "uinputReady boolean");
