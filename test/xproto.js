@@ -376,6 +376,44 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(wp2.readInt16LE(12) === 1 && wp2.readInt16LE(14) === 2, "src-x/y");
 		assert(wp2.readUInt16LE(16) === 100 && wp2.readUInt16LE(18) === 200, "src-w/h");
 
+		// ── encodeGetImage / parseGetImageReply ──────────────────────
+		var gi = req.encodeGetImage({
+			drawable: 0x21F, x: 5, y: -3, width: 100, height: 200,
+		});
+		assert(gi.length === 20, "GetImage is 20 bytes");
+		assert(gi.readUInt8(0) === req.OP_GET_IMAGE, "opcode 73");
+		assert(gi.readUInt8(1) === req.IMAGE_FORMAT_Z_PIXMAP, "default = ZPixmap");
+		assert(gi.readUInt16LE(2) === 5, "length = 5");
+		assert(gi.readUInt32LE(4) === 0x21F, "drawable");
+		assert(gi.readInt16LE(8) === 5 && gi.readInt16LE(10) === -3, "x/y signed");
+		assert(gi.readUInt16LE(12) === 100 && gi.readUInt16LE(14) === 200, "w/h");
+		assert(gi.readUInt32LE(16) === 0xFFFFFFFF, "default plane-mask = all");
+
+		var giReply = Buffer.alloc(32 + 16);  // 4 extra 4-byte units
+		giReply.writeUInt8(1, 0);
+		giReply.writeUInt8(24, 1);            // depth
+		giReply.writeUInt32LE(4, 4);          // 4 * 4 = 16 extra bytes
+		giReply.writeUInt32LE(0x21, 8);       // visual id
+		for (var bi = 0; bi < 16; bi++) giReply.writeUInt8(0xA0 + bi, 32 + bi);
+		var giParsed = req.parseGetImageReply(giReply);
+		assert(giParsed.depth === 24, "parsed depth");
+		assert(giParsed.visual === 0x21, "parsed visual");
+		assert(giParsed.data.length === 16, "parsed data length");
+		assert(giParsed.data[0] === 0xA0 && giParsed.data[15] === 0xAF, "parsed data bytes");
+
+		var giShortThrew = false;
+		try { req.parseGetImageReply(Buffer.alloc(20)); }
+		catch (e) { giShortThrew = true; }
+		assert(giShortThrew, "parseGetImageReply rejects short header");
+
+		var giTruncThrew = false;
+		var trunc = Buffer.alloc(40);
+		trunc.writeUInt8(1, 0);
+		trunc.writeUInt32LE(8, 4);   // claims 32 extra bytes but buffer only has 8
+		try { req.parseGetImageReply(trunc); }
+		catch (e) { giTruncThrew = true; }
+		assert(giTruncThrew, "parseGetImageReply rejects truncated body");
+
 		// ── sequenceOf / packetTotalLength ───────────────────────────
 		assert(req.sequenceOf(qeReply) === 42, "sequenceOf reply");
 		assert(req.sequenceOf(errBuf) === 7, "sequenceOf error");
@@ -431,8 +469,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					await c.fakeKeyPress(38);
 					await c.fakeKeyRelease(38);
 					c.warpPointer(15, 25);
+					var img = await c.getImage({ x: 0, y: 0, width: 8, height: 8 });
+					assert(img.depth >= 8, "captured image depth >= 8");
+					// 8x8 ZPixmap on a 24/32-bit visual = 8*8*4 = 256 bytes
+					assert(img.data.length >= 64, "captured image data >= 64 bytes (got " + img.data.length + ")");
 					var alive = await c.queryExtension("XTEST");
-					assert(alive.present === true, "connection survived FakeInput + WarpPointer burst");
+					assert(alive.present === true, "connection survived FakeInput + WarpPointer + GetImage burst");
 
 					c.close();
 					// Post-close rejection

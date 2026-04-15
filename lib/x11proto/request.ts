@@ -184,6 +184,80 @@ export function encodeWarpPointer(args: WarpPointerArgs): Buffer {
 }
 
 // =============================================================================
+// GetImage (core opcode 73)
+//
+// Wire layout (20 bytes, length = 5):
+//   0   73          opcode
+//   1   format      1 = XYPixmap, 2 = ZPixmap
+//   2-4 5           length
+//   4-8 drawable    DRAWABLE (root window, for screen capture)
+//   8-10 x          INT16
+//   10-12 y         INT16
+//   12-14 width     CARD16
+//   14-16 height    CARD16
+//   16-20 plane-mask CARD32 (0xFFFFFFFF for all planes)
+//
+// Reply (32 + 4*replyLen bytes):
+//   0   1           Reply
+//   1   depth       CARD8 (depth of the source drawable)
+//   2-4 seq         u16
+//   4-8 length      CARD32 (extra 4-byte units beyond the 32-byte header)
+//   8-12 visual     VISUALID or None(0) for InputOnly windows / Pixmaps
+//   12-32 unused
+//   32+ data        replyLen*4 bytes; pixel layout depends on format,
+//                   server image-byte-order, and the visual's RGB masks.
+//
+// For format=ZPixmap on a TrueColor 24/32-bit visual, each pixel is 4 bytes;
+// channel ordering follows the visual's red/green/blue masks (typical X.Org
+// is little-endian BGRX or BGRA).  Callers must consult ServerInfo /
+// the screen's depth list to interpret the bytes correctly.
+// =============================================================================
+
+export const IMAGE_FORMAT_XY_BITMAP = 0;
+export const IMAGE_FORMAT_XY_PIXMAP = 1;
+export const IMAGE_FORMAT_Z_PIXMAP = 2;
+
+export interface GetImageArgs {
+  drawable: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  format?: number;       // default ZPixmap
+  planeMask?: number;    // default 0xFFFFFFFF
+}
+
+export function encodeGetImage(args: GetImageArgs): Buffer {
+  const buf = Buffer.alloc(20);
+  writeRequestHeader(buf, OP_GET_IMAGE, args.format ?? IMAGE_FORMAT_Z_PIXMAP);
+  buf.writeUInt32LE(args.drawable >>> 0, 4);
+  buf.writeInt16LE(args.x | 0, 8);
+  buf.writeInt16LE(args.y | 0, 10);
+  buf.writeUInt16LE(args.width & 0xFFFF, 12);
+  buf.writeUInt16LE(args.height & 0xFFFF, 14);
+  buf.writeUInt32LE((args.planeMask ?? 0xFFFFFFFF) >>> 0, 16);
+  return buf;
+}
+
+export interface GetImageReply {
+  depth: number;
+  visual: number;
+  data: Buffer;     // raw pixel bytes (length = replyLen * 4, may include trailing padding for unused row bytes)
+}
+
+export function parseGetImageReply(buf: Buffer): GetImageReply {
+  if (buf.length < 32) throw new Error("GetImage reply too short");
+  const replyLen = buf.readUInt32LE(4);
+  const total = 32 + replyLen * 4;
+  if (buf.length < total) throw new Error("GetImage reply truncated");
+  return {
+    depth: buf.readUInt8(1),
+    visual: buf.readUInt32LE(8),
+    data: buf.subarray(32, total),
+  };
+}
+
+// =============================================================================
 // XTestFakeInput (XTEST minor 2)
 //
 // Wire layout (36 bytes, length = 9):

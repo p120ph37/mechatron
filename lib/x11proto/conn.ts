@@ -30,13 +30,14 @@ import {
   parseError, packetTotalLength,
   encodeQueryExtension, parseQueryExtensionReply,
   encodeXTestFakeInput, encodeWarpPointer,
+  encodeGetImage, parseGetImageReply, type GetImageReply,
   XTEST_TYPE_KEY_PRESS, XTEST_TYPE_KEY_RELEASE,
   XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
   XTEST_TYPE_MOTION_NOTIFY,
   type QueryExtensionReply, type XError,
 } from "./request";
 
-export type { ServerInfo, XError, QueryExtensionReply };
+export type { ServerInfo, XError, QueryExtensionReply, GetImageReply };
 
 export class XProtoError extends Error {
   public readonly code: number;
@@ -322,6 +323,28 @@ export class XConnection {
     this.sendRequestNoReply(encodeWarpPointer({
       srcWindow: 0, dstWindow: dst, dstX: x, dstY: y,
     }));
+  }
+
+  /**
+   * Capture a rectangle of pixels from a drawable.  For screen capture
+   * pass the screen's root window id.  Defaults to ZPixmap format
+   * (one row of bytes per row of pixels, padded to a 4-byte boundary).
+   */
+  async getImage(args: {
+    drawable?: number;   // default root of screen 0
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    format?: number;
+    planeMask?: number;
+  }): Promise<GetImageReply> {
+    const drawable = args.drawable ?? this.info.screens[0]?.root ?? 0;
+    const reply = await this.sendRequest(encodeGetImage({
+      drawable, x: args.x, y: args.y, width: args.width, height: args.height,
+      format: args.format, planeMask: args.planeMask,
+    }));
+    return parseGetImageReply(reply);
   }
 
   close(): void { this.tearDown(new Error("X11 connection closed by client")); }
