@@ -269,16 +269,16 @@ jobs:
           # class of aarch64 coverage crashes that predates our use).
           # Retries clear this without masking real test failures
           # (which always produce testcases and thus skip the retry
-          # via the <testcase> guard below).  3 attempts observed
-          # sufficient — back-to-back startup crashes on arm64
-          # previously defeated a 2-attempt budget.
+          # via the <testcase> guard below).  5 attempts: 3 was observed
+          # insufficient (run 24418945800 hit the crash 3 times in a
+          # row on ubuntu-22.04-arm); 2 was insufficient before that.
           run_bun() {
             local LABEL="$1"; shift
             local JUNIT_FILE="$1"; shift
             [ "$1" = "--" ] && shift
             local ATTEMPT RC OUT_BEFORE OUT_AFTER
             OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-            for ATTEMPT in 1 2 3; do
+            for ATTEMPT in 1 2 3 4 5; do
               echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
               RC=0
               run_and_log "$@" || RC=$?
@@ -291,11 +291,11 @@ jobs:
                 echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
                 return "$RC"
               fi
-              if [ "$ATTEMPT" = 3 ]; then
+              if [ "$ATTEMPT" = 5 ]; then
                 echo ">>> [$LABEL] retries exhausted (rc=$RC), giving up" | tee -a "$TEST_LOG"
                 return "$RC"
               fi
-              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying (attempt $((ATTEMPT + 1))/3)" | tee -a "$TEST_LOG"
+              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying (attempt $((ATTEMPT + 1))/5)" | tee -a "$TEST_LOG"
               # Clear the empty junit so the second attempt gets a
               # clean file and our "no testcase" detection works below.
               rm -f "$JUNIT_FILE"
