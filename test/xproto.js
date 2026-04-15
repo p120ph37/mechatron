@@ -414,6 +414,85 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		catch (e) { giTruncThrew = true; }
 		assert(giTruncThrew, "parseGetImageReply rejects truncated body");
 
+		// ── RANDR encoders / parsers ─────────────────────────────────
+		var qv = req.encodeRRQueryVersion(140);
+		assert(qv.length === 12, "RRQueryVersion is 12 bytes");
+		assert(qv.readUInt8(0) === 140, "randr major");
+		assert(qv.readUInt8(1) === req.RANDR_MINOR_QUERY_VERSION, "minor 0");
+		assert(qv.readUInt32LE(4) === req.RANDR_CLIENT_MAJOR, "client major");
+		assert(qv.readUInt32LE(8) === req.RANDR_CLIENT_MINOR, "client minor");
+
+		var qvReply = Buffer.alloc(32);
+		qvReply.writeUInt8(1, 0);
+		qvReply.writeUInt32LE(1, 8);
+		qvReply.writeUInt32LE(5, 12);
+		var qvParsed = req.parseRRQueryVersionReply(qvReply);
+		assert(qvParsed.majorVersion === 1 && qvParsed.minorVersion === 5, "parsed RR version");
+
+		var gm = req.encodeRRGetMonitors(140, 0x21F, true);
+		assert(gm.length === 12, "RRGetMonitors is 12 bytes");
+		assert(gm.readUInt8(1) === req.RANDR_MINOR_GET_MONITORS, "minor 42");
+		assert(gm.readUInt32LE(4) === 0x21F, "window");
+		assert(gm.readUInt8(8) === 1, "active-only");
+		var gmInactive = req.encodeRRGetMonitors(140, 0x21F, false);
+		assert(gmInactive.readUInt8(8) === 0, "active-only false");
+
+		// Hand-roll a GetMonitors reply with 2 monitors:
+		// monitor 0: 1 output, primary
+		// monitor 1: 2 outputs, not primary
+		// MonitorInfo sizes: 24+4=28, 24+8=32 → trailing data = 60 bytes = 15 4-byte units
+		var gmReply = Buffer.alloc(32 + 60);
+		gmReply.writeUInt8(1, 0);
+		gmReply.writeUInt32LE(15, 4);    // 60/4
+		gmReply.writeUInt32LE(0xCAFEBABE, 8);  // timestamp
+		gmReply.writeUInt32LE(2, 12);    // nMonitors
+		gmReply.writeUInt32LE(3, 16);    // nOutputs total
+		// Monitor 0 @ off=32
+		gmReply.writeUInt32LE(101, 32);   // name atom
+		gmReply.writeUInt8(1, 36);        // primary
+		gmReply.writeUInt8(1, 37);        // automatic
+		gmReply.writeUInt16LE(1, 38);     // nOutput
+		gmReply.writeInt16LE(0, 40);
+		gmReply.writeInt16LE(0, 42);
+		gmReply.writeUInt16LE(1920, 44);
+		gmReply.writeUInt16LE(1080, 46);
+		gmReply.writeUInt32LE(509, 48);   // 1080p widthMm
+		gmReply.writeUInt32LE(286, 52);
+		gmReply.writeUInt32LE(70, 56);    // output id
+		// Monitor 1 @ off=60
+		gmReply.writeUInt32LE(102, 60);
+		gmReply.writeUInt8(0, 64);
+		gmReply.writeUInt8(0, 65);
+		gmReply.writeUInt16LE(2, 66);
+		gmReply.writeInt16LE(1920, 68);
+		gmReply.writeInt16LE(0, 70);
+		gmReply.writeUInt16LE(2560, 72);
+		gmReply.writeUInt16LE(1440, 74);
+		gmReply.writeUInt32LE(597, 76);
+		gmReply.writeUInt32LE(336, 80);
+		gmReply.writeUInt32LE(80, 84);
+		gmReply.writeUInt32LE(81, 88);
+		var gmParsed = req.parseRRGetMonitorsReply(gmReply);
+		assert(gmParsed.timestamp === 0xCAFEBABE, "timestamp");
+		assert(gmParsed.monitors.length === 2, "2 monitors");
+		assert(gmParsed.monitors[0].primary === true, "m0 primary");
+		assert(gmParsed.monitors[0].width === 1920, "m0 width");
+		assert(gmParsed.monitors[0].outputs.length === 1, "m0 1 output");
+		assert(gmParsed.monitors[0].outputs[0] === 70, "m0 output id");
+		assert(gmParsed.monitors[1].primary === false, "m1 not primary");
+		assert(gmParsed.monitors[1].x === 1920, "m1 x offset");
+		assert(gmParsed.monitors[1].outputs.length === 2, "m1 2 outputs");
+		assert(gmParsed.monitors[1].outputs[1] === 81, "m1 second output id");
+
+		var gmTrunc = false;
+		var trunc2 = Buffer.alloc(32 + 20);
+		trunc2.writeUInt8(1, 0);
+		trunc2.writeUInt32LE(5, 4);
+		trunc2.writeUInt32LE(1, 12);    // claims 1 monitor but body is too short
+		try { req.parseRRGetMonitorsReply(trunc2); }
+		catch (e) { gmTrunc = true; }
+		assert(gmTrunc, "truncated MonitorInfo header rejected");
+
 		// ── sequenceOf / packetTotalLength ───────────────────────────
 		assert(req.sequenceOf(qeReply) === 42, "sequenceOf reply");
 		assert(req.sequenceOf(errBuf) === 7, "sequenceOf error");
@@ -473,8 +552,22 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					assert(img.depth >= 8, "captured image depth >= 8");
 					// 8x8 ZPixmap on a 24/32-bit visual = 8*8*4 = 256 bytes
 					assert(img.data.length >= 64, "captured image data >= 64 bytes (got " + img.data.length + ")");
+
+					// RANDR: try GetMonitors but tolerate servers without RandR
+					// (e.g. very old Xvfb builds compiled without it).
+					try {
+						var mons = await c.getMonitors();
+						assert(Array.isArray(mons.monitors), "monitors is array");
+						if (mons.monitors.length > 0) {
+							assert(mons.monitors[0].width > 0, "first monitor has width");
+							assert(mons.monitors[0].height > 0, "first monitor has height");
+						}
+					} catch (e) {
+						if (!/RANDR/.test(e.message)) throw e;
+					}
+
 					var alive = await c.queryExtension("XTEST");
-					assert(alive.present === true, "connection survived FakeInput + WarpPointer + GetImage burst");
+					assert(alive.present === true, "connection survived FakeInput + WarpPointer + GetImage + RANDR burst");
 
 					c.close();
 					// Post-close rejection

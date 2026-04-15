@@ -48,6 +48,14 @@ export const OP_GET_IMAGE = 73;
 // XTEST extension minor opcodes (we only ever send FakeInput).
 export const XTEST_MINOR_FAKE_INPUT = 2;
 
+// RANDR extension minor opcodes
+export const RANDR_MINOR_QUERY_VERSION = 0;
+export const RANDR_MINOR_GET_MONITORS = 42;
+// Client-supported RANDR version we negotiate.  RandR 1.5 introduced
+// RRGetMonitors, which is all we use.
+export const RANDR_CLIENT_MAJOR = 1;
+export const RANDR_CLIENT_MINOR = 5;
+
 // XTestFakeInput event types (mirror core X event codes).
 export const XTEST_TYPE_KEY_PRESS = 2;
 export const XTEST_TYPE_KEY_RELEASE = 3;
@@ -302,6 +310,126 @@ export function encodeXTestFakeInput(majorOpcode: number, args: XTestFakeInputAr
   buf.writeInt16LE((args.rootY ?? 0) | 0, 26);
   // bytes 28-36 unused
   return buf;
+}
+
+// =============================================================================
+// RANDR — RRQueryVersion (minor 0) and RRGetMonitors (minor 42)
+//
+// RRQueryVersion (12 bytes, length = 3):
+//   0   major          RANDR major opcode (from QueryExtension)
+//   1   0              RANDR minor (QueryVersion)
+//   2-4 3              request length
+//   4-8 client-major   CARD32
+//   8-12 client-minor  CARD32
+// Reply (32 bytes, replyLen = 0):
+//   8-12 server-major
+//   12-16 server-minor
+//   16-32 unused
+//
+// RRGetMonitors (12 bytes, length = 3):
+//   0   major
+//   1   42             RANDR minor (GetMonitors)
+//   2-4 3
+//   4-8 window         WINDOW (any on the target screen; we use root)
+//   8   get-active     BOOL (1 = only active monitors)
+//   9-12 unused
+// Reply (32 + variable):
+//   4-8  length        CARD32 (4-byte units of trailing data)
+//   8-12 timestamp     TIMESTAMP
+//   12-16 nMonitors    CARD32
+//   16-20 nOutputs     CARD32 (total across all monitors)
+//   20-32 unused
+//   32+  MonitorInfo[nMonitors]
+//
+// MonitorInfo (24 + 4*nOutput bytes):
+//   0-4   name         ATOM
+//   4     primary      BOOL
+//   5     automatic    BOOL
+//   6-8   nOutput      CARD16
+//   8-10  x            INT16
+//   10-12 y            INT16
+//   12-14 width        CARD16 (pixels)
+//   14-16 height       CARD16 (pixels)
+//   16-20 width-mm     CARD32
+//   20-24 height-mm    CARD32
+//   24+   outputs[nOutput]  CARD32 each
+// =============================================================================
+
+export function encodeRRQueryVersion(majorOpcode: number): Buffer {
+  const buf = Buffer.alloc(12);
+  writeRequestHeader(buf, majorOpcode, RANDR_MINOR_QUERY_VERSION);
+  buf.writeUInt32LE(RANDR_CLIENT_MAJOR, 4);
+  buf.writeUInt32LE(RANDR_CLIENT_MINOR, 8);
+  return buf;
+}
+
+export interface RRQueryVersionReply {
+  majorVersion: number;
+  minorVersion: number;
+}
+
+export function parseRRQueryVersionReply(buf: Buffer): RRQueryVersionReply {
+  if (buf.length < 32) throw new Error("RRQueryVersion reply too short");
+  return {
+    majorVersion: buf.readUInt32LE(8),
+    minorVersion: buf.readUInt32LE(12),
+  };
+}
+
+export function encodeRRGetMonitors(majorOpcode: number, window: number, getActive = true): Buffer {
+  const buf = Buffer.alloc(12);
+  writeRequestHeader(buf, majorOpcode, RANDR_MINOR_GET_MONITORS);
+  buf.writeUInt32LE(window >>> 0, 4);
+  buf.writeUInt8(getActive ? 1 : 0, 8);
+  return buf;
+}
+
+export interface MonitorInfo {
+  name: number;        // ATOM (caller can look up via GetAtomName if desired)
+  primary: boolean;
+  automatic: boolean;
+  x: number;
+  y: number;
+  width: number;       // pixels
+  height: number;      // pixels
+  widthMm: number;
+  heightMm: number;
+  outputs: number[];   // RANDR output IDs
+}
+
+export interface RRGetMonitorsReply {
+  timestamp: number;
+  monitors: MonitorInfo[];
+}
+
+export function parseRRGetMonitorsReply(buf: Buffer): RRGetMonitorsReply {
+  if (buf.length < 32) throw new Error("RRGetMonitors reply too short");
+  const timestamp = buf.readUInt32LE(8);
+  const nMonitors = buf.readUInt32LE(12);
+  const monitors: MonitorInfo[] = [];
+  let off = 32;
+  for (let i = 0; i < nMonitors; i++) {
+    if (off + 24 > buf.length) throw new Error("RRGetMonitors reply truncated in MonitorInfo header");
+    const nOutput = buf.readUInt16LE(off + 6);
+    const blockEnd = off + 24 + nOutput * 4;
+    if (blockEnd > buf.length) throw new Error("RRGetMonitors reply truncated in outputs[]");
+    const outputs: number[] = [];
+    for (let j = 0; j < nOutput; j++) outputs.push(buf.readUInt32LE(off + 24 + j * 4));
+    monitors.push({
+      name: buf.readUInt32LE(off + 0),
+      primary: buf.readUInt8(off + 4) !== 0,
+      automatic: buf.readUInt8(off + 5) !== 0,
+      x: buf.readInt16LE(off + 8),
+      y: buf.readInt16LE(off + 10),
+      width: buf.readUInt16LE(off + 12),
+      height: buf.readUInt16LE(off + 14),
+      widthMm: buf.readUInt32LE(off + 16),
+      heightMm: buf.readUInt32LE(off + 20),
+      outputs,
+    });
+    off = blockEnd;
+  }
+  return { timestamp, monitors };
 }
 
 // =============================================================================

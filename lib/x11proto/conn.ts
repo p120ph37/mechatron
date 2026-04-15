@@ -31,13 +31,17 @@ import {
   encodeQueryExtension, parseQueryExtensionReply,
   encodeXTestFakeInput, encodeWarpPointer,
   encodeGetImage, parseGetImageReply, type GetImageReply,
+  encodeRRQueryVersion, parseRRQueryVersionReply,
+  encodeRRGetMonitors, parseRRGetMonitorsReply,
+  type RRQueryVersionReply, type RRGetMonitorsReply, type MonitorInfo,
   XTEST_TYPE_KEY_PRESS, XTEST_TYPE_KEY_RELEASE,
   XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
   XTEST_TYPE_MOTION_NOTIFY,
   type QueryExtensionReply, type XError,
 } from "./request";
 
-export type { ServerInfo, XError, QueryExtensionReply, GetImageReply };
+export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
+  RRQueryVersionReply, RRGetMonitorsReply, MonitorInfo };
 
 export class XProtoError extends Error {
   public readonly code: number;
@@ -345,6 +349,39 @@ export class XConnection {
       format: args.format, planeMask: args.planeMask,
     }));
     return parseGetImageReply(reply);
+  }
+
+  // ── RANDR ────────────────────────────────────────────────────────────────
+  // Same lazy-probe-once pattern as XTEST: every RANDR request needs the
+  // server-assigned major opcode, so cache it on first use.
+
+  private randrMajor: number = -1;
+  private randrProbe: Promise<number> | null = null;
+
+  private async ensureRandr(): Promise<number> {
+    if (this.randrMajor > 0) return this.randrMajor;
+    if (this.randrMajor === 0) throw new Error("RANDR extension not present on server");
+    if (!this.randrProbe) {
+      this.randrProbe = (async () => {
+        const r = await this.queryExtension("RANDR");
+        this.randrMajor = r.present ? r.majorOpcode : 0;
+        if (!r.present) throw new Error("RANDR extension not present on server");
+        // Negotiate version — without this some servers refuse subsequent
+        // RANDR calls with BadAccess.
+        const reply = await this.sendRequest(encodeRRQueryVersion(this.randrMajor));
+        parseRRQueryVersionReply(reply);
+        return this.randrMajor;
+      })();
+    }
+    return this.randrProbe;
+  }
+
+  /** Enumerate connected monitors via RANDR 1.5 RRGetMonitors. */
+  async getMonitors(opts: { window?: number; activeOnly?: boolean } = {}): Promise<RRGetMonitorsReply> {
+    const major = await this.ensureRandr();
+    const window = opts.window ?? this.info.screens[0]?.root ?? 0;
+    const reply = await this.sendRequest(encodeRRGetMonitors(major, window, opts.activeOnly ?? true));
+    return parseRRGetMonitorsReply(reply);
   }
 
   close(): void { this.tearDown(new Error("X11 connection closed by client")); }
