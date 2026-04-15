@@ -139,6 +139,51 @@ export function parseQueryExtensionReply(buf: Buffer): QueryExtensionReply {
 }
 
 // =============================================================================
+// WarpPointer (core opcode 41)
+//
+// Wire layout (24 bytes, length = 6):
+//   0   41          opcode
+//   1   unused
+//   2-4 6           length
+//   4-8 src-window  WINDOW (None=0 to skip the source rectangle test)
+//   8-12 dst-window WINDOW (None=0 to make dst-x/y relative to current pos)
+//   12-14 src-x     INT16
+//   14-16 src-y     INT16
+//   16-18 src-w     CARD16  (0 = "rest of window")
+//   18-20 src-h     CARD16
+//   20-22 dst-x     INT16
+//   22-24 dst-y     INT16
+//
+// Common case (absolute warp on root): srcWindow=0, dstWindow=root,
+// src-rect ignored (0/0/0/0), dst-x/y = absolute root coords.
+// =============================================================================
+
+export interface WarpPointerArgs {
+  srcWindow?: number;   // default 0 (None)
+  dstWindow: number;    // typically root window id
+  srcX?: number;
+  srcY?: number;
+  srcW?: number;
+  srcH?: number;
+  dstX: number;
+  dstY: number;
+}
+
+export function encodeWarpPointer(args: WarpPointerArgs): Buffer {
+  const buf = Buffer.alloc(24);
+  writeRequestHeader(buf, OP_WARP_POINTER, 0);
+  buf.writeUInt32LE((args.srcWindow ?? 0) >>> 0, 4);
+  buf.writeUInt32LE(args.dstWindow >>> 0, 8);
+  buf.writeInt16LE((args.srcX ?? 0) | 0, 12);
+  buf.writeInt16LE((args.srcY ?? 0) | 0, 14);
+  buf.writeUInt16LE((args.srcW ?? 0) & 0xFFFF, 16);
+  buf.writeUInt16LE((args.srcH ?? 0) & 0xFFFF, 18);
+  buf.writeInt16LE(args.dstX | 0, 20);
+  buf.writeInt16LE(args.dstY | 0, 22);
+  return buf;
+}
+
+// =============================================================================
 // XTestFakeInput (XTEST minor 2)
 //
 // Wire layout (36 bytes, length = 9):

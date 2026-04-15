@@ -356,6 +356,26 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(fiMotion.readInt16LE(24) === -10, "rootX (signed)");
 		assert(fiMotion.readInt16LE(26) === 200, "rootY");
 
+		// ── encodeWarpPointer ────────────────────────────────────────
+		var wp = req.encodeWarpPointer({
+			dstWindow: 0x12345678, dstX: 100, dstY: -50,
+		});
+		assert(wp.length === 24, "WarpPointer is 24 bytes");
+		assert(wp.readUInt8(0) === req.OP_WARP_POINTER, "opcode 41");
+		assert(wp.readUInt16LE(2) === 6, "length = 6 (4-byte units)");
+		assert(wp.readUInt32LE(4) === 0, "src-window default = None(0)");
+		assert(wp.readUInt32LE(8) === 0x12345678, "dst-window");
+		assert(wp.readInt16LE(20) === 100, "dst-x");
+		assert(wp.readInt16LE(22) === -50, "dst-y (signed)");
+
+		var wp2 = req.encodeWarpPointer({
+			srcWindow: 0xAA, dstWindow: 0xBB, srcX: 1, srcY: 2,
+			srcW: 100, srcH: 200, dstX: 0, dstY: 0,
+		});
+		assert(wp2.readUInt32LE(4) === 0xAA, "src-window");
+		assert(wp2.readInt16LE(12) === 1 && wp2.readInt16LE(14) === 2, "src-x/y");
+		assert(wp2.readUInt16LE(16) === 100 && wp2.readUInt16LE(18) === 200, "src-w/h");
+
 		// ── sequenceOf / packetTotalLength ───────────────────────────
 		assert(req.sequenceOf(qeReply) === 42, "sequenceOf reply");
 		assert(req.sequenceOf(errBuf) === 7, "sequenceOf error");
@@ -410,8 +430,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					await c.fakeButtonRelease(1);
 					await c.fakeKeyPress(38);
 					await c.fakeKeyRelease(38);
+					c.warpPointer(15, 25);
 					var alive = await c.queryExtension("XTEST");
-					assert(alive.present === true, "connection survived FakeInput burst");
+					assert(alive.present === true, "connection survived FakeInput + WarpPointer burst");
 
 					c.close();
 					// Post-close rejection

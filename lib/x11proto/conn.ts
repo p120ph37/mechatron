@@ -29,7 +29,7 @@ import {
 import {
   parseError, packetTotalLength,
   encodeQueryExtension, parseQueryExtensionReply,
-  encodeXTestFakeInput,
+  encodeXTestFakeInput, encodeWarpPointer,
   XTEST_TYPE_KEY_PRESS, XTEST_TYPE_KEY_RELEASE,
   XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
   XTEST_TYPE_MOTION_NOTIFY,
@@ -309,6 +309,18 @@ export class XConnection {
       root: opts.root ?? 0,
       rootX: x, rootY: y,
       delayMs: opts.delayMs ?? 0,
+    }));
+  }
+
+  /**
+   * Warp the pointer to absolute (x, y) on the given root window.
+   * If `root` is omitted, uses the first screen's root window from the
+   * connection-setup info.  Fire-and-forget.
+   */
+  warpPointer(x: number, y: number, root?: number): void {
+    const dst = root ?? this.info.screens[0]?.root ?? 0;
+    this.sendRequestNoReply(encodeWarpPointer({
+      srcWindow: 0, dstWindow: dst, dstX: x, dstY: y,
     }));
   }
 
