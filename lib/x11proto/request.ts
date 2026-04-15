@@ -221,9 +221,7 @@ export function encodeWarpPointer(args: WarpPointerArgs): Buffer {
 // the screen's depth list to interpret the bytes correctly.
 // =============================================================================
 
-export const IMAGE_FORMAT_XY_BITMAP = 0;
-export const IMAGE_FORMAT_XY_PIXMAP = 1;
-export const IMAGE_FORMAT_Z_PIXMAP = 2;
+export const IMAGE_FORMAT_Z_PIXMAP = 2;   // the only format we actually use
 
 export interface GetImageArgs {
   drawable: number;

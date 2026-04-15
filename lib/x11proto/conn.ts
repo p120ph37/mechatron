@@ -90,7 +90,7 @@ export class XConnection {
   static async connect(opts: ConnectOptions = {}): Promise<XConnection> {
     const displayStr = opts.display ?? process.env.DISPLAY ?? "";
     const endpoint = parseDisplay(displayStr);
-    if (!endpoint) throw new Error(`invalid or missing \$DISPLAY: ${JSON.stringify(displayStr)}`);
+    if (!endpoint) throw new Error(`invalid or missing $DISPLAY: ${JSON.stringify(displayStr)}`);
     const env = opts.xauthority ? { ...process.env, XAUTHORITY: opts.xauthority } : process.env;
     const cookie = findXauthCookie(loadXauthority(env), endpoint);
 
@@ -179,7 +179,11 @@ export class XConnection {
       if (this.rxBuf.length < total) return;
       const pkt = this.rxBuf.subarray(0, total);
       this.rxBuf = this.rxBuf.subarray(total);
-      this.dispatchPacket(Buffer.from(pkt));   // copy so downstream owns it
+      // `pkt` and the new `rxBuf` are disjoint views over the same
+      // ArrayBuffer; future TCP chunks either replace rxBuf (when it
+      // drains empty) or concat to it, so we never write back into
+      // `pkt`'s range.  No defensive copy needed.
+      this.dispatchPacket(pkt);
     }
   }
 
@@ -241,7 +245,11 @@ export class XConnection {
   sendRequestNoReply(buf: Buffer): void {
     if (this.closed) throw this.closeReason || new Error("X11 connection closed");
     this.nextSequence = (this.nextSequence + 1) & 0xFFFF;
-    this.socket.write(buf);
+    // A failed write means the connection is dead — tear down rather than
+    // leave future reply-correlation off-by-one vs the server's view of
+    // the sequence counter.
+    try { this.socket.write(buf); }
+    catch (e) { this.tearDown(e as Error); throw e; }
   }
 
   /** Probe for an extension by name. */
@@ -250,71 +258,64 @@ export class XConnection {
     return parseQueryExtensionReply(reply);
   }
 
+  // ── Extension probe cache ────────────────────────────────────────────────
+  // Every X extension request needs the server-assigned major opcode.  We
+  // cache the probe as a Promise: resolved → major opcode; rejected →
+  // extension not present (subsequent callers see the same rejection).
+  // Optional postNegotiate runs once after QueryExtension succeeds (RANDR
+  // uses this for RRQueryVersion; some servers require it before
+  // subsequent RANDR calls).
+  private extProbes: Map<string, Promise<number>> = new Map();
+
+  private ensureExtension(name: string, postNegotiate?: (major: number) => Promise<void>): Promise<number> {
+    const cached = this.extProbes.get(name);
+    if (cached) return cached;
+    const probe = (async () => {
+      const r = await this.queryExtension(name);
+      if (!r.present) throw new Error(`${name} extension not present on server`);
+      if (postNegotiate) await postNegotiate(r.majorOpcode);
+      return r.majorOpcode;
+    })();
+    this.extProbes.set(name, probe);
+    return probe;
+  }
+
   // ── XTEST FakeInput ──────────────────────────────────────────────────────
-  // The major opcode is per-server (extensions are dynamically numbered),
-  // so we cache the QueryExtension result on first use.  All FakeInput
-  // requests go fire-and-forget — the server doesn't reply to them, and
-  // a server-side error means the request was malformed (a bug), which
-  // tearDown() surfaces by closing the connection.
+  // Fire-and-forget: the server doesn't reply to FakeInput, and a malformed
+  // request surfaces as a connection tearDown via the unmatched-error path.
 
-  private xtestMajor: number = -1;       // unprobed
-  private xtestProbe: Promise<number> | null = null;
-
-  private async ensureXTest(): Promise<number> {
-    if (this.xtestMajor > 0) return this.xtestMajor;
-    if (this.xtestMajor === 0) throw new Error("XTEST extension not present on server");
-    if (!this.xtestProbe) {
-      this.xtestProbe = this.queryExtension("XTEST").then((r) => {
-        this.xtestMajor = r.present ? r.majorOpcode : 0;
-        if (!r.present) throw new Error("XTEST extension not present on server");
-        return this.xtestMajor;
-      });
-    }
-    return this.xtestProbe;
+  private async sendFakeInput(type: number, detail: number, delayMs: number,
+                              rootX = 0, rootY = 0, root = 0): Promise<void> {
+    const major = await this.ensureExtension("XTEST");
+    this.sendRequestNoReply(encodeXTestFakeInput(major, {
+      type, detail, delayMs, rootX, rootY, root,
+    }));
   }
 
   /** Synthesise a key press (down). `keycode` is the X11 keycode (8..255). */
-  async fakeKeyPress(keycode: number, delayMs = 0): Promise<void> {
-    const major = await this.ensureXTest();
-    this.sendRequestNoReply(encodeXTestFakeInput(major, {
-      type: XTEST_TYPE_KEY_PRESS, detail: keycode, delayMs,
-    }));
+  fakeKeyPress(keycode: number, delayMs = 0): Promise<void> {
+    return this.sendFakeInput(XTEST_TYPE_KEY_PRESS, keycode, delayMs);
   }
 
   /** Synthesise a key release (up). */
-  async fakeKeyRelease(keycode: number, delayMs = 0): Promise<void> {
-    const major = await this.ensureXTest();
-    this.sendRequestNoReply(encodeXTestFakeInput(major, {
-      type: XTEST_TYPE_KEY_RELEASE, detail: keycode, delayMs,
-    }));
+  fakeKeyRelease(keycode: number, delayMs = 0): Promise<void> {
+    return this.sendFakeInput(XTEST_TYPE_KEY_RELEASE, keycode, delayMs);
   }
 
   /** Synthesise a pointer button press (1=left, 2=middle, 3=right, 4-7=wheel). */
-  async fakeButtonPress(button: number, delayMs = 0): Promise<void> {
-    const major = await this.ensureXTest();
-    this.sendRequestNoReply(encodeXTestFakeInput(major, {
-      type: XTEST_TYPE_BUTTON_PRESS, detail: button, delayMs,
-    }));
+  fakeButtonPress(button: number, delayMs = 0): Promise<void> {
+    return this.sendFakeInput(XTEST_TYPE_BUTTON_PRESS, button, delayMs);
   }
 
   /** Synthesise a pointer button release. */
-  async fakeButtonRelease(button: number, delayMs = 0): Promise<void> {
-    const major = await this.ensureXTest();
-    this.sendRequestNoReply(encodeXTestFakeInput(major, {
-      type: XTEST_TYPE_BUTTON_RELEASE, detail: button, delayMs,
-    }));
+  fakeButtonRelease(button: number, delayMs = 0): Promise<void> {
+    return this.sendFakeInput(XTEST_TYPE_BUTTON_RELEASE, button, delayMs);
   }
 
   /** Synthesise pointer motion (absolute by default; pass relative=true for delta). */
-  async fakeMotion(x: number, y: number, opts: { relative?: boolean; root?: number; delayMs?: number } = {}): Promise<void> {
-    const major = await this.ensureXTest();
-    this.sendRequestNoReply(encodeXTestFakeInput(major, {
-      type: XTEST_TYPE_MOTION_NOTIFY,
-      detail: opts.relative ? 1 : 0,
-      root: opts.root ?? 0,
-      rootX: x, rootY: y,
-      delayMs: opts.delayMs ?? 0,
-    }));
+  fakeMotion(x: number, y: number, opts: { relative?: boolean; root?: number; delayMs?: number } = {}): Promise<void> {
+    return this.sendFakeInput(XTEST_TYPE_MOTION_NOTIFY, opts.relative ? 1 : 0,
+                              opts.delayMs ?? 0, x, y, opts.root ?? 0);
   }
 
   /**
@@ -351,34 +352,13 @@ export class XConnection {
     return parseGetImageReply(reply);
   }
 
-  // ── RANDR ────────────────────────────────────────────────────────────────
-  // Same lazy-probe-once pattern as XTEST: every RANDR request needs the
-  // server-assigned major opcode, so cache it on first use.
-
-  private randrMajor: number = -1;
-  private randrProbe: Promise<number> | null = null;
-
-  private async ensureRandr(): Promise<number> {
-    if (this.randrMajor > 0) return this.randrMajor;
-    if (this.randrMajor === 0) throw new Error("RANDR extension not present on server");
-    if (!this.randrProbe) {
-      this.randrProbe = (async () => {
-        const r = await this.queryExtension("RANDR");
-        this.randrMajor = r.present ? r.majorOpcode : 0;
-        if (!r.present) throw new Error("RANDR extension not present on server");
-        // Negotiate version — without this some servers refuse subsequent
-        // RANDR calls with BadAccess.
-        const reply = await this.sendRequest(encodeRRQueryVersion(this.randrMajor));
-        parseRRQueryVersionReply(reply);
-        return this.randrMajor;
-      })();
-    }
-    return this.randrProbe;
-  }
-
   /** Enumerate connected monitors via RANDR 1.5 RRGetMonitors. */
   async getMonitors(opts: { window?: number; activeOnly?: boolean } = {}): Promise<RRGetMonitorsReply> {
-    const major = await this.ensureRandr();
+    // RANDR needs RRQueryVersion negotiation after QueryExtension — some
+    // servers refuse subsequent RANDR calls with BadAccess otherwise.
+    const major = await this.ensureExtension("RANDR", async (m) => {
+      parseRRQueryVersionReply(await this.sendRequest(encodeRRQueryVersion(m)));
+    });
     const window = opts.window ?? this.info.screens[0]?.root ?? 0;
     const reply = await this.sendRequest(encodeRRGetMonitors(major, window, opts.activeOnly ?? true));
     return parseRRGetMonitorsReply(reply);

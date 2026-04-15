@@ -17,6 +17,7 @@
 import { existsSync, accessSync, constants as fsConstants } from "fs";
 import { execFileSync } from "child_process";
 import { MechanismInfo, PlatformCapability } from "./types";
+import { parseDisplay } from "../x11proto/wire";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -128,10 +129,12 @@ function probeUinput(): MechanismInfo {
 
 function probeXproto(): MechanismInfo {
   // Pure-TS X11 wire protocol via lib/x11proto (no libX11/libXtst
-  // dependency).  Available whenever the $DISPLAY socket exists; we
-  // can't probe the auth handshake without actually connecting, but
-  // the byte-layer implementation in lib/x11proto/* covers QueryExtension,
-  // XTestFakeInput, WarpPointer, GetImage, and RRGetMonitors.
+  // dependency).  Available whenever the $DISPLAY endpoint is reachable;
+  // we reuse parseDisplay() so bracketed IPv6 / unix: prefixed / display.screen
+  // forms are all handled identically to the real connect path.  TCP
+  // endpoints can't be cheaply probed without opening a connection, so
+  // we accept them at face value when $DISPLAY is set — the connect
+  // attempt fails loudly later if the server isn't actually listening.
   if (!IS_LINUX) {
     return {
       name: "xproto", description: "Direct X11 wire protocol (no libX11)",
@@ -140,13 +143,7 @@ function probeXproto(): MechanismInfo {
       reason: "not Linux",
     };
   }
-  // Minimal reachability check: parse $DISPLAY and verify the unix socket
-  // exists.  TCP / abstract endpoints can't be cheaply probed without
-  // actually opening a connection, so we accept those at face value when
-  // $DISPLAY is set — the connect attempt will fail loudly later if the
-  // server isn't actually listening.
-  const display = process.env.DISPLAY || "";
-  if (!display) {
+  if (!hasDisplay()) {
     return {
       name: "xproto",
       description: "Direct X11 wire protocol (lib/x11proto, no libX11/libXtst)",
@@ -155,25 +152,24 @@ function probeXproto(): MechanismInfo {
       reason: "no $DISPLAY set",
     };
   }
-  // Cheap socket existence check for the common :N form.
-  const m = display.match(/^(?:[^:]*):(\d+)(?:\.\d+)?$/);
-  let socketReachable = true;
-  let socketReason: string | undefined;
-  if (m && (display.startsWith(":") || display.startsWith("unix:"))) {
-    const path = "/tmp/.X11-unix/X" + m[1];
-    if (!existsSync(path)) {
-      socketReachable = false;
-      socketReason = `${path} not present`;
-    }
+  const endpoint = parseDisplay(process.env.DISPLAY || "");
+  let available = true;
+  let reason: string | undefined;
+  if (!endpoint) {
+    available = false;
+    reason = `invalid $DISPLAY: ${JSON.stringify(process.env.DISPLAY)}`;
+  } else if (endpoint.kind === "unix" && !existsSync(endpoint.path)) {
+    available = false;
+    reason = `${endpoint.path} not present`;
   }
   return {
     name: "xproto",
     description: "Direct X11 wire protocol (lib/x11proto, no libX11/libXtst)",
-    available: socketReachable,
+    available,
     requiresElevatedPrivileges: false,
     requiresUserApproval: false,
     supportsOffScreen: true,
-    reason: socketReachable ? undefined : socketReason,
+    reason,
   };
 }
 
