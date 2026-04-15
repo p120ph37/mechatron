@@ -51,9 +51,12 @@ import { openSync, closeSync, existsSync } from "fs";
 export const EV_SYN = 0x00;
 export const EV_KEY = 0x01;
 export const EV_REL = 0x02;
-export const EV_ABS = 0x03;
 
 export const SYN_REPORT = 0;
+
+// O_RDWR for the open(2) flags arg.  Linux-specific value (Linux defines
+// it as 2 unconditionally; libc on every supported arch agrees).
+export const O_RDWR = 0x0002;
 
 export const REL_X      = 0x00;
 export const REL_Y      = 0x01;
@@ -84,7 +87,6 @@ export const UI_DEV_DESTROY  = 0x5502;   // _IO('U', 2)
 export const UI_SET_EVBIT    = 0x40045564; // _IOW('U', 100, int)
 export const UI_SET_KEYBIT   = 0x40045565; // _IOW('U', 101, int)
 export const UI_SET_RELBIT   = 0x40045566; // _IOW('U', 102, int)
-export const UI_SET_ABSBIT   = 0x40045567; // _IOW('U', 103, int)
 // UI_DEV_SETUP takes a uinput_setup struct (92 bytes): _IOW('U', 3, uinput_setup)
 // = (1 << 30) | (92 << 16) | (0x55 << 8) | 3 = 0x405c5503
 export const UI_DEV_SETUP    = 0x405c5503;
@@ -275,48 +277,17 @@ export function encodeUinputSetup(
 }
 
 /**
- * Encode the legacy `struct uinput_user_dev` (1116 bytes) for pre-4.5
- * kernels where UI_DEV_SETUP isn't available.  Written to the fd with
- * `write(2)` rather than via ioctl — the old compat path.
- *
- * Layout:
- *   char name[80];
- *   struct input_id id;   // 8
- *   __u32 ff_effects_max; // 4
- *   __s32 absmax[64];     // 256
- *   __s32 absmin[64];     // 256
- *   __s32 absfuzz[64];    // 256
- *   __s32 absflat[64];    // 256
- *
- * We leave the abs* arrays zero-filled (we don't emit EV_ABS events from
- * this module — mouse motion is EV_REL only).
- */
-export function encodeUinputUserDev(
-  name: string,
-  opts: { bustype?: number; vendor?: number; product?: number; version?: number; ffEffectsMax?: number } = {},
-): Buffer {
-  const buf = Buffer.alloc(1116);
-  const nameBytes = Buffer.from(name, "utf8");
-  const nameLen = Math.min(nameBytes.length, 79);
-  nameBytes.copy(buf, 0, 0, nameLen);
-  // input_id @ 80
-  buf.writeUInt16LE((opts.bustype ?? BUS_VIRTUAL) & 0xFFFF, 80);
-  buf.writeUInt16LE((opts.vendor ?? 0x1209) & 0xFFFF, 82);
-  buf.writeUInt16LE((opts.product ?? 0x7070) & 0xFFFF, 84);
-  buf.writeUInt16LE((opts.version ?? 1) & 0xFFFF, 86);
-  // ff_effects_max @ 88
-  buf.writeUInt32LE((opts.ffEffectsMax ?? 0) >>> 0, 88);
-  // absmax/absmin/absfuzz/absflat: 92..1116 — all zero.
-  return buf;
-}
-
-/**
  * Encode an event burst: the given events followed by a `SYN_REPORT`.
  *
  * Callers batch related events (press+release for a click, dx+dy for
  * diagonal motion) into a single burst so the kernel commits them as
  * one input update — a "frame" in evdev parlance.  Without the trailing
  * SYN_REPORT the kernel buffers indefinitely.
+ *
+ * The whole burst is packed into a single `Buffer.alloc` with the
+ * timestamp BigInts hoisted out of the per-event loop — typical press/
+ * release bursts are on the hot path, and the naive
+ * "alloc-per-event + Buffer.concat" is measurably wasteful there.
  */
 export interface UInputEvent {
   type: number;
@@ -327,12 +298,23 @@ export function encodeEventBurst(
   events: UInputEvent[],
   timestampMs: number = Date.now(),
 ): Buffer {
-  const parts: Buffer[] = [];
-  for (const e of events) {
-    parts.push(encodeInputEvent(e.type, e.code, e.value, timestampMs));
+  const total = (events.length + 1) * 24;
+  const buf = Buffer.alloc(total);
+  const secBig = BigInt(Math.floor(timestampMs / 1000));
+  const usecBig = BigInt((timestampMs % 1000) * 1000);
+  const writeAt = (off: number, type: number, code: number, value: number) => {
+    buf.writeBigInt64LE(secBig, off);
+    buf.writeBigInt64LE(usecBig, off + 8);
+    buf.writeUInt16LE(type & 0xFFFF, off + 16);
+    buf.writeUInt16LE(code & 0xFFFF, off + 18);
+    buf.writeInt32LE(value | 0, off + 20);
+  };
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    writeAt(i * 24, e.type, e.code, e.value);
   }
-  parts.push(encodeInputEvent(EV_SYN, SYN_REPORT, 0, timestampMs));
-  return Buffer.concat(parts);
+  writeAt(events.length * 24, EV_SYN, SYN_REPORT, 0);
+  return buf;
 }
 
 // =============================================================================
@@ -350,7 +332,7 @@ export function openUinputForProbe(): { ok: boolean; reason?: string } {
   }
   let fd: number;
   try {
-    fd = openSync("/dev/uinput", 0x0002 /* O_RDWR */);
+    fd = openSync("/dev/uinput", O_RDWR);
   } catch (e) {
     return { ok: false, reason: (e as Error)?.message || "open failed" };
   }

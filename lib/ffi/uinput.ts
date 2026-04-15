@@ -32,11 +32,12 @@ import {
   BUTTON_RIGHT as BTN_IDX_RIGHT, BUTTON_X1 as BTN_IDX_X1, BUTTON_X2 as BTN_IDX_X2,
 } from "../mouse/constants";
 import {
-  EV_SYN, EV_KEY, EV_REL, SYN_REPORT,
+  EV_SYN, EV_KEY, EV_REL,
   REL_X, REL_Y, REL_WHEEL, REL_HWHEEL,
   BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA,
   UI_DEV_CREATE, UI_DEV_DESTROY, UI_DEV_SETUP,
   UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT,
+  O_RDWR,
   encodeInputEvent, encodeEventBurst, encodeUinputSetup,
   allSupportedEvdevCodes, mapKeysymToKeycode,
   type UInputEvent,
@@ -87,8 +88,6 @@ function openLibc(): void {
 // =============================================================================
 // Device lifecycle
 // =============================================================================
-
-const O_RDWR = 0x0002;
 
 export interface UInputDevice {
   fd: number;
@@ -141,35 +140,27 @@ export function getUinputDevice(): UInputDevice | null {
     return _libc!.ioctl(fd, BigInt(req), typeof arg === "bigint" ? arg : BigInt(arg));
   };
 
-  // UI_SET_EVBIT — advertise EV_KEY, EV_REL, EV_SYN.
   for (const ev of [EV_KEY, EV_REL, EV_SYN]) {
     if (ioctl(UI_SET_EVBIT, ev) < 0) {
       return closeOnErr(`UI_SET_EVBIT ${ev} failed`);
     }
   }
-  // UI_SET_KEYBIT — every keycode we might emit, including mouse buttons.
   for (const code of allSupportedEvdevCodes()) {
     if (ioctl(UI_SET_KEYBIT, code) < 0) {
       return closeOnErr(`UI_SET_KEYBIT ${code} failed`);
     }
   }
-  // UI_SET_RELBIT — X, Y, vertical and horizontal wheel.
   for (const rel of [REL_X, REL_Y, REL_WHEEL, REL_HWHEEL]) {
     if (ioctl(UI_SET_RELBIT, rel) < 0) {
       return closeOnErr(`UI_SET_RELBIT ${rel} failed`);
     }
   }
 
-  // UI_DEV_SETUP — submit the uinput_setup struct.
-  const setupBuf = encodeUinputSetup("mechatron virtual input", {
-    vendor: 0x1209,   // pid.codes block (we have no assigned PID, this is a test/dev range)
-    product: 0x7070,  // arbitrary stable product id
-    version: 1,
-  });
+  const setupBuf = encodeUinputSetup("mechatron virtual input");
   const setupU8 = new Uint8Array(setupBuf.buffer, setupBuf.byteOffset, setupBuf.byteLength);
   const setupPtr = _ffi.ptr(setupU8);
   if (setupPtr == null) return closeOnErr("encodeUinputSetup ptr null");
-  if (ioctl(UI_DEV_SETUP, setupPtr as any) < 0) {
+  if (ioctl(UI_DEV_SETUP, setupPtr) < 0) {
     return closeOnErr("UI_DEV_SETUP failed");
   }
 
@@ -234,6 +225,11 @@ export function writeEvents(fd: number, events: UInputEvent[]): boolean {
   }
 }
 
+function withDevice(fn: (fd: number) => boolean): boolean {
+  const dev = getUinputDevice();
+  return dev ? fn(dev.fd) : false;
+}
+
 /**
  * Press or release a mechatron KEYS.* keysym via uinput.  Returns true
  * when the keysym mapped to a valid evdev code and the write succeeded,
@@ -242,11 +238,9 @@ export function writeEvents(fd: number, events: UInputEvent[]): boolean {
  * XTest if available).
  */
 export function injectKeysym(keysym: number, press: boolean): boolean {
-  const dev = getUinputDevice();
-  if (!dev) return false;
   const code = mapKeysymToKeycode(keysym);
   if (code === 0) return false;
-  return writeEvents(dev.fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]);
+  return withDevice((fd) => writeEvents(fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]));
 }
 
 /**
@@ -254,8 +248,6 @@ export function injectKeysym(keysym: number, press: boolean): boolean {
  * 2=Right, 3=Back/X1, 4=Forward/X2 (matches mechatron BUTTON_* values).
  */
 export function injectMouseButton(button: number, press: boolean): boolean {
-  const dev = getUinputDevice();
-  if (!dev) return false;
   let code: number;
   switch (button) {
     case BTN_IDX_LEFT:  code = BTN_LEFT; break;
@@ -265,24 +257,7 @@ export function injectMouseButton(button: number, press: boolean): boolean {
     case BTN_IDX_X2:    code = BTN_EXTRA; break;
     default: return false;
   }
-  return writeEvents(dev.fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]);
-}
-
-/**
- * Move the pointer by a relative delta.  uinput cannot teleport the
- * cursor — that requires absolute positioning against a configured
- * screen, which in turn requires EV_ABS + ABS_X/Y capability bits +
- * per-compositor assumptions we don't want to bake in.  Absolute
- * positioning (Mouse.setPos) stays on XTest.
- */
-export function injectMouseMoveRel(dx: number, dy: number): boolean {
-  const dev = getUinputDevice();
-  if (!dev) return false;
-  const events: UInputEvent[] = [];
-  if (dx !== 0) events.push({ type: EV_REL, code: REL_X, value: dx });
-  if (dy !== 0) events.push({ type: EV_REL, code: REL_Y, value: dy });
-  if (events.length === 0) return true;
-  return writeEvents(dev.fd, events);
+  return withDevice((fd) => writeEvents(fd, [{ type: EV_KEY, code, value: press ? 1 : 0 }]));
 }
 
 /**
@@ -293,18 +268,14 @@ export function injectMouseMoveRel(dx: number, dy: number): boolean {
  * is correct.
  */
 export function injectScrollV(amount: number): boolean {
-  const dev = getUinputDevice();
-  if (!dev) return false;
-  if (amount === 0) return true;
-  return writeEvents(dev.fd, [{ type: EV_REL, code: REL_WHEEL, value: amount }]);
+  if (amount === 0) return withDevice(() => true);
+  return withDevice((fd) => writeEvents(fd, [{ type: EV_REL, code: REL_WHEEL, value: amount }]));
 }
 
 /** Horizontal scroll — same discrete-notches semantics as `injectScrollV`. */
 export function injectScrollH(amount: number): boolean {
-  const dev = getUinputDevice();
-  if (!dev) return false;
-  if (amount === 0) return true;
-  return writeEvents(dev.fd, [{ type: EV_REL, code: REL_HWHEEL, value: amount }]);
+  if (amount === 0) return withDevice(() => true);
+  return withDevice((fd) => writeEvents(fd, [{ type: EV_REL, code: REL_HWHEEL, value: amount }]));
 }
 
 /**

@@ -40,7 +40,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(ui.UI_SET_EVBIT === 0x40045564, "UI_SET_EVBIT value");
 		assert(ui.UI_SET_KEYBIT === 0x40045565, "UI_SET_KEYBIT value");
 		assert(ui.UI_SET_RELBIT === 0x40045566, "UI_SET_RELBIT value");
-		assert(ui.UI_SET_ABSBIT === 0x40045567, "UI_SET_ABSBIT value");
 		// _IOW('U', 3, sizeof(uinput_setup)=92) = 0x405c5503
 		assert(ui.UI_DEV_SETUP === 0x405c5503, "UI_DEV_SETUP value");
 
@@ -48,7 +47,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(ui.EV_SYN === 0x00, "EV_SYN");
 		assert(ui.EV_KEY === 0x01, "EV_KEY");
 		assert(ui.EV_REL === 0x02, "EV_REL");
-		assert(ui.EV_ABS === 0x03, "EV_ABS");
 		assert(ui.SYN_REPORT === 0, "SYN_REPORT");
 		assert(ui.REL_X === 0x00 && ui.REL_Y === 0x01, "REL_X/Y");
 		assert(ui.REL_WHEEL === 0x08, "REL_WHEEL");
@@ -188,23 +186,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var ffSetup = ui.encodeUinputSetup("ff", { ffEffectsMax: 7 });
 		assert(ffSetup.readUInt32LE(88) === 7, "ff_effects_max override");
 
-		// ── encodeUinputUserDev (legacy struct, 1116 bytes) ──────────
-		var ud = ui.encodeUinputUserDev("legacy-dev", {
-			vendor: 0xAAAA, product: 0xBBBB, version: 3,
-		});
-		assert(ud.length === 1116, "uinput_user_dev length 1116");
-		assert(ud.toString("utf8", 0, "legacy-dev".length) === "legacy-dev", "legacy name");
-		assert(ud[80 + 0] === ui.BUS_VIRTUAL, "legacy bustype LSB");
-		assert(ud.readUInt16LE(80) === ui.BUS_VIRTUAL, "legacy bustype");
-		assert(ud.readUInt16LE(82) === 0xAAAA, "legacy vendor");
-		assert(ud.readUInt16LE(84) === 0xBBBB, "legacy product");
-		assert(ud.readUInt16LE(86) === 3, "legacy version");
-		assert(ud.readUInt32LE(88) === 0, "legacy ff_effects_max");
-		// absmax/min/fuzz/flat (4 x 64 x i32 = 1024 bytes) @ 92..1116 all zero.
-		for (var j = 92; j < 1116; j += 4) {
-			assert(ud.readInt32LE(j) === 0, "abs* array zero at " + j);
-		}
-
 		// ── encodeEventBurst (concatenation + trailing SYN_REPORT) ───
 		var burst = ui.encodeEventBurst([
 			{ type: ui.EV_KEY, code: 30, value: 1 },
@@ -258,7 +239,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(typeof ffi.uinputOpenReason === "function", "ffi.uinputOpenReason");
 		assert(typeof ffi.injectKeysym === "function", "ffi.injectKeysym");
 		assert(typeof ffi.injectMouseButton === "function", "ffi.injectMouseButton");
-		assert(typeof ffi.injectMouseMoveRel === "function", "ffi.injectMouseMoveRel");
 		assert(typeof ffi.injectScrollV === "function", "ffi.injectScrollV");
 		assert(typeof ffi.injectScrollH === "function", "ffi.injectScrollH");
 		assert(typeof ffi.writeEvents === "function", "ffi.writeEvents");
@@ -281,7 +261,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			// device isn't available — they must NOT throw.
 			assert(ffi.injectKeysym(KEYS.KEY_A, true) === false, "injectKeysym false when !ready");
 			assert(ffi.injectMouseButton(0, true) === false, "injectMouseButton false when !ready");
-			assert(ffi.injectMouseMoveRel(1, 1) === false, "injectMouseMoveRel false when !ready");
 			assert(ffi.injectScrollV(1) === false, "injectScrollV false when !ready");
 			assert(ffi.injectScrollH(1) === false, "injectScrollH false when !ready");
 			// closeUinputDevice is a no-op when there's no device.
@@ -300,8 +279,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(ffi.injectMouseButton(0, true) === true, "BTN_LEFT press accepted");
 			assert(ffi.injectMouseButton(0, false) === true, "BTN_LEFT release accepted");
 			assert(ffi.injectMouseButton(99, true) === false, "out-of-range button false");
-			assert(ffi.injectMouseMoveRel(3, -2) === true, "rel move 3,-2 accepted");
-			assert(ffi.injectMouseMoveRel(0, 0) === true, "rel move 0,0 no-op");
 			assert(ffi.injectScrollV(1) === true, "scrollV +1 accepted");
 			assert(ffi.injectScrollV(0) === true, "scrollV 0 no-op");
 			assert(ffi.injectScrollH(-1) === true, "scrollH -1 accepted");
@@ -313,7 +290,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(ffi.uinputReady() === false, "uinputReady false after close");
 		}
 
-		// ── Platform mechanism plumbing (6c part 3) ──────────────────
+		// ── Platform mechanism plumbing ──────────────────────────────
 		// Keyboard/Mouse dispatch consults Platform.getMechanism("input")
 		// on each call; verify that the mechanism registry knows about
 		// uinput, that pinning it works, and that Keyboard.press /
