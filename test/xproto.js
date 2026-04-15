@@ -505,6 +505,18 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		bigReply.writeUInt32LE(5, 4);    // 5 * 4 = 20 extra bytes
 		assert(req.packetTotalLength(bigReply) === 52, "reply with extra bytes");
 
+		// ── Mechanism registry: xproto present and probed correctly ──
+		var inputMechs = mechatron.listMechanisms("input");
+		var xpMech = inputMechs.find(function (m) { return m.name === "xproto"; });
+		assert(xpMech, "xproto registered as input mechanism");
+		if (process.platform === "linux") {
+			// Reachability matches whether $DISPLAY's socket exists; we
+			// just verify the probe did *something* (not the stale stub
+			// "not yet implemented (Phase 6d)" reason).
+			assert(!/not yet implemented/.test(xpMech.reason || ""),
+				"xproto probe no longer returns 'not yet implemented'");
+		}
+
 		// ── Live connection smoke test ──────────────────────────────
 		// When $DISPLAY is reachable, the Bun environment gives us a
 		// real end-to-end exerciser: handshake, QueryExtension on a

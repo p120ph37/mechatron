@@ -127,9 +127,11 @@ function probeUinput(): MechanismInfo {
 }
 
 function probeXproto(): MechanismInfo {
-  // Pure X11 wire protocol (no libX11/libXtst dependency).  Available
-  // whenever we can reach $DISPLAY — the actual connection parse isn't
-  // implemented yet so we report unavailable until 6d lands.
+  // Pure-TS X11 wire protocol via lib/x11proto (no libX11/libXtst
+  // dependency).  Available whenever the $DISPLAY socket exists; we
+  // can't probe the auth handshake without actually connecting, but
+  // the byte-layer implementation in lib/x11proto/* covers QueryExtension,
+  // XTestFakeInput, WarpPointer, GetImage, and RRGetMonitors.
   if (!IS_LINUX) {
     return {
       name: "xproto", description: "Direct X11 wire protocol (no libX11)",
@@ -138,14 +140,40 @@ function probeXproto(): MechanismInfo {
       reason: "not Linux",
     };
   }
+  // Minimal reachability check: parse $DISPLAY and verify the unix socket
+  // exists.  TCP / abstract endpoints can't be cheaply probed without
+  // actually opening a connection, so we accept those at face value when
+  // $DISPLAY is set — the connect attempt will fail loudly later if the
+  // server isn't actually listening.
+  const display = process.env.DISPLAY || "";
+  if (!display) {
+    return {
+      name: "xproto",
+      description: "Direct X11 wire protocol (lib/x11proto, no libX11/libXtst)",
+      available: false, requiresElevatedPrivileges: false,
+      requiresUserApproval: false, supportsOffScreen: true,
+      reason: "no $DISPLAY set",
+    };
+  }
+  // Cheap socket existence check for the common :N form.
+  const m = display.match(/^(?:[^:]*):(\d+)(?:\.\d+)?$/);
+  let socketReachable = true;
+  let socketReason: string | undefined;
+  if (m && (display.startsWith(":") || display.startsWith("unix:"))) {
+    const path = "/tmp/.X11-unix/X" + m[1];
+    if (!existsSync(path)) {
+      socketReachable = false;
+      socketReason = `${path} not present`;
+    }
+  }
   return {
     name: "xproto",
-    description: "Direct X11 wire protocol (no libX11/libXtst dependency)",
-    available: false,   // planned; see PLAN.md §6d
+    description: "Direct X11 wire protocol (lib/x11proto, no libX11/libXtst)",
+    available: socketReachable,
     requiresElevatedPrivileges: false,
     requiresUserApproval: false,
     supportsOffScreen: true,
-    reason: "pure X protocol backend not yet implemented (Phase 6d)",
+    reason: socketReachable ? undefined : socketReason,
   };
 }
 
