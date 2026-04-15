@@ -76,7 +76,15 @@ export class XConnection {
   private socket!: net.Socket;
   private nextSequence = 1;   // conn-setup is seq 0; first request is seq 1
   private pending = new Map<number, PendingReply>();
-  private rxBuf: Buffer = Buffer.alloc(0);
+  // Reader state: a queue of raw TCP chunks with a running byte total.
+  // Packets are extracted lazily — a small packet sitting entirely inside
+  // the first chunk is returned as a zero-copy subarray; a packet spanning
+  // multiple chunks allocates exactly one fresh Buffer of the packet's
+  // size.  Avoids the O(n²) `Buffer.concat(rxBuf, chunk)` pattern for
+  // large multi-chunk replies (GetImage on a high-res drawable can run
+  // to tens of megabytes).
+  private rxChunks: Buffer[] = [];
+  private rxTotal = 0;
   private closed = false;
   private closeReason: Error | null = null;
 
@@ -144,9 +152,12 @@ export class XConnection {
           }
           this.info = reply.info;
           // Leftover bytes beyond the handshake reply (unlikely, but the
-          // server could batch an error for an as-yet-unsent request — no).
+          // server could batch an error for an as-yet-unsent request).
           const leftover = acc.subarray(total);
-          if (leftover.length) this.rxBuf = leftover;
+          if (leftover.length) {
+            this.rxChunks.push(leftover);
+            this.rxTotal = leftover.length;
+          }
           this.installReaderLoop();
           resolve();
         }
@@ -164,26 +175,72 @@ export class XConnection {
 
   private installReaderLoop(): void {
     this.socket.on("data", (chunk: Buffer) => {
-      this.rxBuf = this.rxBuf.length === 0 ? chunk : Buffer.concat([this.rxBuf, chunk]);
+      this.rxChunks.push(chunk);
+      this.rxTotal += chunk.length;
       this.drainRxBuf();
     });
     this.socket.on("error", (e) => this.tearDown(e));
     this.socket.on("close", () => this.tearDown(new Error("X11 connection closed")));
   }
 
+  /**
+   * Read the next `n` bytes without consuming them.  Fast path when the
+   * first chunk already holds enough; slow path concatenates just enough
+   * chunks to cover `n`.  Caller must have verified `rxTotal >= n`.
+   */
+  private peekRx(n: number): Buffer {
+    const first = this.rxChunks[0];
+    if (first.length >= n) return first.subarray(0, n);
+    const parts: Buffer[] = [];
+    let collected = 0;
+    for (const c of this.rxChunks) {
+      parts.push(c);
+      collected += c.length;
+      if (collected >= n) break;
+    }
+    return Buffer.concat(parts, collected).subarray(0, n);
+  }
+
+  /**
+   * Consume exactly `n` bytes from the head of the queue, returning them
+   * as a single Buffer.  Fast path (packet entirely inside first chunk)
+   * returns a zero-copy subarray; slow path allocates one fresh Buffer
+   * of size `n`.  Caller must have verified `rxTotal >= n`.
+   */
+  private consumeRx(n: number): Buffer {
+    const first = this.rxChunks[0];
+    if (first.length >= n) {
+      const pkt = first.subarray(0, n);
+      if (first.length === n) this.rxChunks.shift();
+      else this.rxChunks[0] = first.subarray(n);
+      this.rxTotal -= n;
+      return pkt;
+    }
+    const parts: Buffer[] = [];
+    let need = n;
+    while (need > 0) {
+      const c = this.rxChunks[0];
+      if (c.length <= need) {
+        parts.push(c);
+        need -= c.length;
+        this.rxChunks.shift();
+      } else {
+        parts.push(c.subarray(0, need));
+        this.rxChunks[0] = c.subarray(need);
+        need = 0;
+      }
+    }
+    this.rxTotal -= n;
+    return Buffer.concat(parts, n);
+  }
+
   private drainRxBuf(): void {
-    while (this.rxBuf.length >= 8) {
+    while (this.rxTotal >= 8) {
       let total: number;
-      try { total = packetTotalLength(this.rxBuf); }
+      try { total = packetTotalLength(this.peekRx(8)); }
       catch { return; }
-      if (this.rxBuf.length < total) return;
-      const pkt = this.rxBuf.subarray(0, total);
-      this.rxBuf = this.rxBuf.subarray(total);
-      // `pkt` and the new `rxBuf` are disjoint views over the same
-      // ArrayBuffer; future TCP chunks either replace rxBuf (when it
-      // drains empty) or concat to it, so we never write back into
-      // `pkt`'s range.  No defensive copy needed.
-      this.dispatchPacket(pkt);
+      if (this.rxTotal < total) return;
+      this.dispatchPacket(this.consumeRx(total));
     }
   }
 
