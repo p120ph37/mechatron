@@ -45,6 +45,16 @@ export const OP_QUERY_EXTENSION = 98;
 export const OP_WARP_POINTER = 41;
 export const OP_GET_IMAGE = 73;
 
+// XTEST extension minor opcodes (we only ever send FakeInput).
+export const XTEST_MINOR_FAKE_INPUT = 2;
+
+// XTestFakeInput event types (mirror core X event codes).
+export const XTEST_TYPE_KEY_PRESS = 2;
+export const XTEST_TYPE_KEY_RELEASE = 3;
+export const XTEST_TYPE_BUTTON_PRESS = 4;
+export const XTEST_TYPE_BUTTON_RELEASE = 5;
+export const XTEST_TYPE_MOTION_NOTIFY = 6;
+
 // Error codes (core, from X11 protocol spec appendix B)
 export const ERR_REQUEST = 1;
 export const ERR_VALUE = 2;
@@ -126,6 +136,53 @@ export function parseQueryExtensionReply(buf: Buffer): QueryExtensionReply {
     firstEvent: buf.readUInt8(10),
     firstError: buf.readUInt8(11),
   };
+}
+
+// =============================================================================
+// XTestFakeInput (XTEST minor 2)
+//
+// Wire layout (36 bytes, length = 9):
+//   0   major        XTEST major opcode (from QueryExtension)
+//   1   2            minor (FakeInput)
+//   2-4 9            request length
+//   4   type         KeyPress=2, KeyRelease=3, ButtonPress=4,
+//                    ButtonRelease=5, MotionNotify=6
+//   5   detail       keycode (key events), button# (button events),
+//                    or relative-flag (0=absolute, 1=relative) for motion
+//   6-8 unused
+//   8-12 delay       milliseconds (CARD32) — server delays before injecting
+//   12-16 root       window id, or 0 (None) to use current root
+//   16-24 unused
+//   24-26 rootX      INT16 — for MotionNotify
+//   26-28 rootY      INT16
+//   28-36 unused
+//
+// The server treats button presses on buttons 4-7 as wheel events, which
+// is the conventional way to inject scroll input via XTEST.
+// =============================================================================
+
+export interface XTestFakeInputArgs {
+  type: number;          // XTEST_TYPE_*
+  detail?: number;       // keycode/button/relative-flag (default 0)
+  delayMs?: number;      // server-side delay before injection (default 0)
+  root?: number;         // window id (default 0 = current root)
+  rootX?: number;        // for MOTION_NOTIFY (default 0)
+  rootY?: number;        // for MOTION_NOTIFY (default 0)
+}
+
+export function encodeXTestFakeInput(majorOpcode: number, args: XTestFakeInputArgs): Buffer {
+  const buf = Buffer.alloc(36);
+  writeRequestHeader(buf, majorOpcode, XTEST_MINOR_FAKE_INPUT);
+  buf.writeUInt8(args.type & 0xFF, 4);
+  buf.writeUInt8((args.detail ?? 0) & 0xFF, 5);
+  // bytes 6-8 unused
+  buf.writeUInt32LE((args.delayMs ?? 0) >>> 0, 8);
+  buf.writeUInt32LE((args.root ?? 0) >>> 0, 12);
+  // bytes 16-24 unused
+  buf.writeInt16LE((args.rootX ?? 0) | 0, 24);
+  buf.writeInt16LE((args.rootY ?? 0) | 0, 26);
+  // bytes 28-36 unused
+  return buf;
 }
 
 // =============================================================================

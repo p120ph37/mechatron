@@ -29,6 +29,10 @@ import {
 import {
   parseError, packetTotalLength,
   encodeQueryExtension, parseQueryExtensionReply,
+  encodeXTestFakeInput,
+  XTEST_TYPE_KEY_PRESS, XTEST_TYPE_KEY_RELEASE,
+  XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
+  XTEST_TYPE_MOTION_NOTIFY,
   type QueryExtensionReply, type XError,
 } from "./request";
 
@@ -239,6 +243,73 @@ export class XConnection {
   async queryExtension(name: string): Promise<QueryExtensionReply> {
     const reply = await this.sendRequest(encodeQueryExtension(name));
     return parseQueryExtensionReply(reply);
+  }
+
+  // ── XTEST FakeInput ──────────────────────────────────────────────────────
+  // The major opcode is per-server (extensions are dynamically numbered),
+  // so we cache the QueryExtension result on first use.  All FakeInput
+  // requests go fire-and-forget — the server doesn't reply to them, and
+  // a server-side error means the request was malformed (a bug), which
+  // tearDown() surfaces by closing the connection.
+
+  private xtestMajor: number = -1;       // unprobed
+  private xtestProbe: Promise<number> | null = null;
+
+  private async ensureXTest(): Promise<number> {
+    if (this.xtestMajor > 0) return this.xtestMajor;
+    if (this.xtestMajor === 0) throw new Error("XTEST extension not present on server");
+    if (!this.xtestProbe) {
+      this.xtestProbe = this.queryExtension("XTEST").then((r) => {
+        this.xtestMajor = r.present ? r.majorOpcode : 0;
+        if (!r.present) throw new Error("XTEST extension not present on server");
+        return this.xtestMajor;
+      });
+    }
+    return this.xtestProbe;
+  }
+
+  /** Synthesise a key press (down). `keycode` is the X11 keycode (8..255). */
+  async fakeKeyPress(keycode: number, delayMs = 0): Promise<void> {
+    const major = await this.ensureXTest();
+    this.sendRequestNoReply(encodeXTestFakeInput(major, {
+      type: XTEST_TYPE_KEY_PRESS, detail: keycode, delayMs,
+    }));
+  }
+
+  /** Synthesise a key release (up). */
+  async fakeKeyRelease(keycode: number, delayMs = 0): Promise<void> {
+    const major = await this.ensureXTest();
+    this.sendRequestNoReply(encodeXTestFakeInput(major, {
+      type: XTEST_TYPE_KEY_RELEASE, detail: keycode, delayMs,
+    }));
+  }
+
+  /** Synthesise a pointer button press (1=left, 2=middle, 3=right, 4-7=wheel). */
+  async fakeButtonPress(button: number, delayMs = 0): Promise<void> {
+    const major = await this.ensureXTest();
+    this.sendRequestNoReply(encodeXTestFakeInput(major, {
+      type: XTEST_TYPE_BUTTON_PRESS, detail: button, delayMs,
+    }));
+  }
+
+  /** Synthesise a pointer button release. */
+  async fakeButtonRelease(button: number, delayMs = 0): Promise<void> {
+    const major = await this.ensureXTest();
+    this.sendRequestNoReply(encodeXTestFakeInput(major, {
+      type: XTEST_TYPE_BUTTON_RELEASE, detail: button, delayMs,
+    }));
+  }
+
+  /** Synthesise pointer motion (absolute by default; pass relative=true for delta). */
+  async fakeMotion(x: number, y: number, opts: { relative?: boolean; root?: number; delayMs?: number } = {}): Promise<void> {
+    const major = await this.ensureXTest();
+    this.sendRequestNoReply(encodeXTestFakeInput(major, {
+      type: XTEST_TYPE_MOTION_NOTIFY,
+      detail: opts.relative ? 1 : 0,
+      root: opts.root ?? 0,
+      rootX: x, rootY: y,
+      delayMs: opts.delayMs ?? 0,
+    }));
   }
 
   close(): void { this.tearDown(new Error("X11 connection closed by client")); }

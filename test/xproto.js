@@ -331,6 +331,31 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(err.majorOpcode === 98, "major opcode");
 		assert(err.minorOpcode === 13, "minor opcode");
 
+		// ── encodeXTestFakeInput ─────────────────────────────────────
+		// XTEST major opcode is per-server; we just verify the byte
+		// shape with a stand-in major (132 = a typical assignment).
+		var fi = req.encodeXTestFakeInput(132, {
+			type: req.XTEST_TYPE_KEY_PRESS, detail: 38, delayMs: 0,
+		});
+		assert(fi.length === 36, "FakeInput is 36 bytes");
+		assert(fi.readUInt8(0) === 132, "major opcode");
+		assert(fi.readUInt8(1) === req.XTEST_MINOR_FAKE_INPUT, "minor = 2");
+		assert(fi.readUInt16LE(2) === 9, "length = 9 (4-byte units)");
+		assert(fi.readUInt8(4) === req.XTEST_TYPE_KEY_PRESS, "type = KeyPress");
+		assert(fi.readUInt8(5) === 38, "detail = keycode 38");
+		assert(fi.readUInt32LE(8) === 0, "delay = 0");
+
+		var fiMotion = req.encodeXTestFakeInput(132, {
+			type: req.XTEST_TYPE_MOTION_NOTIFY, detail: 1,
+			rootX: -10, rootY: 200, root: 0x12345678, delayMs: 250,
+		});
+		assert(fiMotion.readUInt8(4) === req.XTEST_TYPE_MOTION_NOTIFY, "type = Motion");
+		assert(fiMotion.readUInt8(5) === 1, "relative flag");
+		assert(fiMotion.readUInt32LE(8) === 250, "delay = 250");
+		assert(fiMotion.readUInt32LE(12) === 0x12345678, "root window id");
+		assert(fiMotion.readInt16LE(24) === -10, "rootX (signed)");
+		assert(fiMotion.readInt16LE(26) === 200, "rootY");
+
 		// ── sequenceOf / packetTotalLength ───────────────────────────
 		assert(req.sequenceOf(qeReply) === 42, "sequenceOf reply");
 		assert(req.sequenceOf(errBuf) === 7, "sequenceOf error");
@@ -375,6 +400,19 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					assert(xt.majorOpcode > 0, "XTEST majorOpcode > 0");
 					var bad = await c.queryExtension("NOT-AN-EXTENSION");
 					assert(bad.present === false, "bogus extension absent");
+
+					// Live FakeInput smoke: any malformed request would
+					// land an XError that tears the connection down.  The
+					// post-call queryExtension proves the connection is
+					// still healthy.
+					await c.fakeMotion(20, 30);
+					await c.fakeButtonPress(1);
+					await c.fakeButtonRelease(1);
+					await c.fakeKeyPress(38);
+					await c.fakeKeyRelease(38);
+					var alive = await c.queryExtension("XTEST");
+					assert(alive.present === true, "connection survived FakeInput burst");
+
 					c.close();
 					// Post-close rejection
 					var postCloseThrew = false;
