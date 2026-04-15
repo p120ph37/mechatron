@@ -467,11 +467,16 @@ and headless sessions — but it cannot report *current* pointer/key state
 (that's a session-level concept), so `Mouse.getPos()` / `Keyboard.getState()`
 still transparently delegate to the X11 backend if one is also available.
 
-### 6d. Direct X Protocol Implementation (PLANNED)
+### 6d. Direct X Protocol Implementation (COMPLETE)
 
 An intermediate fallback that speaks the X11 wire protocol directly over
 `$DISPLAY` (Unix socket or TCP), with no dependency on `libX11` /
-`libXtst` / `libXrandr`:
+`libXtst` / `libXrandr`.  Landed across seven sub-parts under
+`lib/x11proto/` (`wire.ts` — display parsing + Xauthority + connection
+setup encode/decode; `request.ts` — per-request encoders and reply/error
+parsers; `conn.ts` — socket lifecycle, sequence-correlated dispatch,
+chunk-queue reader with lazy peek/consume to avoid O(n²) on multi-MB
+replies).  Exposed mechanisms:
 
 - **Connection setup**: parse `$DISPLAY`, read Xauthority cookie,
   send `X_ConnSetup` (byte-order + protocol version + auth), parse the
@@ -491,10 +496,14 @@ distros that don't bundle them; containers that strip shared libraries);
 identical behaviour between the napi and ffi backends; easier to thread
 or background than libX11 which holds a global display lock.
 
-Risk: the X protocol is large; we only need a tiny subset, but the
-connection-setup parse is intricate.  This is planned as an *additional
-intermediate* fallback between xtest/libX11 and uinput/framebuffer —
-not a replacement for the library path unless it proves robust enough.
+Live smoke test (`test/xproto.js`) exercises FakeKey + FakeButton +
+WarpPointer + GetImage + RANDR against a real Xvfb; CI on Linux runners
+runs it as part of the standard matrix.  Mechanism-registry probe is
+wired through `getMechanism("input")` / `getMechanism("screen")`, so
+setting `MECHATRON_INPUT_MECHANISM=xproto` selects it for introspection.
+FFI-backend keyboard/mouse dispatch still routes through libXtst or
+uinput — sync→async glue to route through XConnection is deferred until
+there's a compelling case (Alpine containers that ship no libX11).
 
 ### 6e. Framebuffer / KMS Screen Capture (COMPLETE — skeleton)
 
@@ -568,7 +577,7 @@ caching semantics; same `restore_token` idea.
 | Platform mechanism introspection (6a) | **Complete** | `getMechanism`, `listMechanisms`, `setMechanism`, `getCapabilities` |
 | Linux clipboard via wl-clipboard/xclip/xsel (6b) | **Complete** | TS bridge with tool auto-detection |
 | uinput fallback (6c) | Complete | Pure-TS encoding + bun:ffi ioctl layer + Keyboard/Mouse dispatch routing + CI coverage via `MECHATRON_INPUT_MECHANISM=uinput` on Linux runners |
-| Pure X protocol (6d) | **Planned** | Connection-setup parser is the gating work item |
+| Pure X protocol (6d) | **Complete** | lib/x11proto: wire + request + conn; mechanism probe wired; live smoke test against Xvfb in CI |
 | Framebuffer / DRM capture (6e) | **Skeleton** | /dev/fb0 probe + mmap path; DRM TBD |
 | Portal+PipeWire screen capture (6f) | **Planned** | D-Bus portal detection landed; capture thread TBD |
 | Portal+libei input (6g) | **Planned** | Detection landed; sendinput TBD |
