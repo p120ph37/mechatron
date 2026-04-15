@@ -258,51 +258,18 @@ jobs:
           run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
 
           # run_bun LABEL JUNIT_FILE -- <bun test command> ...
-          # Wraps run_and_log with: (1) a visible progress marker so CI
-          # logs show exactly which invocation the script is on, and
-          # (2) up to two retries when bun exits non-zero with an empty
-          # JUnit file (i.e. crashed before a single testcase could
-          # execute).  The ubuntu-22.04-arm runner hits an upstream bun
-          # bug where `bun test --coverage` intermittently SIGSEGVs
-          # during JavaScriptCore instrumentation setup with zero
-          # stdout/stderr (see oven-sh/bun#6831 and friends — a known
-          # class of aarch64 coverage crashes that predates our use).
-          # Retries clear this without masking real test failures
-          # (which always produce testcases and thus skip the retry
-          # via the <testcase> guard below).  3 attempts is enough for
-          # real bun startup flakes; the previously-observed "3 wasn't
-          # enough on arm64" failure (run 24418945800) turned out to
-          # be a script-level race in the Xvfb/xmessage setup, not a
-          # bun crash, and is fixed independently above.
+          # Logs a visible progress marker before invoking bun, so CI
+          # logs show exactly which invocation the script is on, then
+          # delegates to run_and_log.  No retries: bun should never
+          # crash on startup; a startup failure indicates a real bug
+          # (in our code, our test harness, or upstream) that we want
+          # to investigate, not paper over.
           run_bun() {
             local LABEL="$1"; shift
             local JUNIT_FILE="$1"; shift
             [ "$1" = "--" ] && shift
-            local ATTEMPT RC OUT_BEFORE OUT_AFTER
-            OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-            for ATTEMPT in 1 2 3; do
-              echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
-              RC=0
-              run_and_log "$@" || RC=$?
-              if [ "$RC" = 0 ]; then return 0; fi
-              OUT_AFTER=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-              # If bun produced any testcase output, this is a real
-              # test failure — don't retry.  Otherwise it's a startup
-              # crash on a pristine junit file; retry once.
-              if [ -s "$JUNIT_FILE" ] && grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
-                echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
-                return "$RC"
-              fi
-              if [ "$ATTEMPT" = 3 ]; then
-                echo ">>> [$LABEL] retries exhausted (rc=$RC), giving up" | tee -a "$TEST_LOG"
-                return "$RC"
-              fi
-              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying (attempt $((ATTEMPT + 1))/3)" | tee -a "$TEST_LOG"
-              # Clear the empty junit so the second attempt gets a
-              # clean file and our "no testcase" detection works below.
-              rm -f "$JUNIT_FILE"
-              sleep 2
-            done
+            echo ">>> [$LABEL]: $*" | tee -a "$TEST_LOG"
+            run_and_log "$@"
           }
 
           # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
