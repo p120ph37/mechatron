@@ -506,6 +506,39 @@ jobs:
             [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
           fi
 
+          # ── Linux-only: FFI with MECHATRON_SCREEN_MECHANISM=drm.
+          #    Exercises lib/ffi/framebuffer.ts's libc dlopen +
+          #    captureSelected dispatch gate.  In GHA runners neither
+          #    /dev/dri/card0 nor /dev/fb0 is present, so live capture
+          #    falls back to the XGetImage path — the test still passes
+          #    and we get coverage of the gate + libc FFI open path.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-drm.xml"
+            BE_COV_DIR="$COV_DIR/ffi-drm"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND=ffi \
+            MECHATRON_SCREEN_MECHANISM=drm \
+              run_bun "ffi-drm" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for ffi-drm (MECHATRON_SCREEN_MECHANISM=drm) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="ffi-drm-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="ffi-drm backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          fi
+
           if [ "${{ runner.os }}" = "Linux" ]; then
             for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
               label="${variant%%:*}"

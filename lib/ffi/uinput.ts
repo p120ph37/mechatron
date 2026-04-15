@@ -25,7 +25,7 @@
  */
 
 import { openSync, writeSync, closeSync } from "fs";
-import { getBunFFI, type BunFFI } from "./bun";
+import { libc, libcFFI, libcOpenReason } from "./libc";
 import { getMechanism } from "../platform";
 import {
   BUTTON_LEFT as BTN_IDX_LEFT, BUTTON_MID as BTN_IDX_MID,
@@ -42,48 +42,6 @@ import {
   allSupportedEvdevCodes, mapKeysymToKeycode,
   type UInputEvent,
 } from "../input/uinput";
-
-// =============================================================================
-// libc dlopen
-//
-// Bun supplies its own shim for "libc" on Linux via dlopen("libc.so.6") —
-// every glibc-based distro, and every modern musl-based distro that ships a
-// libc compat symlink, provides this SONAME.  Declaring ioctl with a
-// fixed 3-arg signature is safe for every ioctl request we issue here
-// (all take either no extra arg or a single pointer / unsigned long).
-// =============================================================================
-
-interface LibC {
-  ioctl: (fd: number, request: bigint, arg: bigint) => number;
-}
-
-let _libcOpened = false;
-let _libc: LibC | null = null;
-let _ffi: BunFFI | null = null;
-
-function openLibc(): void {
-  if (_libcOpened) return;
-  _libcOpened = true;
-  _ffi = getBunFFI();
-  if (!_ffi) return;
-  const T = _ffi.FFIType;
-  try {
-    const h = _ffi.dlopen<LibC>("libc.so.6", {
-      // ioctl is variadic at the C ABI, but bun:ffi requires a fixed
-      // signature.  For every request we issue here the "third arg"
-      // semantics collapse to a single 64-bit value (pointer-as-u64
-      // for UI_DEV_SETUP, int-as-u64 for UI_SET_*BIT, ignored / 0 for
-      // UI_DEV_CREATE / UI_DEV_DESTROY).  Declaring it as u64 matches
-      // the calling convention on every Linux arch we target (x86_64,
-      // aarch64, arm, riscv64) — the register/stack assignment for an
-      // unsigned long and a void* are identical there.
-      ioctl: { args: [T.i32, T.u64, T.u64], returns: T.i32 },
-    });
-    _libc = h.symbols;
-  } catch (_) {
-    _libc = null;
-  }
-}
 
 // =============================================================================
 // Device lifecycle
@@ -116,9 +74,10 @@ export function getUinputDevice(): UInputDevice | null {
     _openReason = "not Linux";
     return null;
   }
-  openLibc();
+  const _libc = libc();
+  const _ffi = libcFFI();
   if (!_libc || !_ffi) {
-    _openReason = "bun:ffi / libc not available";
+    _openReason = "libc unavailable: " + (libcOpenReason() || "unknown");
     return null;
   }
 
