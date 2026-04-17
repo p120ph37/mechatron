@@ -164,11 +164,11 @@ export class Keyboard {
   static async getState(keycode?: number): Promise<Record<number, boolean> | boolean> {
     const native = getNative("keyboard");
     if (keycode !== undefined) {
-      return native.keyboard_getKeyState(keycode);
+      return await native.keyboard_getKeyState(keycode);
     }
     const state: Record<number, boolean> = {};
     for (const key of getAllKeys()) {
-      state[key] = native.keyboard_getKeyState(key);
+      state[key] = await native.keyboard_getKeyState(key);
     }
     return state;
   }

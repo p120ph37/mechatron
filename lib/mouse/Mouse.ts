@@ -53,7 +53,7 @@ export class Mouse {
   }
 
   static async getPos(): Promise<Point> {
-    const p = getNative("mouse").mouse_getPos();
+    const p = await getNative("mouse").mouse_getPos();
     return new Point(p.x, p.y);
   }
 
@@ -65,11 +65,11 @@ export class Mouse {
   static async getState(button?: number): Promise<Record<number, boolean> | boolean> {
     const native = getNative("mouse");
     if (button !== undefined) {
-      return native.mouse_getButtonState(button);
+      return await native.mouse_getButtonState(button);
     }
     const state: Record<number, boolean> = {};
     for (const btn of ALL_BUTTONS) {
-      state[btn] = native.mouse_getButtonState(btn);
+      state[btn] = await native.mouse_getButtonState(btn);
     }
     return state;
   }

@@ -75,7 +75,7 @@ export class Screen {
   static async synchronize(): Promise<boolean> {
     interface RawRect { x: number; y: number; w: number; h: number; }
     interface RawScreen { bounds: RawRect; usable: RawRect; }
-    const result: RawScreen[] | null = getNative("screen").screen_synchronize();
+    const result: RawScreen[] | null = await getNative("screen").screen_synchronize();
     if (!result) return false;
     let tb: RawRect = { x: 0, y: 0, w: 0, h: 0 };
     let tu: RawRect = { x: 0, y: 0, w: 0, h: 0 };
@@ -139,7 +139,7 @@ export class Screen {
       x = a; y = b as number; w = c!; h = d!;
       windowHandle = Screen._resolveWindowHandle(e);
     }
-    const result = getNative("screen").screen_grabScreen(x, y, w, h, windowHandle);
+    const result = await getNative("screen").screen_grabScreen(x, y, w, h, windowHandle);
     if (!result) return false;
     image.create(w, h);
     const data = image.getData();

@@ -1,18 +1,12 @@
-/**
- * Pure-JS Bun FFI mouse backend.
- *
- * Linux: dlopens libX11.so.6 + libXtst.so.6 directly.
- * Windows: dlopens user32.dll directly.
- * macOS: dlopens CoreGraphics.framework; uses CGEventCreateMouseEvent,
- * CGEventPost, CGWarpMouseCursorPosition, CGEventSourceButtonState, and
- * CGEventCreateScrollWheelEvent2.  `mouse_getPos` can't be implemented
- * cleanly because CGEventGetLocation returns a CGPoint by value (bun:ffi
- * can only read the x component); callers treat {0,0} as "unsupported".
- */
-
+import { getXConnection } from "./xconn";
 import {
-  ffi, getDisplay, isXTestAvailable, x11, xtest, True, False, CurrentTime,
-} from "./x11";
+  xprotoMousePress, xprotoMouseRelease,
+  xprotoScrollV, xprotoScrollH, xprotoSetPos,
+} from "./xproto";
+import {
+  injectMouseButton, injectScrollV, injectScrollH,
+  uinputSelected,
+} from "./uinput";
 import {
   user32,
   MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
@@ -34,25 +28,14 @@ import {
   kCGScrollEventUnitPixel,
 } from "./mac";
 import type { Pointer } from "./bun";
-import {
-  injectMouseButton, injectScrollV, injectScrollH,
-  uinputSelected,
-} from "./uinput";
-import {
-  xprotoSelected, xprotoMousePress, xprotoMouseRelease,
-  xprotoScrollV, xprotoScrollH, xprotoSetPos,
-} from "./xproto";
 import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "../mouse/constants";
 
-// X11 button mask bits (from <X11/X.h>)
 const Button1Mask = 1 << 8;
 const Button2Mask = 1 << 9;
 const Button3Mask = 1 << 10;
 
 // ==================== Linux ====================
 
-// X11 protocol pointer button numbers (libXtst/core-protocol convention):
-//   1=Left 2=Middle 3=Right 4/5=WheelUp/Down 6/7=WheelLeft/Right 8/9=X1/X2
 export function linux_xButton(button: number): number | null {
   switch (button) {
     case BUTTON_LEFT:  return 1;
@@ -65,130 +48,56 @@ export function linux_xButton(button: number): number | null {
 }
 
 function linux_mouse_press(button: number): void | Promise<void> {
-  if (xprotoSelected()) return xprotoMousePress(button);
   if (uinputSelected()) {
     if (injectMouseButton(button, true)) return;
   }
-  const xbtn = linux_xButton(button);
-  if (xbtn === null || !isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  T.XTestFakeButtonEvent(display, xbtn, True, CurrentTime);
-  X.XSync(display, False);
+  return xprotoMousePress(button);
 }
 
 function linux_mouse_release(button: number): void | Promise<void> {
-  if (xprotoSelected()) return xprotoMouseRelease(button);
   if (uinputSelected()) {
     if (injectMouseButton(button, false)) return;
   }
-  const xbtn = linux_xButton(button);
-  if (xbtn === null || !isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  T.XTestFakeButtonEvent(display, xbtn, False, CurrentTime);
-  X.XSync(display, False);
+  return xprotoMouseRelease(button);
 }
 
 function linux_mouse_scrollH(amount: number): void | Promise<void> {
-  if (xprotoSelected()) return xprotoScrollH(amount);
   if (uinputSelected()) {
     if (injectScrollH(amount)) return;
   }
-  if (!isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  const repeat = Math.abs(amount);
-  const button = amount < 0 ? 6 : 7;
-  for (let i = 0; i < repeat; i++) {
-    T.XTestFakeButtonEvent(display, button, True, CurrentTime);
-    T.XTestFakeButtonEvent(display, button, False, CurrentTime);
-  }
-  X.XSync(display, False);
+  return xprotoScrollH(amount);
 }
 
 function linux_mouse_scrollV(amount: number): void | Promise<void> {
-  if (xprotoSelected()) return xprotoScrollV(amount);
   if (uinputSelected()) {
     if (injectScrollV(amount)) return;
   }
-  if (!isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  const repeat = Math.abs(amount);
-  const button = amount < 0 ? 5 : 4;
-  for (let i = 0; i < repeat; i++) {
-    T.XTestFakeButtonEvent(display, button, True, CurrentTime);
-    T.XTestFakeButtonEvent(display, button, False, CurrentTime);
-  }
-  X.XSync(display, False);
+  return xprotoScrollV(amount);
 }
 
-function linux_mouse_getPos(): { x: number; y: number } {
-  if (!isXTestAvailable()) return { x: 0, y: 0 };
-  const X = x11()!, F = ffi()!;
-  const display = getDisplay();
-  const screens = X.XScreenCount(display);
-  const root = new BigUint64Array(1);
-  const child = new BigUint64Array(1);
-  const rx = new Int32Array(1);
-  const ry = new Int32Array(1);
-  const wx = new Int32Array(1);
-  const wy = new Int32Array(1);
-  const mask = new Uint32Array(1);
-  for (let i = 0; i < screens; i++) {
-    const r = X.XQueryPointer(
-      display, X.XRootWindow(display, i),
-      F.ptr(root), F.ptr(child),
-      F.ptr(rx), F.ptr(ry),
-      F.ptr(wx), F.ptr(wy),
-      F.ptr(mask),
-    );
-    if (r !== 0) return { x: rx[0], y: ry[0] };
-  }
-  return { x: 0, y: 0 };
+async function linux_mouse_getPos(): Promise<{ x: number; y: number }> {
+  const c = await getXConnection();
+  if (!c) return { x: 0, y: 0 };
+  const qp = await c.queryPointer();
+  return { x: qp.rootX, y: qp.rootY };
 }
 
-function linux_mouse_setPos(x: number, y: number): void | Promise<void> {
-  if (xprotoSelected()) return xprotoSetPos(x, y);
-  if (!isXTestAvailable()) return;
-  const X = x11()!;
-  const display = getDisplay();
-  X.XWarpPointer(display, 0n, X.XDefaultRootWindow(display), 0, 0, 0, 0, x, y);
-  X.XSync(display, False);
+function linux_mouse_setPos(x: number, y: number): Promise<void> {
+  return xprotoSetPos(x, y);
 }
 
-function linux_mouse_getButtonState(button: number): boolean {
-  if (button === BUTTON_X1 || button === BUTTON_X2 || !isXTestAvailable()) return false;
-  const X = x11()!, F = ffi()!;
-  const display = getDisplay();
-  const screens = X.XScreenCount(display);
-  const root = new BigUint64Array(1);
-  const child = new BigUint64Array(1);
-  const rx = new Int32Array(1);
-  const ry = new Int32Array(1);
-  const wx = new Int32Array(1);
-  const wy = new Int32Array(1);
-  const mask = new Uint32Array(1);
-  for (let i = 0; i < screens; i++) {
-    const r = X.XQueryPointer(
-      display, X.XRootWindow(display, i),
-      F.ptr(root), F.ptr(child),
-      F.ptr(rx), F.ptr(ry),
-      F.ptr(wx), F.ptr(wy),
-      F.ptr(mask),
-    );
-    if (r !== 0) {
-      const m = mask[0];
-      switch (button) {
-        case BUTTON_LEFT:  return ((m & Button1Mask) >>> 8) !== 0;
-        case BUTTON_MID:   return ((m & Button2Mask) >>> 8) !== 0;
-        case BUTTON_RIGHT: return ((m & Button3Mask) >>> 8) !== 0;
-        default: return false;
-      }
-    }
+async function linux_mouse_getButtonState(button: number): Promise<boolean> {
+  if (button === BUTTON_X1 || button === BUTTON_X2) return false;
+  const c = await getXConnection();
+  if (!c) return false;
+  const qp = await c.queryPointer();
+  const m = qp.mask;
+  switch (button) {
+    case BUTTON_LEFT:  return ((m & Button1Mask) >>> 8) !== 0;
+    case BUTTON_MID:   return ((m & Button2Mask) >>> 8) !== 0;
+    case BUTTON_RIGHT: return ((m & Button3Mask) >>> 8) !== 0;
+    default: return false;
   }
-  return false;
 }
 
 // ==================== Windows ====================
@@ -240,9 +149,11 @@ function win_mouse_scrollV(amount: number): void {
 }
 
 function win_mouse_getPos(): { x: number; y: number } {
-  const u = user32(); const F = ffi();
-  if (!u || !F) return { x: 0, y: 0 };
-  // POINT { LONG x; LONG y; } — 8 bytes
+  const u = user32();
+  if (!u) return { x: 0, y: 0 };
+  let F: any;
+  try { F = require("./bun").bunFFI(); } catch { return { x: 0, y: 0 }; }
+  if (!F) return { x: 0, y: 0 };
   const buf = new Int32Array(2);
   u.GetCursorPos(F.ptr(buf));
   return { x: buf[0], y: buf[1] };
@@ -287,7 +198,6 @@ function mac_cgButton(button: number): { type_down: number; type_up: number; cg_
   }
 }
 
-// Shared HID event source (cheaper than recreating it per call).
 let _macMouseSource: Pointer = null;
 function macMouseSource(): Pointer {
   if (_macMouseSource) return _macMouseSource;
@@ -296,9 +206,6 @@ function macMouseSource(): Pointer {
   return _macMouseSource;
 }
 
-// Last-known cursor position.  `CGEventGetLocation` returns a CGPoint by
-// value which bun:ffi can't retrieve, so we track position ourselves via
-// `setPos`.  `getPos` returns the cached value.
 let _macLastPos = { x: 0, y: 0 };
 
 function mac_mouse_press(button: number): void {
@@ -307,9 +214,6 @@ function mac_mouse_press(button: number): void {
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
   const src = macMouseSource();
-  // CGPoint is passed as two f64 args (see mac.ts CGEventCreateMouseEvent
-  // signature).  Posting at the tracked last position matches the napi
-  // backend's behavior closely enough for HID state-source updates.
   const evt = C.CGEventCreateMouseEvent(src, spec.type_down, _macLastPos.x, _macLastPos.y, spec.cg_btn);
   if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
@@ -332,7 +236,6 @@ function mac_mouse_scrollV(amount: number): void {
   const C = cg();
   const F = cf();
   if (!C || !F) return;
-  // macOS treats positive scroll values as "up", matching robot-js semantics.
   const evt = C.CGEventCreateScrollWheelEvent2(null, kCGScrollEventUnitPixel, 1, amount | 0, 0, 0);
   if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
@@ -350,9 +253,6 @@ function mac_mouse_scrollH(amount: number): void {
 }
 
 function mac_mouse_getPos(): { x: number; y: number } {
-  // CGEventGetLocation returns CGPoint by value; bun:ffi can't retrieve
-  // both components.  We return the last position we warped the cursor
-  // to instead — accurate as long as all movement goes through setPos.
   return { x: _macLastPos.x, y: _macLastPos.y };
 }
 
@@ -360,8 +260,6 @@ function mac_mouse_setPos(x: number, y: number): void {
   const C = cg();
   if (!C) return;
   C.CGWarpMouseCursorPosition(x, y);
-  // Immediately re-associate so the system mouse tracks the synthesized
-  // position (matches napi backend behavior).
   C.CGAssociateMouseAndMouseCursorPosition(1);
   _macLastPos = { x, y };
 }
