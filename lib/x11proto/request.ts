@@ -45,6 +45,21 @@ export const OP_QUERY_EXTENSION = 98;
 export const OP_WARP_POINTER = 41;
 export const OP_GET_IMAGE = 73;
 export const OP_GET_KEYBOARD_MAPPING = 101;
+export const OP_GET_WINDOW_ATTRIBUTES = 3;
+export const OP_DESTROY_WINDOW = 4;
+export const OP_MAP_WINDOW = 8;
+export const OP_UNMAP_WINDOW = 10;
+export const OP_CONFIGURE_WINDOW = 12;
+export const OP_GET_GEOMETRY = 14;
+export const OP_QUERY_TREE = 15;
+export const OP_INTERN_ATOM = 16;
+export const OP_GET_ATOM_NAME = 17;
+export const OP_CHANGE_PROPERTY = 18;
+export const OP_GET_PROPERTY = 20;
+export const OP_SEND_EVENT = 25;
+export const OP_QUERY_POINTER = 38;
+export const OP_TRANSLATE_COORDINATES = 40;
+export const OP_QUERY_KEYMAP = 44;
 
 // XTEST extension minor opcodes (we only ever send FakeInput).
 export const XTEST_MINOR_FAKE_INPUT = 2;
@@ -479,6 +494,489 @@ export function parseGetKeyboardMappingReply(buf: Buffer): GetKeyboardMappingRep
   const keysyms = new Uint32Array(replyLen);
   for (let i = 0; i < replyLen; i++) keysyms[i] = buf.readUInt32LE(32 + i * 4);
   return { keysymsPerKeycode, keysyms };
+}
+
+// =============================================================================
+// GetWindowAttributes (core opcode 3)
+//
+// Request (8 bytes):  [3, 0, 2, 0, window:u32]
+// Reply (44 bytes, reply-length = 3):
+//   1   backing-store  8   visual:u32  12 class:u16  14 bit-gravity:u8
+//   15  win-gravity:u8 16  backing-planes:u32  20 backing-pixel:u32
+//   24  save-under:bool  25 map-is-installed:bool  26 map-state:u8
+//   27  override-redirect:bool  28 colormap:u32  32 all-event-masks:u32
+//   36  your-event-mask:u32  40 do-not-propagate-mask:u16
+// =============================================================================
+
+export function encodeGetWindowAttributes(window: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_GET_WINDOW_ATTRIBUTES, 0);
+  buf.writeUInt32LE(window >>> 0, 4);
+  return buf;
+}
+
+export interface GetWindowAttributesReply {
+  backingStore: number;
+  visual: number;
+  windowClass: number;     // 1=InputOutput, 2=InputOnly
+  bitGravity: number;
+  winGravity: number;
+  backingPlanes: number;
+  backingPixel: number;
+  saveUnder: boolean;
+  mapIsInstalled: boolean;
+  mapState: number;        // 0=Unmapped, 1=Unviewable, 2=Viewable
+  overrideRedirect: boolean;
+  colormap: number;
+  allEventMasks: number;
+  yourEventMask: number;
+  doNotPropagateMask: number;
+}
+
+export function parseGetWindowAttributesReply(buf: Buffer): GetWindowAttributesReply {
+  if (buf.length < 44) throw new Error("GetWindowAttributes reply too short");
+  return {
+    backingStore: buf.readUInt8(1),
+    visual: buf.readUInt32LE(8),
+    windowClass: buf.readUInt16LE(12),
+    bitGravity: buf.readUInt8(14),
+    winGravity: buf.readUInt8(15),
+    backingPlanes: buf.readUInt32LE(16),
+    backingPixel: buf.readUInt32LE(20),
+    saveUnder: buf.readUInt8(24) !== 0,
+    mapIsInstalled: buf.readUInt8(25) !== 0,
+    mapState: buf.readUInt8(26),
+    overrideRedirect: buf.readUInt8(27) !== 0,
+    colormap: buf.readUInt32LE(28),
+    allEventMasks: buf.readUInt32LE(32),
+    yourEventMask: buf.readUInt32LE(36),
+    doNotPropagateMask: buf.readUInt16LE(40),
+  };
+}
+
+// =============================================================================
+// DestroyWindow (core opcode 4)  — no reply
+// =============================================================================
+
+export function encodeDestroyWindow(window: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_DESTROY_WINDOW, 0);
+  buf.writeUInt32LE(window >>> 0, 4);
+  return buf;
+}
+
+// =============================================================================
+// MapWindow (core opcode 8)  — no reply
+// =============================================================================
+
+export function encodeMapWindow(window: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_MAP_WINDOW, 0);
+  buf.writeUInt32LE(window >>> 0, 4);
+  return buf;
+}
+
+// =============================================================================
+// UnmapWindow (core opcode 10)  — no reply
+// =============================================================================
+
+export function encodeUnmapWindow(window: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_UNMAP_WINDOW, 0);
+  buf.writeUInt32LE(window >>> 0, 4);
+  return buf;
+}
+
+// =============================================================================
+// ConfigureWindow (core opcode 12)
+//
+// Wire (12 + 4*popcount(mask)):
+//   0  12  opcode        1  unused      2-4  length
+//   4-8  window          8-10  value-mask:u16   10-12  unused
+//   12+  values[], one u32 per set bit in mask
+//
+// Mask bits:   0x01=x  0x02=y  0x04=width  0x08=height
+//              0x10=border-width  0x20=sibling  0x40=stack-mode
+// =============================================================================
+
+export const CW_X            = 0x01;
+export const CW_Y            = 0x02;
+export const CW_WIDTH        = 0x04;
+export const CW_HEIGHT       = 0x08;
+export const CW_BORDER_WIDTH = 0x10;
+export const CW_SIBLING      = 0x20;
+export const CW_STACK_MODE   = 0x40;
+
+export interface ConfigureWindowArgs {
+  window: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  borderWidth?: number;
+  sibling?: number;
+  stackMode?: number;       // 0=Above, 1=Below, 2=TopIf, 3=BottomIf, 4=Opposite
+}
+
+export function encodeConfigureWindow(args: ConfigureWindowArgs): Buffer {
+  const vals: { mask: number; v: number }[] = [];
+  if (args.x !== undefined)           vals.push({ mask: CW_X, v: args.x | 0 });
+  if (args.y !== undefined)           vals.push({ mask: CW_Y, v: args.y | 0 });
+  if (args.width !== undefined)       vals.push({ mask: CW_WIDTH, v: args.width & 0xFFFF });
+  if (args.height !== undefined)      vals.push({ mask: CW_HEIGHT, v: args.height & 0xFFFF });
+  if (args.borderWidth !== undefined) vals.push({ mask: CW_BORDER_WIDTH, v: args.borderWidth & 0xFFFF });
+  if (args.sibling !== undefined)     vals.push({ mask: CW_SIBLING, v: args.sibling >>> 0 });
+  if (args.stackMode !== undefined)   vals.push({ mask: CW_STACK_MODE, v: args.stackMode & 0xFF });
+  let combinedMask = 0;
+  for (const e of vals) combinedMask |= e.mask;
+  const buf = Buffer.alloc(12 + vals.length * 4);
+  writeRequestHeader(buf, OP_CONFIGURE_WINDOW, 0);
+  buf.writeUInt32LE(args.window >>> 0, 4);
+  buf.writeUInt16LE(combinedMask, 8);
+  for (let i = 0; i < vals.length; i++) buf.writeInt32LE(vals[i].v, 12 + i * 4);
+  return buf;
+}
+
+// =============================================================================
+// GetGeometry (core opcode 14)
+//
+// Request (8 bytes):  [14, 0, 2, 0, drawable:u32]
+// Reply (32 bytes, reply-length = 0):
+//   1 depth  8 root:u32  12 x:i16  14 y:i16  16 width:u16  18 height:u16
+//   20 border-width:u16
+// =============================================================================
+
+export function encodeGetGeometry(drawable: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_GET_GEOMETRY, 0);
+  buf.writeUInt32LE(drawable >>> 0, 4);
+  return buf;
+}
+
+export interface GetGeometryReply {
+  depth: number;
+  root: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  borderWidth: number;
+}
+
+export function parseGetGeometryReply(buf: Buffer): GetGeometryReply {
+  if (buf.length < 32) throw new Error("GetGeometry reply too short");
+  return {
+    depth: buf.readUInt8(1),
+    root: buf.readUInt32LE(8),
+    x: buf.readInt16LE(12),
+    y: buf.readInt16LE(14),
+    width: buf.readUInt16LE(16),
+    height: buf.readUInt16LE(18),
+    borderWidth: buf.readUInt16LE(20),
+  };
+}
+
+// =============================================================================
+// QueryTree (core opcode 15)
+//
+// Request (8 bytes):  [15, 0, 2, 0, window:u32]
+// Reply (32 + 4*nChildren):
+//   8 root:u32  12 parent:u32(0=None)  16 nChildren:u16  32+ children[]:u32
+// =============================================================================
+
+export function encodeQueryTree(window: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_QUERY_TREE, 0);
+  buf.writeUInt32LE(window >>> 0, 4);
+  return buf;
+}
+
+export interface QueryTreeReply {
+  root: number;
+  parent: number;       // 0 = None (the root window's parent)
+  children: number[];
+}
+
+export function parseQueryTreeReply(buf: Buffer): QueryTreeReply {
+  if (buf.length < 32) throw new Error("QueryTree reply too short");
+  const nChildren = buf.readUInt16LE(16);
+  const children: number[] = [];
+  for (let i = 0; i < nChildren; i++) children.push(buf.readUInt32LE(32 + i * 4));
+  return {
+    root: buf.readUInt32LE(8),
+    parent: buf.readUInt32LE(12),
+    children,
+  };
+}
+
+// =============================================================================
+// InternAtom (core opcode 16)
+//
+// Request (8 + pad4(n)):
+//   0  16  opcode  1  only-if-exists:bool  4-6  name-length:u16  8+  name
+// Reply (32 bytes):   8  atom:u32 (0 = None when only-if-exists && not found)
+// =============================================================================
+
+export function encodeInternAtom(name: string, onlyIfExists = false): Buffer {
+  const nameBuf = Buffer.from(name, "utf8");
+  const total = pad4(8 + nameBuf.length);
+  const buf = Buffer.alloc(total);
+  writeRequestHeader(buf, OP_INTERN_ATOM, onlyIfExists ? 1 : 0);
+  buf.writeUInt16LE(nameBuf.length, 4);
+  nameBuf.copy(buf, 8);
+  return buf;
+}
+
+export interface InternAtomReply {
+  atom: number;     // 0 = None
+}
+
+export function parseInternAtomReply(buf: Buffer): InternAtomReply {
+  if (buf.length < 32) throw new Error("InternAtom reply too short");
+  return { atom: buf.readUInt32LE(8) };
+}
+
+// =============================================================================
+// GetAtomName (core opcode 17)
+//
+// Request (8 bytes):  [17, 0, 2, 0, atom:u32]
+// Reply (32 + pad4(n)):  8  name-length:u16   32+  name
+// =============================================================================
+
+export function encodeGetAtomName(atom: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_GET_ATOM_NAME, 0);
+  buf.writeUInt32LE(atom >>> 0, 4);
+  return buf;
+}
+
+export interface GetAtomNameReply {
+  name: string;
+}
+
+export function parseGetAtomNameReply(buf: Buffer): GetAtomNameReply {
+  if (buf.length < 32) throw new Error("GetAtomName reply too short");
+  const n = buf.readUInt16LE(8);
+  return { name: buf.toString("utf8", 32, 32 + n) };
+}
+
+// =============================================================================
+// ChangeProperty (core opcode 18)  — no reply
+//
+// Request (24 + pad4(data)):
+//   0  18  opcode  1  mode:u8 (0=Replace,1=Prepend,2=Append)
+//   4  window:u32  8  property:atom  12  type:atom
+//   16  format:u8 (8,16,32)  20  length:u32 (in format units)
+//   24+ data  (n = length * format/8 bytes)
+// =============================================================================
+
+export const PROP_MODE_REPLACE = 0;
+export const PROP_MODE_PREPEND = 1;
+export const PROP_MODE_APPEND  = 2;
+
+export interface ChangePropertyArgs {
+  mode?: number;       // PROP_MODE_REPLACE by default
+  window: number;
+  property: number;    // atom
+  type: number;        // atom
+  format: 8 | 16 | 32;
+  data: Buffer;        // raw bytes (must be format-aligned)
+}
+
+export function encodeChangeProperty(args: ChangePropertyArgs): Buffer {
+  const dataLen = args.data.length;
+  const total = pad4(24 + dataLen);
+  const buf = Buffer.alloc(total);
+  writeRequestHeader(buf, OP_CHANGE_PROPERTY, args.mode ?? PROP_MODE_REPLACE);
+  buf.writeUInt32LE(args.window >>> 0, 4);
+  buf.writeUInt32LE(args.property >>> 0, 8);
+  buf.writeUInt32LE(args.type >>> 0, 12);
+  buf.writeUInt8(args.format, 16);
+  buf.writeUInt32LE((dataLen / (args.format / 8)) >>> 0, 20);
+  args.data.copy(buf, 24);
+  return buf;
+}
+
+// =============================================================================
+// GetProperty (core opcode 20)
+//
+// Request (24 bytes):
+//   0  20  opcode  1  delete:bool  4  window:u32  8  property:atom
+//   12  type:atom (0=AnyPropertyType)  16  long-offset:u32  20  long-length:u32
+// Reply (32 + pad4(n)):
+//   1  format:u8 (0/8/16/32)  8  type:atom  12  bytes-after:u32
+//   16  value-length:u32 (in format units)  32+  value
+// =============================================================================
+
+export interface GetPropertyArgs {
+  window: number;
+  property: number;    // atom
+  type?: number;       // 0 = AnyPropertyType
+  longOffset?: number;
+  longLength?: number; // max 4-byte units to return (default 1024 = 4KB)
+  delete?: boolean;
+}
+
+export function encodeGetProperty(args: GetPropertyArgs): Buffer {
+  const buf = Buffer.alloc(24);
+  writeRequestHeader(buf, OP_GET_PROPERTY, args.delete ? 1 : 0);
+  buf.writeUInt32LE(args.window >>> 0, 4);
+  buf.writeUInt32LE(args.property >>> 0, 8);
+  buf.writeUInt32LE((args.type ?? 0) >>> 0, 12);
+  buf.writeUInt32LE((args.longOffset ?? 0) >>> 0, 16);
+  buf.writeUInt32LE((args.longLength ?? 1024) >>> 0, 20);
+  return buf;
+}
+
+export interface GetPropertyReply {
+  format: number;       // 0 = property doesn't exist, 8/16/32 = data element size
+  type: number;         // atom
+  bytesAfter: number;   // remaining bytes not returned
+  value: Buffer;        // raw data (length = valueLength * format/8)
+}
+
+export function parseGetPropertyReply(buf: Buffer): GetPropertyReply {
+  if (buf.length < 32) throw new Error("GetProperty reply too short");
+  const format = buf.readUInt8(1);
+  const type = buf.readUInt32LE(8);
+  const bytesAfter = buf.readUInt32LE(12);
+  const valueLength = buf.readUInt32LE(16);
+  const byteLen = format === 0 ? 0 : valueLength * (format / 8);
+  return {
+    format, type, bytesAfter,
+    value: buf.subarray(32, 32 + byteLen),
+  };
+}
+
+// =============================================================================
+// SendEvent (core opcode 25)  — no reply
+//
+// Request (44 bytes):
+//   0  25  opcode  1  propagate:bool
+//   4  destination:u32 (0=PointerWindow, 1=InputFocus, or a window)
+//   8  event-mask:u32
+//   12  event[32]  (raw 32-byte event to send)
+// =============================================================================
+
+export interface SendEventArgs {
+  propagate?: boolean;
+  destination: number;
+  eventMask: number;
+  event: Buffer;         // must be exactly 32 bytes
+}
+
+export function encodeSendEvent(args: SendEventArgs): Buffer {
+  const buf = Buffer.alloc(44);
+  writeRequestHeader(buf, OP_SEND_EVENT, args.propagate ? 1 : 0);
+  buf.writeUInt32LE(args.destination >>> 0, 4);
+  buf.writeUInt32LE(args.eventMask >>> 0, 8);
+  if (args.event.length !== 32) throw new Error("SendEvent: event must be exactly 32 bytes");
+  args.event.copy(buf, 12);
+  return buf;
+}
+
+// =============================================================================
+// QueryPointer (core opcode 38)
+//
+// Request (8 bytes):  [38, 0, 2, 0, window:u32]
+// Reply (32 bytes, reply-length = 0):
+//   1  same-screen:bool  8  root:u32  12  child:u32(0=None)
+//   16  root-x:i16  18  root-y:i16  20  win-x:i16  22  win-y:i16
+//   24  mask:u16 (key/button state)
+// =============================================================================
+
+export function encodeQueryPointer(window: number): Buffer {
+  const buf = Buffer.alloc(8);
+  writeRequestHeader(buf, OP_QUERY_POINTER, 0);
+  buf.writeUInt32LE(window >>> 0, 4);
+  return buf;
+}
+
+export interface QueryPointerReply {
+  sameScreen: boolean;
+  root: number;
+  child: number;        // 0 = None
+  rootX: number;
+  rootY: number;
+  winX: number;
+  winY: number;
+  mask: number;          // key/button modifier mask
+}
+
+export function parseQueryPointerReply(buf: Buffer): QueryPointerReply {
+  if (buf.length < 32) throw new Error("QueryPointer reply too short");
+  return {
+    sameScreen: buf.readUInt8(1) !== 0,
+    root: buf.readUInt32LE(8),
+    child: buf.readUInt32LE(12),
+    rootX: buf.readInt16LE(16),
+    rootY: buf.readInt16LE(18),
+    winX: buf.readInt16LE(20),
+    winY: buf.readInt16LE(22),
+    mask: buf.readUInt16LE(24),
+  };
+}
+
+// =============================================================================
+// TranslateCoordinates (core opcode 40)
+//
+// Request (16 bytes):
+//   4  src-window:u32  8  dst-window:u32  12  src-x:i16  14  src-y:i16
+// Reply (32 bytes, reply-length = 0):
+//   1  same-screen:bool  8  child:u32(0=None)  12  dst-x:i16  14  dst-y:i16
+// =============================================================================
+
+export function encodeTranslateCoordinates(
+  srcWindow: number, dstWindow: number, srcX: number, srcY: number,
+): Buffer {
+  const buf = Buffer.alloc(16);
+  writeRequestHeader(buf, OP_TRANSLATE_COORDINATES, 0);
+  buf.writeUInt32LE(srcWindow >>> 0, 4);
+  buf.writeUInt32LE(dstWindow >>> 0, 8);
+  buf.writeInt16LE(srcX | 0, 12);
+  buf.writeInt16LE(srcY | 0, 14);
+  return buf;
+}
+
+export interface TranslateCoordinatesReply {
+  sameScreen: boolean;
+  child: number;
+  dstX: number;
+  dstY: number;
+}
+
+export function parseTranslateCoordinatesReply(buf: Buffer): TranslateCoordinatesReply {
+  if (buf.length < 32) throw new Error("TranslateCoordinates reply too short");
+  return {
+    sameScreen: buf.readUInt8(1) !== 0,
+    child: buf.readUInt32LE(8),
+    dstX: buf.readInt16LE(12),
+    dstY: buf.readInt16LE(14),
+  };
+}
+
+// =============================================================================
+// QueryKeymap (core opcode 44)
+//
+// Request (4 bytes): just the header [44, 0, 1, 0]
+// Reply (40 bytes, reply-length = 2):
+//   bytes 8-39: keys[32] — 256-bit bitmap of currently-pressed keycodes
+//   Bit N corresponds to keycode N: byte (N >> 3), bit (N & 7).
+// =============================================================================
+
+export function encodeQueryKeymap(): Buffer {
+  const buf = Buffer.alloc(4);
+  writeRequestHeader(buf, OP_QUERY_KEYMAP, 0);
+  return buf;
+}
+
+export interface QueryKeymapReply {
+  keys: Uint8Array;     // 32-byte bitmap
+}
+
+export function parseQueryKeymapReply(buf: Buffer): QueryKeymapReply {
+  if (buf.length < 40) throw new Error("QueryKeymap reply too short");
+  return { keys: new Uint8Array(buf.buffer, buf.byteOffset + 8, 32) };
 }
 
 // =============================================================================

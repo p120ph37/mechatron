@@ -40,11 +40,29 @@ import {
   XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
   XTEST_TYPE_MOTION_NOTIFY,
   type QueryExtensionReply, type XError,
+  // New opcodes
+  encodeGetWindowAttributes, parseGetWindowAttributesReply, type GetWindowAttributesReply,
+  encodeDestroyWindow, encodeMapWindow, encodeUnmapWindow,
+  encodeConfigureWindow, type ConfigureWindowArgs,
+  encodeGetGeometry, parseGetGeometryReply, type GetGeometryReply,
+  encodeQueryTree, parseQueryTreeReply, type QueryTreeReply,
+  encodeInternAtom, parseInternAtomReply,
+  encodeGetAtomName, parseGetAtomNameReply,
+  encodeChangeProperty, type ChangePropertyArgs,
+  encodeGetProperty, parseGetPropertyReply, type GetPropertyReply, type GetPropertyArgs,
+  encodeSendEvent, type SendEventArgs,
+  encodeQueryPointer, parseQueryPointerReply, type QueryPointerReply,
+  encodeTranslateCoordinates, parseTranslateCoordinatesReply, type TranslateCoordinatesReply,
+  encodeQueryKeymap, parseQueryKeymapReply, type QueryKeymapReply,
 } from "./request";
 
 export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
   GetKeyboardMappingReply,
-  RRQueryVersionReply, RRGetMonitorsReply, MonitorInfo };
+  RRQueryVersionReply, RRGetMonitorsReply, MonitorInfo,
+  GetWindowAttributesReply, GetGeometryReply, QueryTreeReply,
+  GetPropertyReply, QueryPointerReply, TranslateCoordinatesReply,
+  QueryKeymapReply, ConfigureWindowArgs, ChangePropertyArgs,
+  SendEventArgs, GetPropertyArgs };
 
 export class XProtoError extends Error {
   public readonly code: number;
@@ -471,6 +489,91 @@ export class XConnection {
     const window = opts.window ?? this.info.screens[0]?.root ?? 0;
     const reply = await this.sendRequest(encodeRRGetMonitors(major, window, opts.activeOnly ?? true));
     return parseRRGetMonitorsReply(reply);
+  }
+
+  // ── Core protocol helpers ─────────────────────────────────────────────────
+
+  async getWindowAttributes(window: number): Promise<GetWindowAttributesReply> {
+    const reply = await this.sendRequest(encodeGetWindowAttributes(window));
+    return parseGetWindowAttributesReply(reply);
+  }
+
+  destroyWindow(window: number): void {
+    this.sendRequestNoReply(encodeDestroyWindow(window));
+  }
+
+  mapWindow(window: number): void {
+    this.sendRequestNoReply(encodeMapWindow(window));
+  }
+
+  unmapWindow(window: number): void {
+    this.sendRequestNoReply(encodeUnmapWindow(window));
+  }
+
+  configureWindow(args: ConfigureWindowArgs): void {
+    this.sendRequestNoReply(encodeConfigureWindow(args));
+  }
+
+  async getGeometry(drawable: number): Promise<GetGeometryReply> {
+    const reply = await this.sendRequest(encodeGetGeometry(drawable));
+    return parseGetGeometryReply(reply);
+  }
+
+  async queryTree(window: number): Promise<QueryTreeReply> {
+    const reply = await this.sendRequest(encodeQueryTree(window));
+    return parseQueryTreeReply(reply);
+  }
+
+  // ── Atom resolution (cached) ────────────────────────────────────────────
+  // X11 atoms are stable for the lifetime of a connection.  We cache the
+  // InternAtom promise so concurrent callers share a single round-trip.
+  private atomCache = new Map<string, Promise<number>>();
+
+  internAtom(name: string, onlyIfExists = false): Promise<number> {
+    const key = `${name}\0${onlyIfExists ? 1 : 0}`;
+    const cached = this.atomCache.get(key);
+    if (cached) return cached;
+    const p = this.sendRequest(encodeInternAtom(name, onlyIfExists))
+      .then(r => parseInternAtomReply(r).atom);
+    this.atomCache.set(key, p);
+    return p;
+  }
+
+  async getAtomName(atom: number): Promise<string> {
+    const reply = await this.sendRequest(encodeGetAtomName(atom));
+    return parseGetAtomNameReply(reply).name;
+  }
+
+  changeProperty(args: ChangePropertyArgs): void {
+    this.sendRequestNoReply(encodeChangeProperty(args));
+  }
+
+  async getProperty(args: GetPropertyArgs): Promise<GetPropertyReply> {
+    const reply = await this.sendRequest(encodeGetProperty(args));
+    return parseGetPropertyReply(reply);
+  }
+
+  sendEvent(args: SendEventArgs): void {
+    this.sendRequestNoReply(encodeSendEvent(args));
+  }
+
+  async queryPointer(window?: number): Promise<QueryPointerReply> {
+    const win = window ?? this.info.screens[0]?.root ?? 0;
+    const reply = await this.sendRequest(encodeQueryPointer(win));
+    return parseQueryPointerReply(reply);
+  }
+
+  async translateCoordinates(
+    srcWindow: number, dstWindow: number, srcX: number, srcY: number,
+  ): Promise<TranslateCoordinatesReply> {
+    const reply = await this.sendRequest(
+      encodeTranslateCoordinates(srcWindow, dstWindow, srcX, srcY));
+    return parseTranslateCoordinatesReply(reply);
+  }
+
+  async queryKeymap(): Promise<QueryKeymapReply> {
+    const reply = await this.sendRequest(encodeQueryKeymap());
+    return parseQueryKeymapReply(reply);
   }
 
   close(): void { this.tearDown(new Error("X11 connection closed by client")); }

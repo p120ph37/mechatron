@@ -535,6 +535,189 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		catch (e) { kmShort = true; }
 		assert(kmShort, "parseGetKeyboardMappingReply rejects short header");
 
+		// ── GetWindowAttributes ─────────────────────────────────────
+		var gwa = req.encodeGetWindowAttributes(0xABCD);
+		assert(gwa.length === 8, "GetWindowAttributes is 8 bytes");
+		assert(gwa.readUInt8(0) === req.OP_GET_WINDOW_ATTRIBUTES, "opcode 3");
+		assert(gwa.readUInt32LE(4) === 0xABCD, "window id");
+		var gwaReply = Buffer.alloc(44);
+		gwaReply.writeUInt8(1, 0);
+		gwaReply.writeUInt8(1, 1);             // backing-store = WhenMapped
+		gwaReply.writeUInt32LE(3, 4);          // reply length
+		gwaReply.writeUInt32LE(0x21, 8);       // visual
+		gwaReply.writeUInt16LE(1, 12);         // class = InputOutput
+		gwaReply.writeUInt8(2, 26);            // mapState = Viewable
+		gwaReply.writeUInt8(1, 27);            // overrideRedirect
+		var gwaParsed = req.parseGetWindowAttributesReply(gwaReply);
+		assert(gwaParsed.backingStore === 1, "backingStore WhenMapped");
+		assert(gwaParsed.visual === 0x21, "visual");
+		assert(gwaParsed.windowClass === 1, "class InputOutput");
+		assert(gwaParsed.mapState === 2, "mapState Viewable");
+		assert(gwaParsed.overrideRedirect === true, "overrideRedirect");
+
+		// ── DestroyWindow / MapWindow / UnmapWindow ─────────────────
+		var dw = req.encodeDestroyWindow(0x1234);
+		assert(dw.length === 8 && dw.readUInt8(0) === req.OP_DESTROY_WINDOW, "DestroyWindow");
+		assert(dw.readUInt32LE(4) === 0x1234, "DestroyWindow wid");
+		var mw = req.encodeMapWindow(0x5678);
+		assert(mw.length === 8 && mw.readUInt8(0) === req.OP_MAP_WINDOW, "MapWindow");
+		var uw = req.encodeUnmapWindow(0x9ABC);
+		assert(uw.length === 8 && uw.readUInt8(0) === 10, "UnmapWindow opcode 10");
+
+		// ── ConfigureWindow ─────────────────────────────────────────
+		var cw = req.encodeConfigureWindow({ window: 0xFF, x: 10, y: 20, width: 300, height: 400 });
+		assert(cw.length === 12 + 4 * 4, "ConfigureWindow 4 values = 28 bytes");
+		assert(cw.readUInt8(0) === req.OP_CONFIGURE_WINDOW, "opcode 12");
+		assert(cw.readUInt32LE(4) === 0xFF, "window");
+		assert(cw.readUInt16LE(8) === (req.CW_X | req.CW_Y | req.CW_WIDTH | req.CW_HEIGHT), "mask");
+		assert(cw.readInt32LE(12) === 10, "x");
+		assert(cw.readInt32LE(16) === 20, "y");
+		assert(cw.readInt32LE(20) === 300, "width");
+		assert(cw.readInt32LE(24) === 400, "height");
+		var cwMin = req.encodeConfigureWindow({ window: 1, stackMode: 0 });
+		assert(cwMin.length === 16, "ConfigureWindow 1 value = 16 bytes");
+		assert(cwMin.readUInt16LE(8) === req.CW_STACK_MODE, "stackMode mask");
+
+		// ── GetGeometry ─────────────────────────────────────────────
+		var gg = req.encodeGetGeometry(0xDEAD);
+		assert(gg.length === 8, "GetGeometry 8 bytes");
+		assert(gg.readUInt8(0) === req.OP_GET_GEOMETRY, "opcode 14");
+		var ggReply = Buffer.alloc(32);
+		ggReply.writeUInt8(1, 0); ggReply.writeUInt8(24, 1);
+		ggReply.writeUInt32LE(0x100, 8);
+		ggReply.writeInt16LE(-5, 12); ggReply.writeInt16LE(10, 14);
+		ggReply.writeUInt16LE(800, 16); ggReply.writeUInt16LE(600, 18);
+		ggReply.writeUInt16LE(2, 20);
+		var ggParsed = req.parseGetGeometryReply(ggReply);
+		assert(ggParsed.depth === 24, "geom depth");
+		assert(ggParsed.root === 0x100, "geom root");
+		assert(ggParsed.x === -5 && ggParsed.y === 10, "geom x/y");
+		assert(ggParsed.width === 800 && ggParsed.height === 600, "geom w/h");
+		assert(ggParsed.borderWidth === 2, "geom borderWidth");
+
+		// ── QueryTree ───────────────────────────────────────────────
+		var qt = req.encodeQueryTree(0xBEEF);
+		assert(qt.length === 8, "QueryTree 8 bytes");
+		var qtReply = Buffer.alloc(32 + 12);
+		qtReply.writeUInt8(1, 0);
+		qtReply.writeUInt32LE(3, 4);          // 3 children = 12 bytes extra
+		qtReply.writeUInt32LE(0x100, 8);      // root
+		qtReply.writeUInt32LE(0x200, 12);     // parent
+		qtReply.writeUInt16LE(3, 16);         // nChildren
+		qtReply.writeUInt32LE(1, 32); qtReply.writeUInt32LE(2, 36); qtReply.writeUInt32LE(3, 40);
+		var qtParsed = req.parseQueryTreeReply(qtReply);
+		assert(qtParsed.root === 0x100, "qt root");
+		assert(qtParsed.parent === 0x200, "qt parent");
+		assert(qtParsed.children.length === 3, "qt 3 children");
+		assert(qtParsed.children[2] === 3, "qt child 3");
+
+		// ── InternAtom ──────────────────────────────────────────────
+		var ia = req.encodeInternAtom("_NET_WM_NAME", true);
+		assert(ia.readUInt8(0) === req.OP_INTERN_ATOM, "opcode 16");
+		assert(ia.readUInt8(1) === 1, "only-if-exists");
+		assert(ia.readUInt16LE(4) === 12, "name length");
+		assert(ia.toString("utf8", 8, 20) === "_NET_WM_NAME", "atom name");
+		var iaReply = Buffer.alloc(32);
+		iaReply.writeUInt8(1, 0);
+		iaReply.writeUInt32LE(333, 8);
+		assert(req.parseInternAtomReply(iaReply).atom === 333, "atom id");
+
+		// ── GetAtomName ─────────────────────────────────────────────
+		var gan = req.encodeGetAtomName(333);
+		assert(gan.readUInt8(0) === req.OP_GET_ATOM_NAME, "opcode 17");
+		assert(gan.readUInt32LE(4) === 333, "atom arg");
+		var ganReply = Buffer.alloc(32 + 16);
+		ganReply.writeUInt8(1, 0); ganReply.writeUInt32LE(4, 4);
+		ganReply.writeUInt16LE(5, 8);
+		Buffer.from("HELLO").copy(ganReply, 32);
+		assert(req.parseGetAtomNameReply(ganReply).name === "HELLO", "atom name");
+
+		// ── ChangeProperty ──────────────────────────────────────────
+		var cpData = Buffer.from([1, 2, 3, 4]);
+		var cp = req.encodeChangeProperty({ window: 0xA, property: 10, type: 20, format: 8, data: cpData });
+		assert(cp.readUInt8(0) === req.OP_CHANGE_PROPERTY, "opcode 18");
+		assert(cp.readUInt8(1) === req.PROP_MODE_REPLACE, "mode Replace");
+		assert(cp.readUInt32LE(4) === 0xA, "window");
+		assert(cp.readUInt32LE(8) === 10, "property atom");
+		assert(cp.readUInt32LE(12) === 20, "type atom");
+		assert(cp.readUInt8(16) === 8, "format 8");
+		assert(cp.readUInt32LE(20) === 4, "length 4 units");
+		assert(cp[24] === 1 && cp[27] === 4, "data copied");
+
+		// ── GetProperty ─────────────────────────────────────────────
+		var gp = req.encodeGetProperty({ window: 0xB, property: 10 });
+		assert(gp.readUInt8(0) === req.OP_GET_PROPERTY, "opcode 20");
+		assert(gp.readUInt32LE(4) === 0xB, "window");
+		assert(gp.readUInt32LE(20) === 1024, "default longLength");
+		var gpReply = Buffer.alloc(32 + 8);
+		gpReply.writeUInt8(1, 0); gpReply.writeUInt8(32, 1);  // format 32
+		gpReply.writeUInt32LE(2, 4);          // 2 extra 4-byte units
+		gpReply.writeUInt32LE(6, 8);          // type atom
+		gpReply.writeUInt32LE(0, 12);         // bytes-after
+		gpReply.writeUInt32LE(2, 16);         // value-length (2 CARD32s)
+		gpReply.writeUInt32LE(0xCAFE, 32);
+		gpReply.writeUInt32LE(0xBEEF, 36);
+		var gpParsed = req.parseGetPropertyReply(gpReply);
+		assert(gpParsed.format === 32, "gp format");
+		assert(gpParsed.type === 6, "gp type");
+		assert(gpParsed.value.length === 8, "gp value 8 bytes");
+		assert(gpParsed.value.readUInt32LE(0) === 0xCAFE, "gp first val");
+
+		// ── SendEvent ───────────────────────────────────────────────
+		var seEvent = Buffer.alloc(32);
+		seEvent.writeUInt8(33, 0);            // ClientMessage
+		var se = req.encodeSendEvent({ destination: 0x100, eventMask: 0, event: seEvent });
+		assert(se.length === 44, "SendEvent 44 bytes");
+		assert(se.readUInt8(0) === req.OP_SEND_EVENT, "opcode 25");
+		assert(se.readUInt32LE(4) === 0x100, "destination");
+		assert(se[12] === 33, "event byte 0 copied");
+
+		// ── QueryPointer ────────────────────────────────────────────
+		var qp = req.encodeQueryPointer(0x100);
+		assert(qp.length === 8, "QueryPointer 8 bytes");
+		assert(qp.readUInt8(0) === req.OP_QUERY_POINTER, "opcode 38");
+		var qpReply = Buffer.alloc(32);
+		qpReply.writeUInt8(1, 0); qpReply.writeUInt8(1, 1);  // same-screen
+		qpReply.writeUInt32LE(0x100, 8);
+		qpReply.writeUInt32LE(0x200, 12);     // child
+		qpReply.writeInt16LE(512, 16); qpReply.writeInt16LE(384, 18);
+		qpReply.writeInt16LE(50, 20); qpReply.writeInt16LE(60, 22);
+		qpReply.writeUInt16LE(0x0100, 24);    // mask (Button1)
+		var qpParsed = req.parseQueryPointerReply(qpReply);
+		assert(qpParsed.sameScreen === true, "qp sameScreen");
+		assert(qpParsed.rootX === 512 && qpParsed.rootY === 384, "qp root coords");
+		assert(qpParsed.winX === 50 && qpParsed.winY === 60, "qp win coords");
+		assert(qpParsed.mask === 0x0100, "qp mask");
+
+		// ── TranslateCoordinates ────────────────────────────────────
+		var tc = req.encodeTranslateCoordinates(0xA, 0xB, 10, -20);
+		assert(tc.length === 16, "TranslateCoordinates 16 bytes");
+		assert(tc.readUInt8(0) === req.OP_TRANSLATE_COORDINATES, "opcode 40");
+		assert(tc.readUInt32LE(4) === 0xA && tc.readUInt32LE(8) === 0xB, "windows");
+		assert(tc.readInt16LE(12) === 10 && tc.readInt16LE(14) === -20, "coords");
+		var tcReply = Buffer.alloc(32);
+		tcReply.writeUInt8(1, 0); tcReply.writeUInt8(1, 1);
+		tcReply.writeUInt32LE(0xC, 8);
+		tcReply.writeInt16LE(110, 12); tcReply.writeInt16LE(-120, 14);
+		var tcParsed = req.parseTranslateCoordinatesReply(tcReply);
+		assert(tcParsed.sameScreen === true, "tc sameScreen");
+		assert(tcParsed.child === 0xC, "tc child");
+		assert(tcParsed.dstX === 110 && tcParsed.dstY === -120, "tc dst coords");
+
+		// ── QueryKeymap ─────────────────────────────────────────────
+		var qk = req.encodeQueryKeymap();
+		assert(qk.length === 4, "QueryKeymap 4 bytes");
+		assert(qk.readUInt8(0) === req.OP_QUERY_KEYMAP, "opcode 44");
+		var qkReply = Buffer.alloc(40);
+		qkReply.writeUInt8(1, 0);
+		qkReply.writeUInt32LE(2, 4);
+		qkReply.writeUInt8(0x42, 8);          // key state byte 0
+		qkReply.writeUInt8(0xFF, 39);         // key state byte 31
+		var qkParsed = req.parseQueryKeymapReply(qkReply);
+		assert(qkParsed.keys.length === 32, "qk keys 32 bytes");
+		assert(qkParsed.keys[0] === 0x42, "qk key byte 0");
+		assert(qkParsed.keys[31] === 0xFF, "qk key byte 31");
+
 		// ── Mechanism registry: xproto present and probed correctly ──
 		// xproto is in the registry only on Linux (CAPABILITY_MECHANISMS.input
 		// lists it for the Linux row); other platforms don't surface it.
@@ -623,6 +806,50 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 					} catch (e) {
 						if (!/RANDR/.test(e.message)) throw e;
 					}
+
+					// ── QueryPointer (live) ───────────────────────────
+					var root = c.info.screens[0].root;
+					var qp = await c.queryPointer();
+					assert(typeof qp.rootX === "number", "qp rootX");
+					assert(typeof qp.rootY === "number", "qp rootY");
+					assert(qp.root > 0, "qp root window");
+
+					// ── QueryKeymap (live) ────────────────────────────
+					var qk = await c.queryKeymap();
+					assert(qk.keys.length === 32, "qk 32 bytes");
+
+					// ── QueryTree (live) ──────────────────────────────
+					var qt = await c.queryTree(root);
+					assert(qt.root === root, "qt root matches");
+					assert(Array.isArray(qt.children), "qt children array");
+
+					// ── GetGeometry (live) ────────────────────────────
+					var geo = await c.getGeometry(root);
+					assert(geo.width > 0, "geo root width > 0");
+					assert(geo.height > 0, "geo root height > 0");
+					assert(geo.depth > 0, "geo root depth > 0");
+
+					// ── GetWindowAttributes (live) ────────────────────
+					var wa = await c.getWindowAttributes(root);
+					assert(typeof wa.mapState === "number", "wa mapState");
+					assert(typeof wa.visual === "number", "wa visual");
+
+					// ── InternAtom + GetAtomName (live) ──────────────
+					var wmNameAtom = await c.internAtom("WM_NAME");
+					assert(wmNameAtom > 0, "WM_NAME atom > 0");
+					var wmNameAgain = await c.internAtom("WM_NAME");
+					assert(wmNameAgain === wmNameAtom, "internAtom cached");
+					var atomName = await c.getAtomName(wmNameAtom);
+					assert(atomName === "WM_NAME", "getAtomName round-trips");
+
+					// ── TranslateCoordinates (live) ──────────────────
+					var tc = await c.translateCoordinates(root, root, 10, 20);
+					assert(tc.dstX === 10 && tc.dstY === 20, "tc same-window identity");
+
+					// ── GetProperty (live) ────────────────────────────
+					var gp = await c.getProperty({ window: root, property: wmNameAtom });
+					assert(typeof gp.type === "number", "gp type is number");
+					assert(typeof gp.format === "number", "gp format is number");
 
 					var alive = await c.queryExtension("XTEST");
 					assert(alive.present === true, "connection survived FakeInput + WarpPointer + GetImage + RANDR burst");
