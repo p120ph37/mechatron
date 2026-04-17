@@ -49,9 +49,8 @@ const gExpect: Record<string, boolean> = gExpected[gPlatformKey] || {};
 // library is deliberately denied via MECHATRON_BLOCK_DLOPEN, the
 // capabilities it provides can't be probed, so demote them from
 // "expected to work" to "may skip" on this run.  This lets the FFI
-// backend's dlopen-catch arms (lib/ffi/x11.ts:220, 234, 245) get
-// deterministic coverage without spuriously failing keyboardSim /
-// mouseSim / grabScreen assertions.
+// backend's dlopen-catch arms get deterministic coverage without
+// spuriously failing keyboardSim / mouseSim / grabScreen assertions.
 const _blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
 if (_blocked.includes("libxtst")) {
   gExpect.keyboardSim = false;
@@ -59,6 +58,31 @@ if (_blocked.includes("libxtst")) {
   // linux_mouse_setPos short-circuits on !isXTestAvailable() even though
   // XWarpPointer itself lives in libX11 (lib/ffi/mouse.ts:131), so the
   // getPos/setPos round-trip observes no movement when libXtst is blocked.
+  gExpect.mousePos = false;
+}
+// When MECHATRON_INPUT_MECHANISM=uinput is pinned, Keyboard.press /
+// Mouse.press route through /dev/uinput → kernel evdev.  In CI the X
+// server is Xvfb, which reads from its own IPC rather than /dev/input,
+// so synthetic input events never reach it and Keyboard.getState() /
+// Mouse.getState() can't observe the press.  Demote keyboardSim /
+// mouseSim from "expected to work" to "may skip" for this cell —
+// coverage of the uinput code path still happens; we just can't do
+// an end-to-end verify against Xvfb.  Mouse.setPos stays on the
+// XTest path (lib/ffi/mouse.ts:linux_mouse_setPos has no uinput
+// routing — uinput is EV_REL-only), so mousePos is unaffected.
+if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "uinput") {
+  gExpect.keyboardSim = false;
+  gExpect.mouseSim = false;
+}
+// xproto dispatch is a sync→async bridge: Keyboard.press / Mouse.press
+// enqueue work on a promise chain, so by the time the generic bun.test
+// harness calls Keyboard.getState() the FakeInput may not have been
+// flushed to Xvfb yet (and getState reads go via the XTest sync path
+// regardless).  Demote the three sim flags to "may skip" — the xproto
+// code path is covered end-to-end in test/xproto.js via xprotoFlush().
+if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "xproto") {
+  gExpect.keyboardSim = false;
+  gExpect.mouseSim = false;
   gExpect.mousePos = false;
 }
 
@@ -79,7 +103,7 @@ const expectOrSkip = (capability: string, label: string) => {
 // Skip when SKIP_PLATFORM is true so that requiring an unsupported subsystem
 // doesn't blow up at file load time.
 
-let typesM: any, kbM: any, mouseM: any, clipM: any, procM: any, winM: any, scrM: any, memM: any;
+let typesM: any, kbM: any, mouseM: any, clipM: any, procM: any, winM: any, scrM: any, memM: any, uinputM: any, xprotoM: any;
 let waitFor: (cond: () => boolean, timeoutMs: number) => boolean;
 
 if (!SKIP_PLATFORM) {
@@ -106,6 +130,8 @@ if (!SKIP_PLATFORM) {
   winM   = require("./window")(mechatron, log, assert, waitFor, expectOrSkip);
   scrM   = require("./screen")(mechatron, log, assert, waitFor, expectOrSkip);
   memM   = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
+  uinputM = require("./uinput")(mechatron, log, assert, waitFor, expectOrSkip);
+  xprotoM = require("./xproto")(mechatron, log, assert, waitFor, expectOrSkip);
 
   log(`\nMECHATRON [${backend.toUpperCase()} backend] ${gPlatformKey}\n`);
   const expected = Object.keys(gExpect).filter((k) => gExpect[k]).join(", ");
@@ -136,4 +162,6 @@ describeMaybe(`mechatron [${backend}]`, () => {
   test("window",    () => winM.testWindow(), 15000);
   test("screen",    () => scrM.testScreen());
   test("memory",    () => memM.testMemory());
+  test("uinput",    () => uinputM.testUinput());
+  test("xproto",    () => xprotoM.testXproto());
 });

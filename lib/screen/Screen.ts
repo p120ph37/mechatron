@@ -10,8 +10,8 @@ import { getNative } from "../napi";
  */
 export interface WindowLike {
   getHandle(): number;
-  getBounds(): { x: number; y: number; w: number; h: number };
-  isValid(): boolean;
+  getBounds(): Promise<{ x: number; y: number; w: number; h: number }>;
+  isValid(): Promise<boolean>;
 }
 
 // Union two bounds rectangles
@@ -72,10 +72,10 @@ export class Screen {
   private static _totalBounds: Bounds = new Bounds();
   private static _totalUsable: Bounds = new Bounds();
 
-  static synchronize(): boolean {
+  static async synchronize(): Promise<boolean> {
     interface RawRect { x: number; y: number; w: number; h: number; }
     interface RawScreen { bounds: RawRect; usable: RawRect; }
-    const result: RawScreen[] | null = getNative("screen").screen_synchronize();
+    const result: RawScreen[] | null = await getNative("screen").screen_synchronize();
     if (!result) return false;
     let tb: RawRect = { x: 0, y: 0, w: 0, h: 0 };
     let tu: RawRect = { x: 0, y: 0, w: 0, h: 0 };
@@ -91,10 +91,6 @@ export class Screen {
     return true;
   }
 
-  static async synchronizeAsync(): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Screen.synchronize())));
-  }
-
   static getMain(): Screen | null {
     return Screen._screens.length > 0 ? Screen._screens[0] : null;
   }
@@ -105,21 +101,20 @@ export class Screen {
 
   static getScreen(target: { x: number; y: number } | Point): Screen | null;
   static getScreen(x: number, y: number): Screen | null;
-  static getScreen(window: any): Screen | null;
-  static getScreen(a: any, b?: number): Screen | null {
+  static getScreen(window: any): Promise<Screen | null>;
+  static getScreen(a: any, b?: number): Screen | null | Promise<Screen | null> {
     if (typeof a === "number" && typeof b === "number") {
       return Screen._getScreenForPoint(new Point(a, b));
     }
-    // Window-like object with getBounds()
     if (a && typeof a.getBounds === "function" && typeof a.isValid === "function") {
-      if (!a.isValid()) return null;
-      const bounds = a.getBounds();
-      // Use center of window bounds
-      const cx = bounds.x + Math.floor(bounds.w / 2);
-      const cy = bounds.y + Math.floor(bounds.h / 2);
-      return Screen._getScreenForPoint(new Point(cx, cy));
+      return (async () => {
+        if (!(await a.isValid())) return null;
+        const bounds = await a.getBounds();
+        const cx = bounds.x + Math.floor(bounds.w / 2);
+        const cy = bounds.y + Math.floor(bounds.h / 2);
+        return Screen._getScreenForPoint(new Point(cx, cy));
+      })();
     }
-    // Point-like
     const p = a instanceof Point ? a : new Point(a.x, a.y);
     return Screen._getScreenForPoint(p);
   }
@@ -131,16 +126,9 @@ export class Screen {
     return Screen.getMain();
   }
 
-  static async grabScreenAsync(image: Image, x: number, y: number, w: number, h: number, window?: WindowLike | number): Promise<boolean>;
-  static async grabScreenAsync(image: Image, bounds: Bounds, window?: WindowLike | number): Promise<boolean>;
-  static async grabScreenAsync(image: Image, a: number | Bounds, b?: WindowLike | number, c?: number, d?: number, e?: WindowLike | number): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() =>
-      resolve(Screen.grabScreen(image, a as any, b as any, c as any, d as any, e as any))));
-  }
-
-  static grabScreen(image: Image, x: number, y: number, w: number, h: number, window?: WindowLike | number): boolean;
-  static grabScreen(image: Image, bounds: Bounds, window?: WindowLike | number): boolean;
-  static grabScreen(image: Image, a: number | Bounds, b?: any, c?: number, d?: number, e?: any): boolean {
+  static async grabScreen(image: Image, x: number, y: number, w: number, h: number, window?: WindowLike | number): Promise<boolean>;
+  static async grabScreen(image: Image, bounds: Bounds, window?: WindowLike | number): Promise<boolean>;
+  static async grabScreen(image: Image, a: number | Bounds, b?: any, c?: number, d?: number, e?: any): Promise<boolean> {
     image.destroy();
     let x: number, y: number, w: number, h: number;
     let windowHandle: number | undefined;
@@ -151,7 +139,7 @@ export class Screen {
       x = a; y = b as number; w = c!; h = d!;
       windowHandle = Screen._resolveWindowHandle(e);
     }
-    const result = getNative("screen").screen_grabScreen(x, y, w, h, windowHandle);
+    const result = await getNative("screen").screen_grabScreen(x, y, w, h, windowHandle);
     if (!result) return false;
     image.create(w, h);
     const data = image.getData();

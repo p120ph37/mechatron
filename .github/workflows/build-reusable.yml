@@ -193,6 +193,37 @@ jobs:
             test/memory-child.c -o "test/memory-child$EXT"
           ls -la "test/memory-child$EXT"
 
+      - name: Enable /dev/uinput
+        if: runner.os == 'Linux'
+        # Expose /dev/uinput to the test process so lib/ffi/uinput.ts can
+        # run its full open + UI_SET_*BIT + UI_DEV_SETUP + UI_DEV_CREATE
+        # dance.  Without this the ioctl paths (~150 LOC of FFI glue) sit
+        # uncovered.  GitHub's ubuntu-* runners ship the `uinput` kernel
+        # module but don't load it at boot and leave the device node
+        # root-only; we modprobe the module and chmod 0666 the node
+        # (simpler and more reliable than a udev rule + group change,
+        # which would need a relogin to take effect).  If the module
+        # can't be loaded on this runner image, we still proceed — the
+        # test harness skips the uinput-live assertions and only
+        # exercises the !ready branches (which is the default state for
+        # most of mechatron's consumers anyway).
+        run: |
+          sudo modprobe uinput || echo "modprobe uinput failed (module may be builtin or unavailable)"
+          # Wait briefly for the device node to appear; udev sometimes
+          # takes a tick after modprobe returns.
+          for _ in $(seq 1 50); do
+            [ -c /dev/uinput ] && break
+            sleep 0.1
+          done
+          if [ -c /dev/uinput ]; then
+            sudo chmod 0666 /dev/uinput
+            ls -l /dev/uinput
+          else
+            echo "WARNING: /dev/uinput not available on this runner"
+            uname -a
+            lsmod | grep -i uinput || true
+          fi
+
       - name: Build dlopen-block LD_PRELOAD shim
         if: runner.os == 'Linux'
         # Compile the selective dlopen-interception shim used to force the
@@ -227,44 +258,18 @@ jobs:
           run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
 
           # run_bun LABEL JUNIT_FILE -- <bun test command> ...
-          # Wraps run_and_log with: (1) a visible progress marker so CI
-          # logs show exactly which invocation the script is on, and
-          # (2) a single retry when bun exits non-zero with an empty
-          # JUnit file (i.e. crashed before a single testcase could
-          # execute).  The ubuntu-22.04-arm runner has intermittently
-          # killed bun at --coverage instrumentation setup time with
-          # zero stdout/stderr; a single retry clears this without
-          # masking real test failures (which always produce testcases
-          # and thus skip the retry).
+          # Logs a visible progress marker before invoking bun, so CI
+          # logs show exactly which invocation the script is on, then
+          # delegates to run_and_log.  No retries: bun should never
+          # crash on startup; a startup failure indicates a real bug
+          # (in our code, our test harness, or upstream) that we want
+          # to investigate, not paper over.
           run_bun() {
             local LABEL="$1"; shift
             local JUNIT_FILE="$1"; shift
             [ "$1" = "--" ] && shift
-            local ATTEMPT RC OUT_BEFORE OUT_AFTER
-            OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-            for ATTEMPT in 1 2; do
-              echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
-              RC=0
-              run_and_log "$@" || RC=$?
-              if [ "$RC" = 0 ]; then return 0; fi
-              OUT_AFTER=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-              # If bun produced any testcase output, this is a real
-              # test failure — don't retry.  Otherwise it's a startup
-              # crash on a pristine junit file; retry once.
-              if [ -s "$JUNIT_FILE" ] && grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
-                echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
-                return "$RC"
-              fi
-              if [ "$ATTEMPT" = 2 ]; then
-                echo ">>> [$LABEL] retry also failed (rc=$RC), giving up" | tee -a "$TEST_LOG"
-                return "$RC"
-              fi
-              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying once" | tee -a "$TEST_LOG"
-              # Clear the empty junit so the second attempt gets a
-              # clean file and our "no testcase" detection works below.
-              rm -f "$JUNIT_FILE"
-              sleep 2
-            done
+            echo ">>> [$LABEL]: $*" | tee -a "$TEST_LOG"
+            run_and_log "$@"
           }
 
           # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
@@ -273,8 +278,29 @@ jobs:
             curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
             unzip -q "node-${NODE_VERSION}-win-x86.zip"
             JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE"
-            exit "$?"
+            # --report-on-fatalerror + --report-directory: if Node hits a
+            # fatal error (including native-code STATUS_ACCESS_VIOLATION
+            # during teardown) it writes a diagnostic report (JSON +
+            # native stack) to the directory below.  We observed a rare
+            # intermittent segfault here after "ALL TESTS PASSED" prints
+            # — these flags give us an actionable stack next time it
+            # recurs without affecting the happy path.
+            REPORT_DIR="${RUNNER_TEMP}/node-reports"
+            mkdir -p "$REPORT_DIR"
+            run_and_log ./node-${NODE_VERSION}-win-x86/node \
+              --report-on-fatalerror --report-directory="$REPORT_DIR" \
+              test/test.js all --backend napi --junit "$JUNIT_FILE"
+            RC=$?
+            if [ "$RC" != 0 ]; then
+              echo ">>> [ia32] node exited rc=$RC; diagnostic reports (if any):"
+              ls -la "$REPORT_DIR" || true
+              for rpt in "$REPORT_DIR"/*.json; do
+                [ -f "$rpt" ] || continue
+                echo "--- $rpt ---"
+                cat "$rpt"
+              done
+            fi
+            exit "$RC"
           fi
 
           BUN="$(command -v bun)"
@@ -305,7 +331,18 @@ jobs:
             # skipped; -name gives us a stable title to match against regexes.
             xmessage -timeout 600 -name MechatronTestWindow "mechatron test client" &
             XMESSAGE_PID=$!
-            sleep 0.3
+            # Poll for the window to be mapped — a fixed sleep races on slow
+            # runners (arm64 emulation in particular), and the bare pipeline
+            # below would `set -e` exit if grep finds no match before the
+            # window appears.  Up to 10s.
+            XMSG_WIN=""
+            for _ in $(seq 1 100); do
+              XMSG_WIN=$(xwininfo -root -tree 2>/dev/null \
+                | { grep MechatronTestWindow || true; } \
+                | head -1 | awk '{print $1}')
+              [ -n "$XMSG_WIN" ] && break
+              sleep 0.1
+            done
             # xmessage doesn't publish _NET_WM_PID on its own, but
             # lib/ffi/window.ts:winIsValid treats _NET_WM_PID presence
             # as the "is this a real window" heuristic — mirroring
@@ -315,9 +352,10 @@ jobs:
             # Inject the atom post-hoc via xprop so the full Linux
             # path is exercised.  xprop is in x11-utils (installed
             # above).
-            XMSG_WIN=$(xwininfo -root -tree 2>/dev/null | grep MechatronTestWindow | head -1 | awk '{print $1}')
             if [ -n "$XMSG_WIN" ]; then
               xprop -id "$XMSG_WIN" -f _NET_WM_PID 32c -set _NET_WM_PID "$XMESSAGE_PID" 2>/dev/null || true
+            else
+              echo ">>> warning: xmessage window not mapped within 10s; window tests may have reduced coverage"
             fi
             cleanup_x() {
               kill "$XMESSAGE_PID" "$OPENBOX_PID" "$XVFB_PID" 2>/dev/null || true
@@ -398,6 +436,109 @@ jobs:
           #    Each variant is its own bun process so the loader re-runs
           #    tryDlopen() with the new LD_PRELOAD policy.  JUnit and lcov
           #    feed into the same aggregators as the base backends.
+          # ── Linux-only: FFI with MECHATRON_INPUT_MECHANISM=uinput.
+          #    Drives coverage of lib/ffi/uinput.ts (libc dlopen, ioctl
+          #    request encoding, event-burst writes) and the uinput
+          #    branches inside lib/ffi/keyboard.ts + lib/ffi/mouse.ts.
+          #    Only runs when /dev/uinput is writable (the "Enable
+          #    /dev/uinput" step above sets this up on ubuntu-*); the
+          #    tests themselves fall back to xtest when it isn't, so
+          #    failing to detect the device here just re-runs the ffi
+          #    backend with a different selector — no harm but also no
+          #    extra coverage.
+          if [ "${{ runner.os }}" = "Linux" ] && [ -w /dev/uinput ]; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-uinput.xml"
+            BE_COV_DIR="$COV_DIR/ffi-uinput"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND=ffi \
+            MECHATRON_INPUT_MECHANISM=uinput \
+              run_bun "ffi-uinput" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for ffi-uinput (MECHATRON_INPUT_MECHANISM=uinput) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="ffi-uinput-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="ffi-uinput backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          fi
+
+          # ── Linux-only: FFI with MECHATRON_INPUT_MECHANISM=xproto.
+          #    Drives coverage of lib/ffi/xproto.ts (sync→async bridge
+          #    onto lib/x11proto) and the xproto branches in
+          #    lib/ffi/keyboard.ts + lib/ffi/mouse.ts.  xproto talks the
+          #    core X11 protocol directly over $DISPLAY's socket, so it
+          #    works under Xvfb; no device-capability gate needed.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-xproto.xml"
+            BE_COV_DIR="$COV_DIR/ffi-xproto"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND=ffi \
+            MECHATRON_INPUT_MECHANISM=xproto \
+              run_bun "ffi-xproto" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for ffi-xproto (MECHATRON_INPUT_MECHANISM=xproto) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="ffi-xproto-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="ffi-xproto backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          fi
+
+          # ── Linux-only: FFI with MECHATRON_SCREEN_MECHANISM=drm.
+          #    Exercises lib/ffi/framebuffer.ts's libc dlopen +
+          #    captureSelected dispatch gate.  In GHA runners neither
+          #    /dev/dri/card0 nor /dev/fb0 is present, so live capture
+          #    falls back to the XGetImage path — the test still passes
+          #    and we get coverage of the gate + libc FFI open path.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-drm.xml"
+            BE_COV_DIR="$COV_DIR/ffi-drm"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+            MECHATRON_BACKEND=ffi \
+            MECHATRON_SCREEN_MECHANISM=drm \
+              run_bun "ffi-drm" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+              || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="bun test for ffi-drm (MECHATRON_SCREEN_MECHANISM=drm) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="ffi-drm-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="ffi-drm backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+          fi
+
           if [ "${{ runner.os }}" = "Linux" ]; then
             for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
               label="${variant%%:*}"
@@ -532,6 +673,7 @@ jobs:
             ${{ runner.temp }}/test-output.txt
             ${{ runner.temp }}/junit/
             ${{ runner.temp }}/coverage/
+            ${{ runner.temp }}/node-reports/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v7

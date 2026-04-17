@@ -1,30 +1,47 @@
 import { Image } from "../types";
 import { getNative } from "../napi";
+import * as linuxCb from "./linux";
+import { getMechanism } from "../platform";
+
+const IS_LINUX = process.platform === "linux";
+
+function linuxActive(): boolean {
+  if (!IS_LINUX) return false;
+  const m = getMechanism("clipboard");
+  return m === "wl-clipboard" || m === "xclip" || m === "xsel";
+}
 
 export const Clipboard = {
-  clear(): boolean {
+  async clear(): Promise<boolean> {
+    if (linuxActive()) return linuxCb.linux_clipboard_clear();
     return getNative("clipboard").clipboard_clear();
   },
 
-  hasText(): boolean {
+  async hasText(): Promise<boolean> {
+    if (linuxActive()) return linuxCb.linux_clipboard_hasText();
     return getNative("clipboard").clipboard_hasText();
   },
 
-  getText(): string {
+  async getText(): Promise<string> {
+    if (linuxActive()) return linuxCb.linux_clipboard_getText();
     return getNative("clipboard").clipboard_getText();
   },
 
-  setText(text: string): boolean {
+  async setText(text: string): Promise<boolean> {
     if (typeof text !== "string") throw new TypeError("Invalid arguments");
+    if (linuxActive()) return linuxCb.linux_clipboard_setText(text);
     return getNative("clipboard").clipboard_setText(text);
   },
 
-  hasImage(): boolean {
+  async hasImage(): Promise<boolean> {
+    if (IS_LINUX) return linuxCb.linux_clipboard_hasImage();
     return getNative("clipboard").clipboard_hasImage();
   },
 
-  getImage(image: Image): boolean {
-    const result = getNative("clipboard").clipboard_getImage();
+  async getImage(image: Image): Promise<boolean> {
+    const result = IS_LINUX
+      ? linuxCb.linux_clipboard_getImage()
+      : getNative("clipboard").clipboard_getImage();
     if (!result) return false;
     image.destroy();
     image.create(result.width, result.height);
@@ -33,27 +50,17 @@ export const Clipboard = {
     return true;
   },
 
-  setImage(image: Image): boolean {
+  async setImage(image: Image): Promise<boolean> {
     const data = image.getData();
     if (!data) return false;
+    if (IS_LINUX) {
+      return linuxCb.linux_clipboard_setImage(image.getWidth(), image.getHeight(), data);
+    }
     return getNative("clipboard").clipboard_setImage(image.getWidth(), image.getHeight(), data);
   },
 
-  getSequence(): number {
+  async getSequence(): Promise<number> {
+    if (IS_LINUX) return linuxCb.linux_clipboard_getSequence();
     return getNative("clipboard").clipboard_getSequence();
-  },
-
-  // --- Promise-based variants for modern async callers ---
-  async getTextAsync(): Promise<string> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.getText())));
-  },
-  async setTextAsync(text: string): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.setText(text))));
-  },
-  async getImageAsync(image: Image): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.getImage(image))));
-  },
-  async setImageAsync(image: Image): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.setImage(image))));
   },
 };

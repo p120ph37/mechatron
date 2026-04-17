@@ -1,17 +1,6 @@
-/**
- * Pure-JS Bun FFI keyboard backend.
- *
- * Linux: dlopens libX11.so.6 + libXtst.so.6 directly.
- * Windows: dlopens user32.dll directly.
- * macOS: dlopens CoreGraphics.framework; uses CGEventCreateKeyboardEvent +
- * CGEventPost to inject synthetic key events, and CGEventSourceKeyState
- * for read-back.
- *
- * Exports the same property names as the napi `keyboard_*` symbols so the
- * loader's consumers (`lib/keyboard/Keyboard.ts`) work unchanged.
- */
-
-import { ffi, getDisplay, isXTestAvailable, x11, xtest, True, False, CurrentTime } from "./x11";
+import { getXConnection } from "./xconn";
+import { xprotoKeyPress, xprotoKeyRelease } from "./xproto";
+import { injectKeysym, uinputSelected } from "./uinput";
 import {
   user32, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC,
 } from "./win";
@@ -21,32 +10,27 @@ import {
 
 // ==================== Linux ====================
 
-function linux_keyboard_press(keycode: number): void {
-  if (!isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  const xkeycode = X.XKeysymToKeycode(display, BigInt(keycode));
-  T.XTestFakeKeyEvent(display, xkeycode, True, CurrentTime);
-  X.XSync(display, False);
+function linux_keyboard_press(keycode: number): void | Promise<void> {
+  if (uinputSelected()) {
+    if (injectKeysym(keycode, true)) return;
+  }
+  return xprotoKeyPress(keycode);
 }
 
-function linux_keyboard_release(keycode: number): void {
-  if (!isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  const xkeycode = X.XKeysymToKeycode(display, BigInt(keycode));
-  T.XTestFakeKeyEvent(display, xkeycode, False, CurrentTime);
-  X.XSync(display, False);
+function linux_keyboard_release(keycode: number): void | Promise<void> {
+  if (uinputSelected()) {
+    if (injectKeysym(keycode, false)) return;
+  }
+  return xprotoKeyRelease(keycode);
 }
 
-function linux_keyboard_getKeyState(keycode: number): boolean {
-  if (!isXTestAvailable()) return false;
-  const X = x11()!;
-  const display = getDisplay();
-  const keys = new Uint8Array(32);
-  X.XQueryKeymap(display, ffi()!.ptr(keys));
-  const xkeycode = X.XKeysymToKeycode(display, BigInt(keycode));
-  return (keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
+async function linux_keyboard_getKeyState(keycode: number): Promise<boolean> {
+  const c = await getXConnection();
+  if (!c) return false;
+  const km = await c.queryKeymap();
+  const xkeycode = c.keysymToKeycode(keycode);
+  if (xkeycode === 0) return false;
+  return (km.keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
 }
 
 // ==================== Windows ====================
@@ -70,7 +54,6 @@ function win_keyboard_getKeyState(keycode: number): boolean {
 
 // ==================== macOS ====================
 
-// CGEventSourceRef is expensive to create — cache one per process.
 let _macSource: ReturnType<NonNullable<ReturnType<typeof cg>>["CGEventSourceCreate"]> | null = null;
 function macSource() {
   if (_macSource !== null) return _macSource;

@@ -12,21 +12,21 @@
 
 module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
-	function testProcess() {
+	async function testProcess() {
 		log("  Process... ");
 
 		var Process = mechatron.Process;
 
 		// --- Invalid process ---
 		var p = new Process();
-		assert(!p.isValid(), "empty invalid");
+		assert(!await p.isValid(), "empty invalid");
 		assert(p.getPID() === 0, "empty pid=0");
-		assert(p.getName() === "", "empty name empty");
-		assert(p.getPath() === "", "empty path empty");
-		assert(p.hasExited(), "empty hasExited");
+		assert(await p.getName() === "", "empty name empty");
+		assert(await p.getPath() === "", "empty path empty");
+		assert(await p.hasExited(), "empty hasExited");
 
 		p = new Process(8888);
-		assert(!p.isValid(), "bogus pid invalid");
+		assert(!await p.isValid(), "bogus pid invalid");
 		assert(p.getPID() === 8888, "bogus pid stored");
 
 		// Equality on invalid
@@ -35,54 +35,56 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(p2.ne(8888), "empty ne 8888");
 
 		// --- getCurrent ---
-		var curr = Process.getCurrent();
-		assert(curr.isValid(), "current valid");
+		var curr = await Process.getCurrent();
+		assert(await curr.isValid(), "current valid");
 		assert(curr.getPID() > 0, "current pid > 0");
-		assert(curr.getName().length > 0, "current has name");
-		assert(curr.getPath().length > 0, "current has path");
-		assert(!curr.hasExited(), "current not exited");
+		assert((await curr.getName()).length > 0, "current has name");
+		assert((await curr.getPath()).length > 0, "current has path");
+		assert(!await curr.hasExited(), "current not exited");
 
 		// Open by PID
 		var p3 = new Process();
-		assert(p3.open(curr.getPID()), "open current pid");
-		assert(p3.isValid(), "opened valid");
+		assert(await p3.open(curr.getPID()), "open current pid");
+		assert(await p3.isValid(), "opened valid");
 		assert(p3.eq(curr), "opened eq current");
 
 		// --- getList ---
-		var list = Process.getList();
+		var list = await Process.getList();
 		assert(list.length > 0, "getList non-empty");
 		assert(list instanceof Array, "getList is array");
 
+		var anyValid = false;
 		for (var i = 0; i < Math.min(list.length, 10); ++i) {
-			assert(list[i].isValid(), "list[" + i + "] valid");
 			assert(list[i].getPID() > 0, "list[" + i + "] pid > 0");
+			if (await list[i].isValid()) anyValid = true;
 		}
+		assert(anyValid, "at least one listed process still valid");
 
 		// Regex filter — pattern derived from the current process so the test
 		// works under any runtime (node, bun, …).
-		var ownName = curr.getName().replace(/[\\.+*?^$()[\]{}|]/g, "\\$&");
-		var filtered = Process.getList(".*" + ownName + ".*");
+		var ownName = (await curr.getName()).replace(/[\\.+*?^$()[\]{}|]/g, "\\$&");
+		var filtered = await Process.getList(".*" + ownName + ".*");
 		assert(filtered.length > 0, "filtered has " + ownName);
 
 		// --- isSys64Bit ---
-		assert(typeof Process.isSys64Bit() === "boolean", "isSys64Bit bool");
+		assert(typeof await Process.isSys64Bit() === "boolean", "isSys64Bit bool");
 
 		// --- open / close ---
 		var p4 = new Process();
-		assert(p4.open(curr.getPID()), "open by pid");
-		assert(p4.isValid(), "opened valid");
-		p4.close();
+		assert(await p4.open(curr.getPID()), "open by pid");
+		assert(await p4.isValid(), "opened valid");
+		await p4.close();
 
 		// --- getHandle ---
-		assert(typeof curr.getHandle() === "number", "getHandle number");
+		assert(typeof await curr.getHandle() === "number", "getHandle number");
 
 		// --- getWindows ---
-		var wins = curr.getWindows();
+		var wins = await curr.getWindows();
 		assert(wins instanceof Array, "getWindows is array");
 
 		// --- getModules ---
 		{
-			var mods = curr.getModules();
+			var mods = await curr.getModules();
 			assert(mods instanceof Array, "getModules is array");
 			assert(mods.length > 0, "getModules non-empty");
 
@@ -174,22 +176,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(pClone.getPID() === curr.getPID(), "clone pid");
 
 		// --- is64Bit, isDebugged ---
-		assert(typeof curr.is64Bit() === "boolean", "is64Bit bool");
-		assert(typeof curr.isDebugged() === "boolean", "isDebugged bool");
+		assert(typeof await curr.is64Bit() === "boolean", "is64Bit bool");
+		assert(typeof await curr.isDebugged() === "boolean", "isDebugged bool");
 
-		// --- Async variants ---
-		var pa1 = Process.getListAsync();
-		assert(pa1 instanceof Promise, "getListAsync returns Promise");
-		var pa2 = curr.getModulesAsync();
-		assert(pa2 instanceof Promise, "getModulesAsync returns Promise");
-
-		// --- exit/kill on invalid process (no-op, no crash) ---
 		var pBogus = new Process();
-		pBogus.exit();
-		pBogus.kill();
+		await pBogus.exit();
+		await pBogus.kill();
 
-		// --- close ---
-		curr.close();
+		await curr.close();
 
 		log("OK\n");
 		return true;

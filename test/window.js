@@ -12,8 +12,16 @@
 
 module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
-	function testWindow() {
+	async function testWindow() {
 		log("  Window... ");
+
+		async function waitForAsync(condFn, timeoutMs) {
+			for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
+				if (await condFn()) return true;
+				await new Promise(r => setTimeout(r, 5));
+			}
+			return false;
+		}
 
 		var Window = mechatron.Window;
 		var Bounds = mechatron.Bounds;
@@ -22,37 +30,37 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// --- Invalid window ---
 		var w1 = new Window();
 		var w2 = new Window();
-		assert(!w1.isValid(), "empty invalid");
+		assert(!await w1.isValid(), "empty invalid");
 		assert(w1.getHandle() === 0, "empty handle=0");
-		assert(w1.getTitle() === "", "empty title empty");
-		assert(w1.getPID() === 0, "empty pid=0");
+		assert(await w1.getTitle() === "", "empty title empty");
+		assert(await w1.getPID() === 0, "empty pid=0");
 
-		assert(w1.setHandle(0), "setHandle 0");
-		assert(!w1.setHandle(8888), "setHandle 8888 fails");
+		assert(await w1.setHandle(0), "setHandle 0");
+		assert(!await w1.setHandle(8888), "setHandle 8888 fails");
 
-		assert(!w1.isTopMost(), "empty !topmost");
-		assert(!w1.isBorderless(), "empty !borderless");
-		assert(!w1.isMinimized(), "empty !minimized");
-		assert(!w1.isMaximized(), "empty !maximized");
+		assert(!await w1.isTopMost(), "empty !topmost");
+		assert(!await w1.isBorderless(), "empty !borderless");
+		assert(!await w1.isMinimized(), "empty !minimized");
+		assert(!await w1.isMaximized(), "empty !maximized");
 
 		// Exercise setters on invalid window (no-op, no crash)
-		w1.setTopMost(false);
-		w1.setBorderless(false);
-		w1.setMinimized(false);
-		w1.setMaximized(false);
-		w1.setTitle("");
-		w1.close();
+		await w1.setTopMost(false);
+		await w1.setBorderless(false);
+		await w1.setMinimized(false);
+		await w1.setMaximized(false);
+		await w1.setTitle("");
+		await w1.close();
 
-		var b = w1.getBounds();
+		var b = await w1.getBounds();
 		assert(b instanceof Bounds, "getBounds returns Bounds");
 		assert(b.eq(0), "empty bounds eq 0");
 
-		var c = w1.getClient();
+		var c = await w1.getClient();
 		assert(c instanceof Bounds, "getClient returns Bounds");
 
-		var mp = w1.mapToClient(20, 20);
+		var mp = await w1.mapToClient(20, 20);
 		assert(mp instanceof Point, "mapToClient returns Point");
-		var ms = w1.mapToScreen(20, 20);
+		var ms = await w1.mapToScreen(20, 20);
 		assert(ms instanceof Point, "mapToScreen returns Point");
 
 		// Equality
@@ -66,38 +74,38 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(wc.eq(w1), "clone eq original");
 
 		// --- getProcess ---
-		var wp = w1.getProcess();
+		var wp = await w1.getProcess();
 		assert(typeof wp === "object", "getProcess returns object");
 
 		// --- getList ---
-		var list = Window.getList();
+		var list = await Window.getList();
 		assert(list instanceof Array, "getList is array");
 
 		// --- getActive ---
-		var active = Window.getActive();
+		var active = await Window.getActive();
 		assert(active instanceof Window, "getActive returns Window");
 
 		// mapToClient/mapToScreen overloads (no args, Point obj)
-		var mp0 = w1.mapToClient();
+		var mp0 = await w1.mapToClient();
 		assert(mp0 instanceof Point, "mapToClient() no args");
-		var ms0 = w1.mapToScreen();
+		var ms0 = await w1.mapToScreen();
 		assert(ms0 instanceof Point, "mapToScreen() no args");
-		var mpPt = w1.mapToClient(new Point(10, 20));
+		var mpPt = await w1.mapToClient(new Point(10, 20));
 		assert(mpPt instanceof Point, "mapToClient(Point)");
-		var msPt = w1.mapToScreen(new Point(10, 20));
+		var msPt = await w1.mapToScreen(new Point(10, 20));
 		assert(msPt instanceof Point, "mapToScreen(Point)");
-		var mpObj = w1.mapToClient({ x: 5, y: 5 });
+		var mpObj = await w1.mapToClient({ x: 5, y: 5 });
 		assert(mpObj instanceof Point, "mapToClient(obj)");
-		var msObj = w1.mapToScreen({ x: 5, y: 5 });
+		var msObj = await w1.mapToScreen({ x: 5, y: 5 });
 		assert(msObj instanceof Point, "mapToScreen(obj)");
 
 		// setBounds/setClient overloads (no-crash on invalid window)
-		w1.setBounds();
-		w1.setBounds(0, 0, 100, 100);
-		w1.setBounds({ x: 0, y: 0, w: 100, h: 100 });
-		w1.setClient();
-		w1.setClient(0, 0, 100, 100);
-		w1.setClient({ x: 0, y: 0, w: 100, h: 100 });
+		await w1.setBounds();
+		await w1.setBounds(0, 0, 100, 100);
+		await w1.setBounds({ x: 0, y: 0, w: 100, h: 100 });
+		await w1.setClient();
+		await w1.setClient(0, 0, 100, 100);
+		await w1.setClient({ x: 0, y: 0, w: 100, h: 100 });
 
 		// Window copy constructor
 		var wCopy = new Window(w1);
@@ -107,35 +115,35 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		if (list.length > 0) {
 			var vw = list[0];
 			// setBounds/getBounds round-trip
-			var origBounds = vw.getBounds();
+			var origBounds = await vw.getBounds();
 			assert(origBounds instanceof Bounds, "valid getBounds");
 
 			// setTopMost/setBorderless/setMinimized/setMaximized (just exercise them)
-			vw.setTopMost(false);
-			vw.setBorderless(false);
+			await vw.setTopMost(false);
+			await vw.setBorderless(false);
 
 			// setTitle (no-crash test)
-			var origTitle = vw.getTitle();
+			var origTitle = await vw.getTitle();
 			if (origTitle) {
-				vw.setTitle(origTitle);
+				await vw.setTitle(origTitle);
 			}
 
 			// Exercise more methods on valid windows
-			assert(typeof vw.isValid() === "boolean", "valid isValid");
-			assert(typeof vw.isTopMost() === "boolean", "valid isTopMost");
-			assert(typeof vw.isBorderless() === "boolean", "valid isBorderless");
-			assert(typeof vw.isMinimized() === "boolean", "valid isMinimized");
-			assert(typeof vw.isMaximized() === "boolean", "valid isMaximized");
-			assert(typeof vw.getPID() === "number", "valid getPID");
+			assert(typeof await vw.isValid() === "boolean", "valid isValid");
+			assert(typeof await vw.isTopMost() === "boolean", "valid isTopMost");
+			assert(typeof await vw.isBorderless() === "boolean", "valid isBorderless");
+			assert(typeof await vw.isMinimized() === "boolean", "valid isMinimized");
+			assert(typeof await vw.isMaximized() === "boolean", "valid isMaximized");
+			assert(typeof await vw.getPID() === "number", "valid getPID");
 			assert(typeof vw.getHandle() === "number", "valid getHandle");
-			var vwProc = vw.getProcess();
+			var vwProc = await vw.getProcess();
 			assert(typeof vwProc === "object", "valid getProcess");
-			var vwClient = vw.getClient();
+			var vwClient = await vw.getClient();
 			assert(vwClient instanceof Bounds, "valid getClient");
 
 			// setMinimized/setMaximized
-			vw.setMinimized(false);
-			vw.setMaximized(false);
+			await vw.setMinimized(false);
+			await vw.setMaximized(false);
 
 			// close (on a cloned handle to avoid disrupting test)
 			var vwClone = vw.clone();
@@ -143,26 +151,24 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		}
 
 		// Window.setActive (exercise on both invalid and valid)
-		Window.setActive(w1);
-		var activeW = Window.getActive();
-		if (activeW.isValid()) {
-			Window.setActive(activeW);
+		await Window.setActive(w1);
+		var activeW = await Window.getActive();
+		if (await activeW.isValid()) {
+			await Window.setActive(activeW);
 		}
 
 		// --- Stale-handle probe (Linux FFI): exercise the
 		//     XGetWindowProperty-on-destroyed-window error arm inside
 		//     winIsValid (lib/ffi/window.ts:34).  Spawn a throwaway
 		//     xmessage, confirm its handle, destroy the window via
-		//     mechatron (XDestroyWindow), then reuse the now-stale
+		//     mechatron (destroyWindow), then reuse the now-stale
 		//     handle in setHandle() — winIsValid issues
-		//     XGetWindowProperty(_NET_WM_PID, staleHandle), which the
-		//     X server answers with BadWindow.  The silent X error
-		//     handler installed in lib/ffi/x11.ts returns 0 so Xlib's
-		//     default exit(1) handler never fires; getWindowProperty
-		//     sees a non-zero status and returns null; winIsValid
-		//     returns false; setHandle returns false.  Timeouts are
-		//     kept short (bun test default per-test timeout is 5s)
-		//     and any step that can't complete falls through to the
+		//     GetProperty(_NET_WM_PID, staleHandle) via xproto, which
+		//     the X server answers with a BadWindow error that the
+		//     xproto client catches; winIsValid returns false;
+		//     setHandle returns false.  Timeouts are kept short
+		//     (bun test default per-test timeout is 5s) and any
+		//     step that can't complete falls through to the
 		//     skip path — the primary test here is the stale-handle
 		//     check after a successful destroy; xmessage-not-listed
 		//     hosts simply skip without failing the suite.
@@ -178,9 +184,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			} catch (_) { _xm = null; }
 			var _stale = 0;
 			if (_xm) {
-				waitFor(function () {
-					var f = Window.getList(_tag);
-					if (f.length > 0 && f[0].isValid()) {
+				await waitForAsync(async function () {
+					var f = await Window.getList(_tag);
+					if (f.length > 0 && await f[0].isValid()) {
 						_stale = f[0].getHandle();
 						return true;
 					}
@@ -188,20 +194,15 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 				}, 1500);
 			}
 			if (_stale !== 0) {
-				// Destroy via mechatron (XDestroyWindow + XFlush).
 				var _live = new Window();
-				if (_live.setHandle(_stale)) {
-					_live.close();
-					var _gone = waitFor(function () {
-						return Window.getList(_tag).length === 0;
+				if (await _live.setHandle(_stale)) {
+					await _live.close();
+					var _gone = await waitForAsync(async function () {
+						return (await Window.getList(_tag)).length === 0;
 					}, 1500);
 					if (_gone) {
-						// Stale handle: setHandle -> winIsValid ->
-						// getWindowProperty -> XGetWindowProperty
-						// (BadWindow, swallowed) -> status != 0 ->
-						// null -> false.
 						var _stalew = new Window();
-						assert(_stalew.setHandle(_stale) === false,
+						assert(await _stalew.setHandle(_stale) === false,
 							"stale handle setHandle false (BadWindow swallowed)");
 					}
 				}
@@ -210,11 +211,10 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		}
 
 		// --- isAxEnabled ---
-		assert(typeof Window.isAxEnabled() === "boolean", "isAxEnabled bool");
+		assert(typeof await Window.isAxEnabled() === "boolean", "isAxEnabled bool");
 
-		// --- Async variants ---
-		var pa1 = Window.getListAsync();
-		assert(pa1 instanceof Promise, "getListAsync returns Promise");
+		var pa1 = Window.getList();
+		assert(pa1 instanceof Promise, "getList returns Promise");
 
 		log("OK\n");
 		return true;

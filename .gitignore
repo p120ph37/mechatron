@@ -4,6 +4,7 @@ build/
 prebuilds/
 build-*/
 node_modules/
+package-lock.json
 .DS_STORE
 napi/target/
 napi/*.node

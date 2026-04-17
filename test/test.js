@@ -107,6 +107,7 @@ var processModule   = require("./process")(mechatron, log, assert, waitFor, expe
 var windowModule    = require("./window")(mechatron, log, assert, waitFor, expectOrSkip);
 var screenModule    = require("./screen")(mechatron, log, assert, waitFor, expectOrSkip);
 var memoryModule    = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
+var uinputModule    = require("./uinput")(mechatron, log, assert, waitFor, expectOrSkip);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -146,6 +147,7 @@ async function main() {
 		["window",    windowModule.testWindow],
 		["screen",    screenModule.testScreen],
 		["memory",    memoryModule.testMemory],
+		["uinput",    uinputModule.testUinput],
 	];
 
 	// Parse command line for specific tests

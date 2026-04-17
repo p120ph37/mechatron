@@ -12,7 +12,15 @@
 
 module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
-	function testKeyboard() {
+	async function waitForAsync(condFn, timeoutMs) {
+		for (var elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
+			if (await condFn()) return true;
+			await new Promise(function (r) { setTimeout(r, 5); });
+		}
+		return false;
+	}
+
+	async function testKeyboard() {
 		log("  Keyboard... ");
 
 		var Keyboard = mechatron.Keyboard;
@@ -76,27 +84,27 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(k.autoDelay instanceof mechatron.Range, "autoDelay is Range");
 
 		// --- click/press/release + getState ---
-		k.press(KEYS.KEY_SHIFT);
-		var pressWorks = waitFor(function () {
-			return Keyboard.getState(KEYS.KEY_SHIFT) === true;
+		await k.press(KEYS.KEY_SHIFT);
+		var pressWorks = await waitForAsync(async function () {
+			return (await Keyboard.getState(KEYS.KEY_SHIFT)) === true;
 		}, 200);
-		k.release(KEYS.KEY_SHIFT);
-		var releaseWorks = pressWorks && waitFor(function () {
-			return Keyboard.getState(KEYS.KEY_SHIFT) === false;
+		await k.release(KEYS.KEY_SHIFT);
+		var releaseWorks = pressWorks && await waitForAsync(async function () {
+			return (await Keyboard.getState(KEYS.KEY_SHIFT)) === false;
 		}, 200);
 		if (releaseWorks) {
-			k.click(KEYS.KEY_SHIFT);
-			assert(waitFor(function () {
-				return Keyboard.getState(KEYS.KEY_SHIFT) === false;
+			await k.click(KEYS.KEY_SHIFT);
+			assert(await waitForAsync(async function () {
+				return (await Keyboard.getState(KEYS.KEY_SHIFT)) === false;
 			}, 200), "shift released after click");
 
-			k.press(KEYS.KEY_SHIFT);
-			assert(waitFor(function () {
-				return Keyboard.getState(KEYS.KEY_SHIFT) === true;
+			await k.press(KEYS.KEY_SHIFT);
+			assert(await waitForAsync(async function () {
+				return (await Keyboard.getState(KEYS.KEY_SHIFT)) === true;
 			}, 200), "shift pressed");
-			k.release(KEYS.KEY_SHIFT);
-			assert(waitFor(function () {
-				return Keyboard.getState(KEYS.KEY_SHIFT) === false;
+			await k.release(KEYS.KEY_SHIFT);
+			assert(await waitForAsync(async function () {
+				return (await Keyboard.getState(KEYS.KEY_SHIFT)) === false;
 			}, 200), "shift released");
 		} else {
 			expectOrSkip("keyboardSim", "Keyboard input simulation");
@@ -104,7 +112,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		}
 
 		// --- getState() returns object ---
-		var state = Keyboard.getState();
+		var state = await Keyboard.getState();
 		assert(typeof state === "object", "getState returns object");
 
 		// --- KEYS record ---
@@ -124,19 +132,19 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(kCopy.autoDelay instanceof mechatron.Range, "copy ctor autoDelay");
 
 		// --- getState() without keycode (returns full state object) ---
-		var kState = Keyboard.getState();
+		var kState = await Keyboard.getState();
 		assert(typeof kState === "object", "getState() returns object");
 
 		// --- click with string key (exercises string click overload) ---
 		if (releaseWorks) {
-			k.click("{SPACE}");
-			assert(waitFor(function () {
-				return Keyboard.getState(KEYS.KEY_SPACE) === false;
+			await k.click("{SPACE}");
+			assert(await waitForAsync(async function () {
+				return (await Keyboard.getState(KEYS.KEY_SPACE)) === false;
 			}, 200), "click string SPACE released");
 
-			k.click("a");
-			assert(waitFor(function () {
-				return Keyboard.getState(KEYS.KEY_A) === false;
+			await k.click("a");
+			assert(await waitForAsync(async function () {
+				return (await Keyboard.getState(KEYS.KEY_A)) === false;
 			}, 200), "click string 'a' released");
 		}
 
