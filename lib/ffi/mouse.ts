@@ -8,7 +8,7 @@ import {
   uinputSelected,
 } from "./uinput";
 import {
-  user32,
+  user32, winFFI,
   MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
   MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
   MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
@@ -150,10 +150,8 @@ function win_mouse_scrollV(amount: number): void {
 
 function win_mouse_getPos(): { x: number; y: number } {
   const u = user32();
-  if (!u) return { x: 0, y: 0 };
-  let F: any;
-  try { F = require("./bun").bunFFI(); } catch { return { x: 0, y: 0 }; }
-  if (!F) return { x: 0, y: 0 };
+  const F = winFFI();
+  if (!u || !F) return { x: 0, y: 0 };
   const buf = new Int32Array(2);
   u.GetCursorPos(F.ptr(buf));
   return { x: buf[0], y: buf[1] };

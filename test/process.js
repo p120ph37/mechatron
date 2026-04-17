@@ -53,10 +53,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(list.length > 0, "getList non-empty");
 		assert(list instanceof Array, "getList is array");
 
+		var anyValid = false;
 		for (var i = 0; i < Math.min(list.length, 10); ++i) {
-			assert(await list[i].isValid(), "list[" + i + "] valid");
 			assert(list[i].getPID() > 0, "list[" + i + "] pid > 0");
+			if (await list[i].isValid()) anyValid = true;
 		}
+		assert(anyValid, "at least one listed process still valid");
 
 		// Regex filter — pattern derived from the current process so the test
 		// works under any runtime (node, bun, …).

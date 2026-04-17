@@ -155,7 +155,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// --- Framebuffer / DRM pure-encoding (no live device needed) ---
 		// Exercises the struct layout helpers from lib/screen/framebuffer.ts
 		// so coverage lands even on machines without /dev/fb0 or /dev/dri.
-		var fb = require("../lib/screen/framebuffer");
+		// Guard: this is a .ts file that Bun executes natively but Node can't
+		// load (e.g. Windows ia32 runner uses Node, not Bun).
+		var fb;
+		try { fb = require("../lib/screen/framebuffer"); } catch (_) { fb = null; }
+		if (fb) {
 
 		// fb_var_screeninfo: width/height/bpp + RGB bitfields.
 		var vinfo = new Uint8Array(160);
@@ -253,6 +257,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// captureFramebuffer stub returns null (real capture is in
 		// lib/ffi/framebuffer.ts and requires libc FFI).
 		assert(fb.captureFramebuffer(0, 0, 100, 100) === null, "pure stub returns null");
+		} else {
+			log("(framebuffer module not loadable — skipping encoding tests) ");
+		}
 
 		// --- FFI framebuffer layer: gated on ffi backend; exercises libc
 		// dlopen + captureSelected gate.  Live capture always returns null
