@@ -49,9 +49,8 @@ const gExpect: Record<string, boolean> = gExpected[gPlatformKey] || {};
 // library is deliberately denied via MECHATRON_BLOCK_DLOPEN, the
 // capabilities it provides can't be probed, so demote them from
 // "expected to work" to "may skip" on this run.  This lets the FFI
-// backend's dlopen-catch arms (lib/ffi/x11.ts:220, 234, 245) get
-// deterministic coverage without spuriously failing keyboardSim /
-// mouseSim / grabScreen assertions.
+// backend's dlopen-catch arms get deterministic coverage without
+// spuriously failing keyboardSim / mouseSim / grabScreen assertions.
 const _blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
 if (_blocked.includes("libxtst")) {
   gExpect.keyboardSim = false;

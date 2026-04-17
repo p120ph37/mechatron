@@ -89,7 +89,7 @@ export class Process {
   }
 
   async getWindows(regex?: string): Promise<Window[]> {
-    const handles: number[] = getNative("process").process_getWindows(this._pid, regex);
+    const handles: number[] = await getNative("process").process_getWindows(this._pid, regex);
     return handles.map((h) => new Window(h));
   }
 

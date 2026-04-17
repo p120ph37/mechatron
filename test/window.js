@@ -161,16 +161,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		//     XGetWindowProperty-on-destroyed-window error arm inside
 		//     winIsValid (lib/ffi/window.ts:34).  Spawn a throwaway
 		//     xmessage, confirm its handle, destroy the window via
-		//     mechatron (XDestroyWindow), then reuse the now-stale
+		//     mechatron (destroyWindow), then reuse the now-stale
 		//     handle in setHandle() — winIsValid issues
-		//     XGetWindowProperty(_NET_WM_PID, staleHandle), which the
-		//     X server answers with BadWindow.  The silent X error
-		//     handler installed in lib/ffi/x11.ts returns 0 so Xlib's
-		//     default exit(1) handler never fires; getWindowProperty
-		//     sees a non-zero status and returns null; winIsValid
-		//     returns false; setHandle returns false.  Timeouts are
-		//     kept short (bun test default per-test timeout is 5s)
-		//     and any step that can't complete falls through to the
+		//     GetProperty(_NET_WM_PID, staleHandle) via xproto, which
+		//     the X server answers with a BadWindow error that the
+		//     xproto client catches; winIsValid returns false;
+		//     setHandle returns false.  Timeouts are kept short
+		//     (bun test default per-test timeout is 5s) and any
+		//     step that can't complete falls through to the
 		//     skip path — the primary test here is the stale-handle
 		//     check after a successful destroy; xmessage-not-listed
 		//     hosts simply skip without failing the suite.
