@@ -13,52 +13,52 @@ export class Window {
     }
   }
 
-  isValid(): boolean {
+  async isValid(): Promise<boolean> {
     return getNative("window").window_isValid(this._handle);
   }
 
-  close(): void {
+  async close(): Promise<void> {
     getNative("window").window_close(this._handle);
   }
 
-  isTopMost(): boolean {
+  async isTopMost(): Promise<boolean> {
     return getNative("window").window_isTopMost(this._handle);
   }
 
-  isBorderless(): boolean {
+  async isBorderless(): Promise<boolean> {
     return getNative("window").window_isBorderless(this._handle);
   }
 
-  isMinimized(): boolean {
+  async isMinimized(): Promise<boolean> {
     return getNative("window").window_isMinimized(this._handle);
   }
 
-  isMaximized(): boolean {
+  async isMaximized(): Promise<boolean> {
     return getNative("window").window_isMaximized(this._handle);
   }
 
-  setTopMost(topMost: boolean): void {
+  async setTopMost(topMost: boolean): Promise<void> {
     getNative("window").window_setTopMost(this._handle, topMost);
   }
 
-  setBorderless(borderless: boolean): void {
+  async setBorderless(borderless: boolean): Promise<void> {
     getNative("window").window_setBorderless(this._handle, borderless);
   }
 
-  setMinimized(minimized: boolean): void {
+  async setMinimized(minimized: boolean): Promise<void> {
     getNative("window").window_setMinimized(this._handle, minimized);
   }
 
-  setMaximized(maximized: boolean): void {
+  async setMaximized(maximized: boolean): Promise<void> {
     getNative("window").window_setMaximized(this._handle, maximized);
   }
 
-  getProcess(): any {
+  async getProcess(): Promise<any> {
     const { Process } = require("../process");
     return new Process(getNative("window").window_getProcess(this._handle));
   }
 
-  getPID(): number {
+  async getPID(): Promise<number> {
     return getNative("window").window_getPID(this._handle);
   }
 
@@ -66,29 +66,29 @@ export class Window {
     return this._handle;
   }
 
-  setHandle(handle: number): boolean {
+  async setHandle(handle: number): Promise<boolean> {
     const result = getNative("window").window_setHandle(this._handle, handle);
     if (result) this._handle = handle;
     return result;
   }
 
-  getTitle(): string {
+  async getTitle(): Promise<string> {
     return getNative("window").window_getTitle(this._handle);
   }
 
-  setTitle(title: string): void {
+  async setTitle(title: string): Promise<void> {
     getNative("window").window_setTitle(this._handle, title);
   }
 
-  getBounds(): Bounds {
+  async getBounds(): Promise<Bounds> {
     const b = getNative("window").window_getBounds(this._handle);
     return new Bounds(b.x, b.y, b.w, b.h);
   }
 
-  setBounds(): void;
-  setBounds(bounds: Bounds | { x: number; y: number; w: number; h: number }): void;
-  setBounds(x: number, y: number, w: number, h: number): void;
-  setBounds(a?: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): void {
+  async setBounds(): Promise<void>;
+  async setBounds(bounds: Bounds | { x: number; y: number; w: number; h: number }): Promise<void>;
+  async setBounds(x: number, y: number, w: number, h: number): Promise<void>;
+  async setBounds(a?: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): Promise<void> {
     if (a === undefined) {
       getNative("window").window_setBounds(this._handle, 0, 0, 0, 0);
     } else if (typeof a === "number") {
@@ -98,15 +98,15 @@ export class Window {
     }
   }
 
-  getClient(): Bounds {
+  async getClient(): Promise<Bounds> {
     const b = getNative("window").window_getClient(this._handle);
     return new Bounds(b.x, b.y, b.w, b.h);
   }
 
-  setClient(): void;
-  setClient(bounds: Bounds | { x: number; y: number; w: number; h: number }): void;
-  setClient(x: number, y: number, w: number, h: number): void;
-  setClient(a?: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): void {
+  async setClient(): Promise<void>;
+  async setClient(bounds: Bounds | { x: number; y: number; w: number; h: number }): Promise<void>;
+  async setClient(x: number, y: number, w: number, h: number): Promise<void>;
+  async setClient(a?: Bounds | { x: number; y: number; w: number; h: number } | number, b?: number, c?: number, d?: number): Promise<void> {
     if (a === undefined) {
       getNative("window").window_setClient(this._handle, 0, 0, 0, 0);
     } else if (typeof a === "number") {
@@ -116,10 +116,10 @@ export class Window {
     }
   }
 
-  mapToClient(): Point;
-  mapToClient(point: Point | { x: number; y: number }): Point;
-  mapToClient(x: number, y: number): Point;
-  mapToClient(a?: Point | { x: number; y: number } | number, b?: number): Point {
+  async mapToClient(): Promise<Point>;
+  async mapToClient(point: Point | { x: number; y: number }): Promise<Point>;
+  async mapToClient(x: number, y: number): Promise<Point>;
+  async mapToClient(a?: Point | { x: number; y: number } | number, b?: number): Promise<Point> {
     let x: number, y: number;
     if (a === undefined) {
       x = 0; y = 0;
@@ -132,10 +132,10 @@ export class Window {
     return new Point(p.x, p.y);
   }
 
-  mapToScreen(): Point;
-  mapToScreen(point: Point | { x: number; y: number }): Point;
-  mapToScreen(x: number, y: number): Point;
-  mapToScreen(a?: Point | { x: number; y: number } | number, b?: number): Point {
+  async mapToScreen(): Promise<Point>;
+  async mapToScreen(point: Point | { x: number; y: number }): Promise<Point>;
+  async mapToScreen(x: number, y: number): Promise<Point>;
+  async mapToScreen(a?: Point | { x: number; y: number } | number, b?: number): Promise<Point> {
     let x: number, y: number;
     if (a === undefined) {
       x = 0; y = 0;
@@ -163,24 +163,20 @@ export class Window {
     return new Window(this._handle);
   }
 
-  static getList(title?: string): Window[] {
+  static async getList(title?: string): Promise<Window[]> {
     const handles: number[] = getNative("window").window_getList(title);
     return handles.map((h) => new Window(h));
   }
 
-  static async getListAsync(title?: string): Promise<Window[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Window.getList(title))));
-  }
-
-  static getActive(): Window {
+  static async getActive(): Promise<Window> {
     return new Window(getNative("window").window_getActive());
   }
 
-  static setActive(window: Window): void {
+  static async setActive(window: Window): Promise<void> {
     getNative("window").window_setActive(window._handle);
   }
 
-  static isAxEnabled(prompt?: boolean): boolean {
+  static async isAxEnabled(prompt?: boolean): Promise<boolean> {
     return getNative("window").window_isAxEnabled(prompt);
   }
 }

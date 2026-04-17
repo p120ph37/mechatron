@@ -64,8 +64,8 @@ export function linux_xButton(button: number): number | null {
   }
 }
 
-function linux_mouse_press(button: number): void {
-  if (xprotoSelected()) { xprotoMousePress(button); return; }
+function linux_mouse_press(button: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoMousePress(button);
   if (uinputSelected()) {
     if (injectMouseButton(button, true)) return;
   }
@@ -77,8 +77,8 @@ function linux_mouse_press(button: number): void {
   X.XSync(display, False);
 }
 
-function linux_mouse_release(button: number): void {
-  if (xprotoSelected()) { xprotoMouseRelease(button); return; }
+function linux_mouse_release(button: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoMouseRelease(button);
   if (uinputSelected()) {
     if (injectMouseButton(button, false)) return;
   }
@@ -90,8 +90,8 @@ function linux_mouse_release(button: number): void {
   X.XSync(display, False);
 }
 
-function linux_mouse_scrollH(amount: number): void {
-  if (xprotoSelected()) { xprotoScrollH(amount); return; }
+function linux_mouse_scrollH(amount: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoScrollH(amount);
   if (uinputSelected()) {
     if (injectScrollH(amount)) return;
   }
@@ -107,8 +107,8 @@ function linux_mouse_scrollH(amount: number): void {
   X.XSync(display, False);
 }
 
-function linux_mouse_scrollV(amount: number): void {
-  if (xprotoSelected()) { xprotoScrollV(amount); return; }
+function linux_mouse_scrollV(amount: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoScrollV(amount);
   if (uinputSelected()) {
     if (injectScrollV(amount)) return;
   }
@@ -149,8 +149,8 @@ function linux_mouse_getPos(): { x: number; y: number } {
   return { x: 0, y: 0 };
 }
 
-function linux_mouse_setPos(x: number, y: number): void {
-  if (xprotoSelected()) { xprotoSetPos(x, y); return; }
+function linux_mouse_setPos(x: number, y: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoSetPos(x, y);
   if (!isXTestAvailable()) return;
   const X = x11()!;
   const display = getDisplay();

@@ -19,31 +19,31 @@ export class Mouse {
     }
   }
 
-  click(button: number): void {
-    this._native.mouse_press(button);
-    Timer.sleep(this.autoDelay);
-    this._native.mouse_release(button);
-    Timer.sleep(this.autoDelay);
+  async click(button: number): Promise<void> {
+    await this._native.mouse_press(button);
+    await Timer.delay(this.autoDelay);
+    await this._native.mouse_release(button);
+    await Timer.delay(this.autoDelay);
   }
 
-  press(button: number): void {
-    this._native.mouse_press(button);
-    Timer.sleep(this.autoDelay);
+  async press(button: number): Promise<void> {
+    await this._native.mouse_press(button);
+    await Timer.delay(this.autoDelay);
   }
 
-  release(button: number): void {
-    this._native.mouse_release(button);
-    Timer.sleep(this.autoDelay);
+  async release(button: number): Promise<void> {
+    await this._native.mouse_release(button);
+    await Timer.delay(this.autoDelay);
   }
 
-  scrollH(amount: number): void {
-    this._native.mouse_scrollH(amount);
-    Timer.sleep(this.autoDelay);
+  async scrollH(amount: number): Promise<void> {
+    await this._native.mouse_scrollH(amount);
+    await Timer.delay(this.autoDelay);
   }
 
-  scrollV(amount: number): void {
-    this._native.mouse_scrollV(amount);
-    Timer.sleep(this.autoDelay);
+  async scrollV(amount: number): Promise<void> {
+    await this._native.mouse_scrollV(amount);
+    await Timer.delay(this.autoDelay);
   }
 
   clone(): Mouse {
@@ -52,17 +52,17 @@ export class Mouse {
     return copy;
   }
 
-  static getPos(): Point {
+  static async getPos(): Promise<Point> {
     const p = getNative("mouse").mouse_getPos();
     return new Point(p.x, p.y);
   }
 
-  static setPos(p: Point | { x: number; y: number } | number, y?: number): void {
+  static async setPos(p: Point | { x: number; y: number } | number, y?: number): Promise<void> {
     const pt = Point._resolve(p, y);
-    getNative("mouse").mouse_setPos(pt.x, pt.y);
+    await getNative("mouse").mouse_setPos(pt.x, pt.y);
   }
 
-  static getState(button?: number): Record<number, boolean> | boolean {
+  static async getState(button?: number): Promise<Record<number, boolean> | boolean> {
     const native = getNative("mouse");
     if (button !== undefined) {
       return native.mouse_getButtonState(button);

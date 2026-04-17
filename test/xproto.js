@@ -875,15 +875,13 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 							"xproto selected as input mechanism");
 						var bridge = require("../lib/ffi/xproto");
 						bridge._resetXprotoForTests();
-						// Sync calls enqueue async work.  Flush to await completion.
-						bridge.xprotoSetPos(42, 51);
-						bridge.xprotoMousePress(mechatron.BUTTON_LEFT);
-						bridge.xprotoMouseRelease(mechatron.BUTTON_LEFT);
-						bridge.xprotoScrollV(1);
-						bridge.xprotoScrollH(-1);
-						// 'a' keysym
-						bridge.xprotoKeyPress(0x61);
-						bridge.xprotoKeyRelease(0x61);
+						await bridge.xprotoSetPos(42, 51);
+						await bridge.xprotoMousePress(mechatron.BUTTON_LEFT);
+						await bridge.xprotoMouseRelease(mechatron.BUTTON_LEFT);
+						await bridge.xprotoScrollV(1);
+						await bridge.xprotoScrollH(-1);
+						await bridge.xprotoKeyPress(0x61);
+						await bridge.xprotoKeyRelease(0x61);
 						await bridge.xprotoFlush();
 						assert(bridge.xprotoReady(),
 							"xproto bridge opened conn and survived press burst");
@@ -893,12 +891,12 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 						// Dispatch through the public API — routes to xproto
 						// because we pinned the mechanism above.
 						var kb = new mechatron.Keyboard();
-						kb.press(0x61);
-						kb.release(0x61);
+						await kb.press(0x61);
+						await kb.release(0x61);
 						var ms = new mechatron.Mouse();
-						ms.press(mechatron.BUTTON_LEFT);
-						ms.release(mechatron.BUTTON_LEFT);
-						mechatron.Mouse.setPos(123, 234);
+						await ms.press(mechatron.BUTTON_LEFT);
+						await ms.release(mechatron.BUTTON_LEFT);
+						await mechatron.Mouse.setPos(123, 234);
 						await bridge.xprotoFlush();
 
 						bridge._resetXprotoForTests();

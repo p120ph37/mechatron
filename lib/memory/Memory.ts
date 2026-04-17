@@ -111,7 +111,6 @@ export class Region {
   }
 }
 
-// Data type enum matching C++ adapter
 const enum DataType {
   Int8 = 1,
   Int16 = 2,
@@ -142,7 +141,7 @@ export class Memory {
     }
   }
 
-  isValid(): boolean {
+  async isValid(): Promise<boolean> {
     return getNative("memory").memory_isValid(this._pid);
   }
 
@@ -151,12 +150,10 @@ export class Memory {
   }
 
   getStats(reset?: boolean): Stats {
-    // Stats are tracked in the native layer; for now return empty
-    // The native backend doesn't expose stats directly in our thin interface
     return new Stats();
   }
 
-  getRegion(address: number): Region {
+  async getRegion(address: number): Promise<Region> {
     const r = getNative("memory").memory_getRegion(this._pid, address);
     const region = new Region();
     region.valid = r.valid;
@@ -173,7 +170,7 @@ export class Memory {
     return region;
   }
 
-  getRegions(start?: number, stop?: number): Region[] {
+  async getRegions(start?: number, stop?: number): Promise<Region[]> {
     interface RawRegion {
       valid: boolean; bound: boolean; start: number; stop: number; size: number;
       readable: boolean; writable: boolean; executable: boolean; access: number;
@@ -197,64 +194,56 @@ export class Memory {
     });
   }
 
-  async getRegionsAsync(start?: number, stop?: number): Promise<Region[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.getRegions(start, stop))));
-  }
-
-  setAccess(region: Region, readable: boolean, writable: boolean, executable: boolean): boolean;
-  setAccess(region: Region, flags: number): boolean;
-  setAccess(region: Region, a: boolean | number, b?: boolean, c?: boolean): boolean {
+  async setAccess(region: Region, readable: boolean, writable: boolean, executable: boolean): Promise<boolean>;
+  async setAccess(region: Region, flags: number): Promise<boolean>;
+  async setAccess(region: Region, a: boolean | number, b?: boolean, c?: boolean): Promise<boolean> {
     if (typeof a === "number") {
       return getNative("memory").memory_setAccessFlags(this._pid, region.start, a);
     }
     return getNative("memory").memory_setAccess(this._pid, region.start, a, b!, c!);
   }
 
-  getPtrSize(): number {
+  async getPtrSize(): Promise<number> {
     return getNative("memory").memory_getPtrSize(this._pid);
   }
 
-  getMinAddress(): number {
+  async getMinAddress(): Promise<number> {
     return getNative("memory").memory_getMinAddress(this._pid);
   }
 
-  getMaxAddress(): number {
+  async getMaxAddress(): Promise<number> {
     return getNative("memory").memory_getMaxAddress(this._pid);
   }
 
-  getPageSize(): number {
+  async getPageSize(): Promise<number> {
     return getNative("memory").memory_getPageSize(this._pid);
   }
 
-  async findAsync(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): Promise<number[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.find(pattern, start, stop, limit, flags))));
-  }
-
-  find(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): number[] {
+  async find(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): Promise<number[]> {
     return getNative("memory").memory_find(this._pid, pattern, start, stop, limit, flags);
   }
 
-  createCache(address: number, size: number, blockSize: number, maxBlocks?: number, flags?: number): boolean {
+  async createCache(address: number, size: number, blockSize: number, maxBlocks?: number, flags?: number): Promise<boolean> {
     return getNative("memory").memory_createCache(this._pid, address, size, blockSize, maxBlocks, flags);
   }
 
-  clearCache(): void {
+  async clearCache(): Promise<void> {
     getNative("memory").memory_clearCache(this._pid);
   }
 
-  deleteCache(): void {
+  async deleteCache(): Promise<void> {
     getNative("memory").memory_deleteCache(this._pid);
   }
 
-  isCaching(): boolean {
+  async isCaching(): Promise<boolean> {
     return getNative("memory").memory_isCaching(this._pid);
   }
 
-  getCacheSize(): number {
+  async getCacheSize(): Promise<number> {
     return getNative("memory").memory_getCacheSize(this._pid);
   }
 
-  readData(address: number, buffer: Buffer, length?: number, flags?: number): number {
+  async readData(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
     const len = length !== undefined ? length : buffer.length;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
     const result = getNative("memory").memory_readData(this._pid, address, len, flags);
@@ -263,91 +252,83 @@ export class Memory {
     return len;
   }
 
-  writeData(address: number, buffer: Buffer, length?: number, flags?: number): number {
+  async writeData(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
     const len = length !== undefined ? length : buffer.length;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
     return getNative("memory").memory_writeData(this._pid, address, buffer, flags);
   }
 
-  async readDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.readData(address, buffer, length, flags))));
-  }
-
-  async writeDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.writeData(address, buffer, length, flags))));
-  }
-
-  readInt8(address: number, count?: number, stride?: number): number | number[] | null {
+  async readInt8(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(address, DataType.Int8, 1, count, stride);
   }
 
-  readInt16(address: number, count?: number, stride?: number): number | number[] | null {
+  async readInt16(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(address, DataType.Int16, 2, count, stride);
   }
 
-  readInt32(address: number, count?: number, stride?: number): number | number[] | null {
+  async readInt32(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(address, DataType.Int32, 4, count, stride);
   }
 
-  readInt64(address: number, count?: number, stride?: number): number | number[] | null {
+  async readInt64(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(address, DataType.Int64, 8, count, stride);
   }
 
-  readReal32(address: number, count?: number, stride?: number): number | number[] | null {
+  async readReal32(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(address, DataType.Real32, 4, count, stride);
   }
 
-  readReal64(address: number, count?: number, stride?: number): number | number[] | null {
+  async readReal64(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(address, DataType.Real64, 8, count, stride);
   }
 
-  readBool(address: number, count?: number, stride?: number): boolean | boolean[] | null {
+  async readBool(address: number, count?: number, stride?: number): Promise<boolean | boolean[] | null> {
     return this._readType(address, DataType.Bool, 1, count, stride) as any;
   }
 
-  readString(address: number, length: number, count?: number, stride?: number): string | string[] | null {
+  async readString(address: number, length: number, count?: number, stride?: number): Promise<string | string[] | null> {
     return this._readType(address, DataType.String, length, count, stride) as any;
   }
 
-  readPtr(address: number, count?: number, stride?: number): number | number[] | null {
-    const ptrSize = this.getPtrSize();
+  async readPtr(address: number, count?: number, stride?: number): Promise<number | number[] | null> {
+    const ptrSize = await this.getPtrSize();
     return this._readType(address, ptrSize === 4 ? DataType.Int32 : DataType.Int64, ptrSize, count, stride);
   }
 
-  writeInt8(address: number, value: number): boolean {
+  async writeInt8(address: number, value: number): Promise<boolean> {
     return this._writeType(address, value, DataType.Int8, 1);
   }
 
-  writeInt16(address: number, value: number): boolean {
+  async writeInt16(address: number, value: number): Promise<boolean> {
     return this._writeType(address, value, DataType.Int16, 2);
   }
 
-  writeInt32(address: number, value: number): boolean {
+  async writeInt32(address: number, value: number): Promise<boolean> {
     return this._writeType(address, value, DataType.Int32, 4);
   }
 
-  writeInt64(address: number, value: number): boolean {
+  async writeInt64(address: number, value: number): Promise<boolean> {
     return this._writeType(address, value, DataType.Int64, 8);
   }
 
-  writeReal32(address: number, value: number): boolean {
+  async writeReal32(address: number, value: number): Promise<boolean> {
     return this._writeType(address, value, DataType.Real32, 4);
   }
 
-  writeReal64(address: number, value: number): boolean {
+  async writeReal64(address: number, value: number): Promise<boolean> {
     return this._writeType(address, value, DataType.Real64, 8);
   }
 
-  writeBool(address: number, value: boolean): boolean {
+  async writeBool(address: number, value: boolean): Promise<boolean> {
     return this._writeType(address, value, DataType.Bool, 1);
   }
 
-  writeString(address: number, value: string, length?: number): boolean {
+  async writeString(address: number, value: string, length?: number): Promise<boolean> {
     return this._writeType(address, value, DataType.String, length || 0);
   }
 
-  writePtr(address: number, value: number): boolean {
-    const ptrSize = this.getPtrSize();
+  async writePtr(address: number, value: number): Promise<boolean> {
+    const ptrSize = await this.getPtrSize();
     return this._writeType(address, value, ptrSize === 4 ? DataType.Int32 : DataType.Int64, ptrSize);
   }
 

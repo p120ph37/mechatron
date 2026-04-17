@@ -25,11 +25,9 @@ import {
 
 // ==================== Linux ====================
 
-function linux_keyboard_press(keycode: number): void {
-  if (xprotoSelected()) { xprotoKeyPress(keycode); return; }
+function linux_keyboard_press(keycode: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoKeyPress(keycode);
   if (uinputSelected()) {
-    // Unmapped keysyms fall through to XTest so niche keys still reach
-    // the X server.
     if (injectKeysym(keycode, true)) return;
   }
   if (!isXTestAvailable()) return;
@@ -40,8 +38,8 @@ function linux_keyboard_press(keycode: number): void {
   X.XSync(display, False);
 }
 
-function linux_keyboard_release(keycode: number): void {
-  if (xprotoSelected()) { xprotoKeyRelease(keycode); return; }
+function linux_keyboard_release(keycode: number): void | Promise<void> {
+  if (xprotoSelected()) return xprotoKeyRelease(keycode);
   if (uinputSelected()) {
     if (injectKeysym(keycode, false)) return;
   }

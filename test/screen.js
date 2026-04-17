@@ -12,7 +12,7 @@
 
 module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
-	function testScreen() {
+	async function testScreen() {
 		log("  Screen... ");
 
 		var Screen = mechatron.Screen;
@@ -24,7 +24,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(tb instanceof Bounds, "getTotalBounds returns Bounds");
 
 		// --- synchronize ---
-		var synced = Screen.synchronize();
+		var synced = await Screen.synchronize();
 		assert(synced === true, "synchronize returns true");
 
 		var main = Screen.getMain();
@@ -60,7 +60,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- grabScreen ---
 		var img = new Image();
-		var result = Screen.grabScreen(img, 0, 0, 100, 100);
+		var result = await Screen.grabScreen(img, 0, 0, 100, 100);
 		if (result) {
 			assert(img.isValid(), "grabbed image valid");
 			assert(img.getWidth() === 100, "grabbed width 100");
@@ -69,7 +69,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			// Grab with bounds
 			var img2 = new Image();
 			var bounds = new Bounds(0, 0, 50, 50);
-			result = Screen.grabScreen(img2, bounds);
+			result = await Screen.grabScreen(img2, bounds);
 			assert(result === true, "grabScreen with bounds");
 			assert(img2.isValid(), "grabbed2 valid");
 		} else {
@@ -95,7 +95,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			getBounds: function() { return { x: 0, y: 0, w: 100, h: 100 }; },
 			getHandle: function() { return 0; }
 		};
-		var foundWin = Screen.getScreen(mockWin);
+		var foundWin = await Screen.getScreen(mockWin);
 		assert(foundWin !== null || foundWin === null, "getScreen by window-like");
 
 		// Invalid window-like
@@ -104,24 +104,21 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			getBounds: function() { return { x: 0, y: 0, w: 0, h: 0 }; },
 			getHandle: function() { return 0; }
 		};
-		assert(Screen.getScreen(mockWinInvalid) === null, "getScreen invalid window returns null");
+		assert(await Screen.getScreen(mockWinInvalid) === null, "getScreen invalid window returns null");
 
 		// --- grabScreen with window handle ---
 		if (result) {
 			var img3 = new Image();
-			var r3 = Screen.grabScreen(img3, 0, 0, 10, 10, 0);
+			var r3 = await Screen.grabScreen(img3, 0, 0, 10, 10, 0);
 			assert(typeof r3 === "boolean", "grabScreen with window handle");
-			// grabScreen with Bounds + window handle
 			var img4 = new Image();
-			var r4 = Screen.grabScreen(img4, new mechatron.Bounds(0, 0, 10, 10), 0);
+			var r4 = await Screen.grabScreen(img4, new mechatron.Bounds(0, 0, 10, 10), 0);
 			assert(typeof r4 === "boolean", "grabScreen with Bounds + handle");
-			// grabScreen with window-like object
 			var img5 = new Image();
-			var r5 = Screen.grabScreen(img5, 0, 0, 10, 10, mockWin);
+			var r5 = await Screen.grabScreen(img5, 0, 0, 10, 10, mockWin);
 			assert(typeof r5 === "boolean", "grabScreen with window-like obj");
-			// grabScreen with Bounds + window-like object
 			var img6 = new Image();
-			var r6 = Screen.grabScreen(img6, new mechatron.Bounds(0, 0, 10, 10), mockWin);
+			var r6 = await Screen.grabScreen(img6, new mechatron.Bounds(0, 0, 10, 10), mockWin);
 			assert(typeof r6 === "boolean", "grabScreen Bounds + window-like");
 		}
 
@@ -137,20 +134,19 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			var imgHuge = new Image();
 			var rHuge;
 			try {
-				rHuge = Screen.grabScreen(imgHuge, 0, 0, 100000, 100000);
+				rHuge = await Screen.grabScreen(imgHuge, 0, 0, 100000, 100000);
 			} catch (_) {
 				rHuge = false;
 			}
 			assert(typeof rHuge === "boolean", "oversize grabScreen returns boolean or throws");
 		}
 
-		// --- Async variants ---
-		var pa1 = Screen.synchronizeAsync();
-		assert(pa1 instanceof Promise, "synchronizeAsync returns Promise");
-		var pa2 = Screen.grabScreenAsync(new mechatron.Image(), 0, 0, 10, 10);
-		assert(pa2 instanceof Promise, "grabScreenAsync returns Promise");
-		var pa3 = Screen.grabScreenAsync(new mechatron.Image(), new mechatron.Bounds(0, 0, 10, 10));
-		assert(pa3 instanceof Promise, "grabScreenAsync Bounds returns Promise");
+		var pa1 = Screen.synchronize();
+		assert(pa1 instanceof Promise, "synchronize returns Promise");
+		var pa2 = Screen.grabScreen(new mechatron.Image(), 0, 0, 10, 10);
+		assert(pa2 instanceof Promise, "grabScreen returns Promise");
+		var pa3 = Screen.grabScreen(new mechatron.Image(), new mechatron.Bounds(0, 0, 10, 10));
+		assert(pa3 instanceof Promise, "grabScreen Bounds returns Promise");
 
 		// --- Screen copy constructor ---
 		var scopy = new Screen(main);

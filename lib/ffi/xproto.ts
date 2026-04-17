@@ -74,15 +74,14 @@ function ensureConn(): Promise<XConnection | null> {
   return _openPromise;
 }
 
-function enqueue(fn: (c: XConnection) => Promise<void> | void): void {
-  _chain = _chain.then(async () => {
+function enqueue(fn: (c: XConnection) => Promise<void> | void): Promise<void> {
+  const step = _chain.then(async () => {
     const c = await ensureConn();
     if (!c) return;
-    // Fire-and-forget: swallow per-op errors so a single bad keysym
-    // doesn't poison later events.  Connection-fatal errors tear the
-    // socket down inside conn.ts; subsequent enqueue() calls just no-op.
     try { await fn(c); } catch { /* ignore */ }
   });
+  _chain = step;
+  return step;
 }
 
 // =============================================================================
@@ -122,32 +121,32 @@ export function xprotoSelected(): boolean {
   return true;
 }
 
-export function xprotoKeyPress(keysym: number): void {
-  enqueue(async (c) => {
+export function xprotoKeyPress(keysym: number): Promise<void> {
+  return enqueue(async (c) => {
     const keycode = c.keysymToKeycode(keysym);
     if (keycode === 0) return;
     await c.fakeKeyPress(keycode);
   });
 }
 
-export function xprotoKeyRelease(keysym: number): void {
-  enqueue(async (c) => {
+export function xprotoKeyRelease(keysym: number): Promise<void> {
+  return enqueue(async (c) => {
     const keycode = c.keysymToKeycode(keysym);
     if (keycode === 0) return;
     await c.fakeKeyRelease(keycode);
   });
 }
 
-export function xprotoMousePress(button: number): void {
+export function xprotoMousePress(button: number): Promise<void> {
   const b = linux_xButton(button);
-  if (b === null) return;
-  enqueue((c) => c.fakeButtonPress(b));
+  if (b === null) return Promise.resolve();
+  return enqueue((c) => c.fakeButtonPress(b));
 }
 
-export function xprotoMouseRelease(button: number): void {
+export function xprotoMouseRelease(button: number): Promise<void> {
   const b = linux_xButton(button);
-  if (b === null) return;
-  enqueue((c) => c.fakeButtonRelease(b));
+  if (b === null) return Promise.resolve();
+  return enqueue((c) => c.fakeButtonRelease(b));
 }
 
 /**
@@ -155,11 +154,11 @@ export function xprotoMouseRelease(button: number): void {
  * enqueue runs the loop in one chain step to avoid microtask spam when
  * scrolling large amounts.  Matches libXtst's XTestFakeButtonEvent loop.
  */
-function xprotoScroll(amount: number, negBtn: number, posBtn: number): void {
+function xprotoScroll(amount: number, negBtn: number, posBtn: number): Promise<void> {
   const repeat = Math.abs(amount);
-  if (repeat === 0) return;
+  if (repeat === 0) return Promise.resolve();
   const button = amount < 0 ? negBtn : posBtn;
-  enqueue(async (c) => {
+  return enqueue(async (c) => {
     for (let i = 0; i < repeat; i++) {
       await c.fakeButtonPress(button);
       await c.fakeButtonRelease(button);
@@ -167,17 +166,16 @@ function xprotoScroll(amount: number, negBtn: number, posBtn: number): void {
   });
 }
 
-export function xprotoScrollV(amount: number): void {
-  xprotoScroll(amount, X_BTN_WHEEL_DOWN, X_BTN_WHEEL_UP);
+export function xprotoScrollV(amount: number): Promise<void> {
+  return xprotoScroll(amount, X_BTN_WHEEL_DOWN, X_BTN_WHEEL_UP);
 }
 
-export function xprotoScrollH(amount: number): void {
-  xprotoScroll(amount, X_BTN_WHEEL_LEFT, X_BTN_WHEEL_RIGHT);
+export function xprotoScrollH(amount: number): Promise<void> {
+  return xprotoScroll(amount, X_BTN_WHEEL_LEFT, X_BTN_WHEEL_RIGHT);
 }
 
-/** Absolute pointer warp on screen 0's root window. */
-export function xprotoSetPos(x: number, y: number): void {
-  enqueue((c) => { c.warpPointer(x, y); });
+export function xprotoSetPos(x: number, y: number): Promise<void> {
+  return enqueue((c) => { c.warpPointer(x, y); });
 }
 
 /**

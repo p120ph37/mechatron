@@ -104,45 +104,43 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- Invalid memory ---
 		var mem = new Memory();
-		assert(!mem.isValid(), "empty invalid");
+		assert(!await mem.isValid(), "empty invalid");
 
 		var proc = new Process();
 		mem = new Memory(proc);
-		assert(!mem.isValid(), "invalid proc -> invalid mem");
+		assert(!await mem.isValid(), "invalid proc -> invalid mem");
 		assert(mem.getProcess().eq(proc), "getProcess eq");
 
 		// Invalid reads/writes
 		var buf = Buffer.alloc(1);
-		assert(mem.readData(0, buf, 1) === 0, "invalid readData");
-		assert(mem.writeData(0, buf, 1) === 0, "invalid writeData");
+		assert(await mem.readData(0, buf, 1) === 0, "invalid readData");
+		assert(await mem.writeData(0, buf, 1) === 0, "invalid writeData");
 
 		// Invalid regions
-		assert(!mem.getRegion(0).valid, "invalid getRegion 0");
-		assert(mem.getRegions().length === 0, "invalid getRegions empty");
+		assert(!(await mem.getRegion(0)).valid, "invalid getRegion 0");
+		assert((await mem.getRegions()).length === 0, "invalid getRegions empty");
 
 		// Invalid find
-		assert(mem.find("  ").length === 0, "invalid find empty");
+		assert((await mem.find("  ")).length === 0, "invalid find empty");
 
 		// --- Open current process ---
-		proc = Process.getCurrent();
+		proc = await Process.getCurrent();
 		mem = new Memory(proc);
-		assert(mem.isValid(), "current mem valid");
+		assert(await mem.isValid(), "current mem valid");
 
-		// Ptr size
-		var ptrSize = mem.getPtrSize();
+		var ptrSize = await mem.getPtrSize();
 		assert(ptrSize === 4 || ptrSize === 8, "ptrSize 4 or 8");
 
-		// Min/max address, page size
-		var minAddr = mem.getMinAddress();
-		var maxAddr = mem.getMaxAddress();
-		var pageSize = mem.getPageSize();
+		var minAddr = await mem.getMinAddress();
+		var maxAddr = await mem.getMaxAddress();
+		var pageSize = await mem.getPageSize();
 		assert(minAddr >= 0, "minAddress >= 0");
 		assert(maxAddr > 0, "maxAddress > 0");
 		assert(maxAddr > minAddr, "maxAddress > minAddress");
 		assert(pageSize > 0, "pageSize > 0");
 
 		// --- Regions and read operations ---
-		var regions = mem.getRegions();
+		var regions = await mem.getRegions();
 		assert(regions.length > 0, "regions non-empty");
 
 		// Find a readable region
@@ -158,11 +156,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- Read from readable region ---
 		buf = Buffer.alloc(16);
-		var bytesRead = mem.readData(readable.start, buf, 16);
+		var bytesRead = await mem.readData(readable.start, buf, 16);
 		assert(bytesRead === 16, "readData 16 bytes");
 
 		// --- getRegion for known address ---
-		var region = mem.getRegion(readable.start);
+		var region = await mem.getRegion(readable.start);
 		assert(region.valid, "getRegion valid");
 		assert(region.bound, "getRegion bound");
 		assert(region.readable, "getRegion readable");
@@ -201,30 +199,29 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		}
 
 		// --- Cache operations ---
-		assert(typeof mem.isCaching() === "boolean", "isCaching bool");
-		assert(typeof mem.getCacheSize() === "number", "getCacheSize number");
-		// Always exercise clearCache/deleteCache (no-op when not caching)
-		mem.clearCache();
-		mem.deleteCache();
+		assert(typeof await mem.isCaching() === "boolean", "isCaching bool");
+		assert(typeof await mem.getCacheSize() === "number", "getCacheSize number");
+		await mem.clearCache();
+		await mem.deleteCache();
 		if (readable) {
-			var cached = mem.createCache(readable.start, readable.size, 4096);
+			var cached = await mem.createCache(readable.start, readable.size, 4096);
 			assert(typeof cached === "boolean", "createCache returns boolean");
 			if (cached) {
-				assert(mem.isCaching(), "isCaching after createCache");
-				assert(mem.getCacheSize() > 0, "getCacheSize > 0");
-				mem.clearCache();
-				mem.deleteCache();
-				assert(!mem.isCaching(), "!isCaching after deleteCache");
+				assert(await mem.isCaching(), "isCaching after createCache");
+				assert(await mem.getCacheSize() > 0, "getCacheSize > 0");
+				await mem.clearCache();
+				await mem.deleteCache();
+				assert(!await mem.isCaching(), "!isCaching after deleteCache");
 			}
 		}
 
 		// Modules of current process
-		var mods = proc.getModules();
+		var mods = await proc.getModules();
 		assert(mods.length > 0, "current proc has modules");
 
 		// --- Memory copy constructor ---
 		var memCopy = new Memory(mem);
-		assert(memCopy.isValid(), "Memory copy ctor valid");
+		assert(await memCopy.isValid(), "Memory copy ctor valid");
 
 		// --- Region eq/ne/lt/gt/le/ge with numbers and TypeError ---
 		if (regions.length > 0) {
@@ -265,7 +262,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- Memory clone ---
 		var memCl = mem.clone();
-		assert(memCl.isValid(), "clone valid");
+		assert(await memCl.isValid(), "clone valid");
 		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
 
 		// --- Cross-process memory write verification ---
@@ -350,13 +347,13 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			var childProc = new Process();
 			assert(childProc.open(_child.pid), "open child process");
 			var childMem = new Memory(childProc);
-			assert(childMem.isValid(), "child Memory valid");
+			assert(await childMem.isValid(), "child Memory valid");
 			assert(childMem.getProcess().getPID() === _child.pid,
 				"child Memory attached to correct pid");
 
 			// Locate the buffer via a content search on the known needle.
 			var _needle = _initialHex.substring(0, 32).match(/../g).join(" ");
-			var _addrs = childMem.find(_needle, undefined, undefined, 1);
+			var _addrs = await childMem.find(_needle, undefined, undefined, 1);
 			assert(_addrs.length > 0, "child sentinel found via find()");
 			var wa = _addrs[0];
 
@@ -371,35 +368,35 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			//   [28-31] writeReal32(1.5)
 			//   [32-39] writeReal64(2.5)
 			//   [40-47] writePtr(0x1234)
-			assert(childMem.writeInt8(wa, 0x42),
+			assert(await childMem.writeInt8(wa, 0x42),
 				"cross-process writeInt8 succeeded");
-			childMem.writeInt16(wa + 2, 0x1234);
-			childMem.writeInt32(wa + 4, 0x12345678);
-			childMem.writeBool(wa + 8, true);
-			childMem.writeInt64(wa + 16, 0x1122);
-			childMem.writeString(wa + 24, "Hi");
-			childMem.writeReal32(wa + 28, 1.5);
-			childMem.writeReal64(wa + 32, 2.5);
-			childMem.writePtr(wa + 40, 0x1234);
+			await childMem.writeInt16(wa + 2, 0x1234);
+			await childMem.writeInt32(wa + 4, 0x12345678);
+			await childMem.writeBool(wa + 8, true);
+			await childMem.writeInt64(wa + 16, 0x1122);
+			await childMem.writeString(wa + 24, "Hi");
+			await childMem.writeReal32(wa + 28, 1.5);
+			await childMem.writeReal64(wa + 32, 2.5);
+			await childMem.writePtr(wa + 40, 0x1234);
 
 			// Read back via typed read methods (cross-process read).
-			assert(childMem.readInt8(wa) === 0x42,
+			assert(await childMem.readInt8(wa) === 0x42,
 				"cross-process readInt8");
-			assert(childMem.readInt16(wa + 2) === 0x1234,
+			assert(await childMem.readInt16(wa + 2) === 0x1234,
 				"cross-process readInt16");
-			assert(childMem.readInt32(wa + 4) === 0x12345678,
+			assert(await childMem.readInt32(wa + 4) === 0x12345678,
 				"cross-process readInt32");
-			assert(childMem.readBool(wa + 8) === true,
+			assert(await childMem.readBool(wa + 8) === true,
 				"cross-process readBool");
-			assert(childMem.readInt64(wa + 16) === 0x1122,
+			assert(await childMem.readInt64(wa + 16) === 0x1122,
 				"cross-process readInt64");
-			assert(childMem.readString(wa + 24, 2) === "Hi",
+			assert(await childMem.readString(wa + 24, 2) === "Hi",
 				"cross-process readString");
-			assert(childMem.readReal32(wa + 28) === 1.5,
+			assert(await childMem.readReal32(wa + 28) === 1.5,
 				"cross-process readReal32");
-			assert(childMem.readReal64(wa + 32) === 2.5,
+			assert(await childMem.readReal64(wa + 32) === 2.5,
 				"cross-process readReal64");
-			assert(childMem.readPtr(wa + 40) === 0x1234,
+			assert(await childMem.readPtr(wa + 40) === 0x1234,
 				"cross-process readPtr");
 
 			// Belt-and-suspenders: ask the child to re-dump its buffer.
@@ -424,20 +421,19 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 				"cross-process writeReal64 visible");
 
 			// Round 2: negative / signed values
-			childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
-			childMem.writeInt8(wa, -1);           // ff
-			childMem.writeInt16(wa + 2, -2);      // fe ff
-			childMem.writeInt32(wa + 4, -3);      // fd ff ff ff
-			childMem.writeInt64(wa + 16, -4);     // fc ff ff ff ff ff ff ff
+			await childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
+			await childMem.writeInt8(wa, -1);
+			await childMem.writeInt16(wa + 2, -2);
+			await childMem.writeInt32(wa + 4, -3);
+			await childMem.writeInt64(wa + 16, -4);
 
-			// Read back via typed read methods — verify sign is preserved
-			assert(childMem.readInt8(wa) === -1,
+			assert(await childMem.readInt8(wa) === -1,
 				"cross-process readInt8 negative");
-			assert(childMem.readInt16(wa + 2) === -2,
+			assert(await childMem.readInt16(wa + 2) === -2,
 				"cross-process readInt16 negative");
-			assert(childMem.readInt32(wa + 4) === -3,
+			assert(await childMem.readInt32(wa + 4) === -3,
 				"cross-process readInt32 negative");
-			assert(childMem.readInt64(wa + 16) === -4,
+			assert(await childMem.readInt64(wa + 16) === -4,
 				"cross-process readInt64 negative");
 
 			// Verify the same via child's own view
@@ -452,7 +448,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 				"cross-process writeInt64 negative visible");
 
 			// Restore original fill
-			childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
+			await childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
 			_hex = await _queryChild();
 			assert(_hex.substring(0, 2) === "a5",
 				"cross-process writeData restore visible");
@@ -485,12 +481,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			typeof process.getuid === "function" &&
 			process.getuid() === 0) {
 			var _nrScript =
+				"(async function() {" +
 				"try {" +
 				"  var m = require(" + JSON.stringify(_path.resolve(__dirname, "..")) + ");" +
 				"  var p = new m.Process(); p.open(1);" +
 				"  var mem = new m.Memory(p);" +
-				"  process.stdout.write(mem.isValid() ? 'TASK_OK' : 'TASK_DENIED');" +
-				"} catch (e) { process.stderr.write(String(e)); }";
+				"  process.stdout.write(await mem.isValid() ? 'TASK_OK' : 'TASK_DENIED');" +
+				"} catch (e) { process.stderr.write(String(e)); }" +
+				"})();";
 			var _nrResult = null;
 			try {
 				_nrResult = _cp.spawnSync(process.execPath,
@@ -518,36 +516,35 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		// --- Multi-value (count > 1) typed reads ---
 		if (readable && readable.size >= 32) {
-			var mv8 = mem.readInt8(readable.start, 4);
+			var mv8 = await mem.readInt8(readable.start, 4);
 			assert(Array.isArray(mv8), "readInt8 count=4 returns array");
 			assert(mv8.length === 4, "readInt8 count=4 length");
-			var mv16 = mem.readInt16(readable.start, 2);
+			var mv16 = await mem.readInt16(readable.start, 2);
 			assert(Array.isArray(mv16), "readInt16 count=2 returns array");
-			var mv32 = mem.readInt32(readable.start, 2);
+			var mv32 = await mem.readInt32(readable.start, 2);
 			assert(Array.isArray(mv32), "readInt32 count=2 returns array");
-			var mvr32 = mem.readReal32(readable.start, 2);
+			var mvr32 = await mem.readReal32(readable.start, 2);
 			assert(Array.isArray(mvr32), "readReal32 count=2 returns array");
-			var mvr64 = mem.readReal64(readable.start, 2);
+			var mvr64 = await mem.readReal64(readable.start, 2);
 			assert(Array.isArray(mvr64), "readReal64 count=2 returns array");
-			var mvb = mem.readBool(readable.start, 4);
+			var mvb = await mem.readBool(readable.start, 4);
 			assert(Array.isArray(mvb), "readBool count=4 returns array");
-			var mvs = mem.readString(readable.start, 4, 2);
+			var mvs = await mem.readString(readable.start, 4, 2);
 			assert(Array.isArray(mvs), "readString count=2 returns array");
-			var mv64 = mem.readInt64(readable.start, 2);
+			var mv64 = await mem.readInt64(readable.start, 2);
 			assert(Array.isArray(mv64), "readInt64 count=2 returns array");
-			var mvp = mem.readPtr(readable.start, 2);
+			var mvp = await mem.readPtr(readable.start, 2);
 			assert(Array.isArray(mvp), "readPtr count=2 returns array");
 
-			// Multi-value with stride
-			var mvStride = mem.readInt8(readable.start, 2, 4);
+			var mvStride = await mem.readInt8(readable.start, 2, 4);
 			assert(Array.isArray(mvStride), "readInt8 with stride returns array");
 		}
 
 		// --- setAccess both overloads ---
 		if (readable) {
-			var access = mem.setAccess(readable, readable.readable, readable.writable, readable.executable);
+			var access = await mem.setAccess(readable, readable.readable, readable.writable, readable.executable);
 			assert(typeof access === "boolean", "setAccess rwx returns bool");
-			var accessFlags = mem.setAccess(readable, readable.access);
+			var accessFlags = await mem.setAccess(readable, readable.access);
 			assert(typeof accessFlags === "boolean", "setAccess flags returns bool");
 		}
 
@@ -563,9 +560,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			// 1MB span is big enough to cross region boundaries in most processes
 			var spanLen = Math.min(1024 * 1024, readable.size * 2);
 			var spanBuf = Buffer.alloc(spanLen);
-			var gotSkip = mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
+			var gotSkip = await mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
 			assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
-			var gotAuto = mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
+			var gotAuto = await mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
 			assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
 
 			// Same for writeData — target the tail of a writable region so the
@@ -579,30 +576,18 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			}
 			if (writable) {
 				var wBuf = Buffer.alloc(16);
-				var wroteSkip = mem.writeData(writable.start, wBuf, 16, Memory.SKIP_ERRORS);
+				var wroteSkip = await mem.writeData(writable.start, wBuf, 16, Memory.SKIP_ERRORS);
 				assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
-				var wroteAuto = mem.writeData(writable.start, wBuf, 16, Memory.AUTO_ACCESS);
+				var wroteAuto = await mem.writeData(writable.start, wBuf, 16, Memory.AUTO_ACCESS);
 				assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
 			}
 		}
 
 		// --- readData with zero length early-out ---
-		assert(mem.readData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "readData len=0");
-		assert(mem.writeData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "writeData len=0");
+		assert(await mem.readData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "readData len=0");
+		assert(await mem.writeData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "writeData len=0");
 
-		// --- writeDataAsync ---
-		var pa4 = mem.writeDataAsync(0, Buffer.alloc(1), 1);
-		assert(pa4 instanceof Promise, "writeDataAsync returns Promise");
-
-		// --- Async variants ---
-		var pa1 = mem.getRegionsAsync();
-		assert(pa1 instanceof Promise, "getRegionsAsync returns Promise");
-		var pa2 = mem.readDataAsync(0, Buffer.alloc(1), 1);
-		assert(pa2 instanceof Promise, "readDataAsync returns Promise");
-		var pa3 = mem.findAsync("  ");
-		assert(pa3 instanceof Promise, "findAsync returns Promise");
-
-		proc.close();
+		await proc.close();
 
 		log("OK\n");
 		return true;
