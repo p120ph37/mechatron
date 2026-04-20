@@ -1,14 +1,26 @@
 /**
  * nolib screen backend — pure TypeScript, no native libraries.
  *
- * Linux: XRandR monitor enumeration and GetImage capture via xproto socket.
- * Other platforms: not available.
+ * Two capture paths:
+ *   1. X11 xproto (GetImage) — when $DISPLAY is set.
+ *   2. Linux framebuffer (/dev/fb0) — headless/TTY fallback via ioctl bridge.
+ *
+ * Monitor enumeration uses xproto (RandR GetMonitors) when available,
+ * or a single-screen geometry derived from the framebuffer ioctl.
  */
 
+import { openSync, readSync, closeSync } from "fs";
 import { getXConnection } from "../ffi/xconn";
 import { xprotoGrabScreen } from "../ffi/xproto";
+import { ioctlSync, ioctlBridgeAvailable } from "./ioctl";
+import {
+  FRAMEBUFFER_DEV, FBIOGET_VSCREENINFO, FBIOGET_FSCREENINFO,
+  framebufferAvailable, parseFbVarScreenInfo, parseFbFixLineLength,
+  rowToArgb, type FbGeometry,
+} from "../screen/framebuffer";
 
 const IS_LINUX = process.platform === "linux";
+const HAS_DISPLAY = !!process.env.DISPLAY;
 
 interface RawRect { x: number; y: number; w: number; h: number; }
 interface ScreenInfo { bounds: RawRect; usable: RawRect; }
@@ -21,7 +33,37 @@ function intersectBounds(a: RawRect, b: RawRect): RawRect {
   return r > l && bot > t ? { x: l, y: t, w: r - l, h: bot - t } : { x: 0, y: 0, w: 0, h: 0 };
 }
 
-async function linuxSynchronize(): Promise<ScreenInfo[] | null> {
+// ─── Framebuffer geometry cache ────────────────────────────────────
+
+let _fbGeom: FbGeometry | null | undefined;
+
+function getFbGeometry(): FbGeometry | null {
+  if (_fbGeom !== undefined) return _fbGeom;
+  if (!ioctlBridgeAvailable() || !framebufferAvailable()) {
+    _fbGeom = null;
+    return null;
+  }
+  const result = ioctlSync(FRAMEBUFFER_DEV, [
+    { request: FBIOGET_VSCREENINFO, data: Buffer.alloc(160) },
+    { request: FBIOGET_FSCREENINFO, data: Buffer.alloc(68) },
+  ]);
+  if (!result || result.outputs.length < 2) {
+    _fbGeom = null;
+    return null;
+  }
+  const geom = parseFbVarScreenInfo(result.outputs[0]);
+  geom.lineLength = parseFbFixLineLength(result.outputs[1]);
+  if (geom.width === 0 || geom.height === 0 || geom.lineLength === 0) {
+    _fbGeom = null;
+    return null;
+  }
+  _fbGeom = geom;
+  return geom;
+}
+
+// ─── xproto path ───────────────────────────────────────────────────
+
+async function xprotoSynchronize(): Promise<ScreenInfo[] | null> {
   const c = await getXConnection();
   if (!c) return null;
 
@@ -70,18 +112,87 @@ async function linuxSynchronize(): Promise<ScreenInfo[] | null> {
   return screens.length > 0 ? screens : null;
 }
 
-async function linuxGrabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Promise<Uint32Array | null> {
-  return xprotoGrabScreen(x, y, w, h, windowHandle);
+// ─── Framebuffer path ──────────────────────────────────────────────
+
+function fbSynchronize(): ScreenInfo[] | null {
+  const geom = getFbGeometry();
+  if (!geom) return null;
+  const bounds: RawRect = { x: 0, y: 0, w: geom.width, h: geom.height };
+  return [{ bounds, usable: bounds }];
 }
 
-export function screen_synchronize(): Promise<ScreenInfo[] | null> {
-  return linuxSynchronize();
+function fbGrabScreen(x: number, y: number, w: number, h: number): Uint32Array | null {
+  const geom = getFbGeometry();
+  if (!geom) return null;
+
+  const clampX = Math.max(0, Math.min(x, geom.width));
+  const clampY = Math.max(0, Math.min(y, geom.height));
+  const clampW = Math.min(w, geom.width - clampX);
+  const clampH = Math.min(h, geom.height - clampY);
+  if (clampW <= 0 || clampH <= 0) return null;
+
+  const bytesPerPixel = geom.bitsPerPixel / 8;
+  const rowBytes = geom.lineLength;
+
+  let fd: number;
+  try {
+    fd = openSync(FRAMEBUFFER_DEV, "r");
+  } catch {
+    return null;
+  }
+
+  try {
+    const pixels = new Uint32Array(clampW * clampH);
+    const pixelRowBytes = clampW * bytesPerPixel;
+    const startOffset = clampY * rowBytes + clampX * bytesPerPixel;
+
+    if (clampX === 0 && pixelRowBytes === rowBytes) {
+      const bulk = new Uint8Array(rowBytes * clampH);
+      readSync(fd, bulk, 0, bulk.length, startOffset);
+      for (let row = 0; row < clampH; row++) {
+        rowToArgb(bulk, row * rowBytes, pixels, row * clampW, clampW, geom);
+      }
+    } else {
+      const rowBuf = new Uint8Array(pixelRowBytes);
+      for (let row = 0; row < clampH; row++) {
+        const fileOffset = startOffset + row * rowBytes;
+        readSync(fd, rowBuf, 0, rowBuf.length, fileOffset);
+        rowToArgb(rowBuf, 0, pixels, row * clampW, clampW, geom);
+      }
+    }
+
+    return pixels;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
 }
 
-export function screen_grabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Promise<Uint32Array | null> {
-  return linuxGrabScreen(x, y, w, h, windowHandle);
+// ─── Exported API ──────────────────────────────────────────────────
+
+export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
+  if (HAS_DISPLAY) {
+    const result = await xprotoSynchronize();
+    if (result) return result;
+  }
+  return fbSynchronize();
 }
 
-if (!IS_LINUX || !process.env.DISPLAY) {
-  throw new Error("nolib/screen: requires Linux with $DISPLAY");
+export async function screen_grabScreen(
+  x: number, y: number, w: number, h: number, windowHandle?: number,
+): Promise<Uint32Array | null> {
+  if (HAS_DISPLAY) {
+    const result = await xprotoGrabScreen(x, y, w, h, windowHandle);
+    if (result) return result;
+  }
+  return fbGrabScreen(x, y, w, h);
+}
+
+if (!IS_LINUX) {
+  throw new Error("nolib/screen: requires Linux");
+}
+
+if (!HAS_DISPLAY && !framebufferAvailable()) {
+  throw new Error("nolib/screen: requires $DISPLAY or /dev/fb0");
 }

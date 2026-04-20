@@ -28,17 +28,13 @@ import { openSync, writeSync, closeSync } from "fs";
 import { libc, libcFFI, libcOpenReason, O_RDWR } from "./libc";
 import { getMechanism } from "../platform";
 import {
-  BUTTON_LEFT as BTN_IDX_LEFT, BUTTON_MID as BTN_IDX_MID,
-  BUTTON_RIGHT as BTN_IDX_RIGHT, BUTTON_X1 as BTN_IDX_X1, BUTTON_X2 as BTN_IDX_X2,
-} from "../mouse/constants";
-import {
   EV_SYN, EV_KEY, EV_REL,
   REL_X, REL_Y, REL_WHEEL, REL_HWHEEL,
-  BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA,
   UI_DEV_CREATE, UI_DEV_DESTROY, UI_DEV_SETUP,
   UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT,
   encodeEventBurst, encodeUinputSetup,
-  allSupportedEvdevCodes, mapKeysymToKeycode,
+  allSupportedEvdevCodes,
+  makeInjectKeysym, makeInjectMouseButton, makeInjectScroll,
   type UInputEvent,
 } from "../input/uinput";
 
@@ -180,54 +176,10 @@ function emit(events: UInputEvent[]): boolean {
   return dev ? writeEvents(dev.fd, events) : false;
 }
 
-/**
- * Press or release a mechatron KEYS.* keysym via uinput.  Returns true
- * when the keysym mapped to a valid evdev code and the write succeeded,
- * false when the keysym is unknown to the mapping (caller's responsibility
- * to fall back — the dispatcher in keyboard.ts routes unknown keys to
- * XTest if available).
- */
-export function injectKeysym(keysym: number, press: boolean): boolean {
-  const code = mapKeysymToKeycode(keysym);
-  if (code === 0) return false;
-  return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
-}
-
-/**
- * Press or release a mouse button.  `button` is 0=Left, 1=Middle,
- * 2=Right, 3=Back/X1, 4=Forward/X2 (matches mechatron BUTTON_* values).
- */
-export function injectMouseButton(button: number, press: boolean): boolean {
-  let code: number;
-  switch (button) {
-    case BTN_IDX_LEFT:  code = BTN_LEFT; break;
-    case BTN_IDX_MID:   code = BTN_MIDDLE; break;
-    case BTN_IDX_RIGHT: code = BTN_RIGHT; break;
-    case BTN_IDX_X1:    code = BTN_SIDE; break;
-    case BTN_IDX_X2:    code = BTN_EXTRA; break;
-    default: return false;
-  }
-  return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
-}
-
-/**
- * Vertical scroll.  evdev `REL_WHEEL` expresses discrete notches, not
- * pixels — a value of 1 is "one notch up" which the compositor then
- * maps to pixels via its own scroll acceleration curves.  mechatron's
- * public scroll* API is discrete notches too, so a straight pass-through
- * is correct.  Zero-amount is an inert success — skip the device-open
- * trigger entirely.
- */
-export function injectScrollV(amount: number): boolean {
-  if (amount === 0) return true;
-  return emit([{ type: EV_REL, code: REL_WHEEL, value: amount }]);
-}
-
-/** Horizontal scroll — same discrete-notches semantics as `injectScrollV`. */
-export function injectScrollH(amount: number): boolean {
-  if (amount === 0) return true;
-  return emit([{ type: EV_REL, code: REL_HWHEEL, value: amount }]);
-}
+export const injectKeysym = makeInjectKeysym(emit);
+export const injectMouseButton = makeInjectMouseButton(emit);
+export const injectScrollV = makeInjectScroll(emit, REL_WHEEL);
+export const injectScrollH = makeInjectScroll(emit, REL_HWHEEL);
 
 /**
  * Is the uinput path fully operational?  True when the module has

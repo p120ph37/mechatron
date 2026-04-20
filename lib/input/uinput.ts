@@ -314,6 +314,57 @@ export function encodeEventBurst(
 }
 
 // =============================================================================
+// Shared inject helpers (used by both ffi/uinput.ts and nolib/uinput.ts)
+// =============================================================================
+
+import {
+  BUTTON_LEFT as BTN_IDX_LEFT, BUTTON_MID as BTN_IDX_MID,
+  BUTTON_RIGHT as BTN_IDX_RIGHT, BUTTON_X1 as BTN_IDX_X1, BUTTON_X2 as BTN_IDX_X2,
+} from "../mouse/constants";
+
+type Emitter = (events: UInputEvent[]) => boolean;
+
+export function makeInjectKeysym(emit: Emitter) {
+  return (keysym: number, press: boolean): boolean => {
+    const code = mapKeysymToKeycode(keysym);
+    if (code === 0) return false;
+    return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
+  };
+}
+
+export function makeInjectMouseButton(emit: Emitter) {
+  return (button: number, press: boolean): boolean => {
+    let code: number;
+    switch (button) {
+      case BTN_IDX_LEFT:  code = BTN_LEFT; break;
+      case BTN_IDX_MID:   code = BTN_MIDDLE; break;
+      case BTN_IDX_RIGHT: code = BTN_RIGHT; break;
+      case BTN_IDX_X1:    code = BTN_SIDE; break;
+      case BTN_IDX_X2:    code = BTN_EXTRA; break;
+      default: return false;
+    }
+    return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
+  };
+}
+
+export function makeInjectScroll(emit: Emitter, axis: number) {
+  return (amount: number): boolean => {
+    if (amount === 0) return true;
+    return emit([{ type: EV_REL, code: axis, value: amount }]);
+  };
+}
+
+export function makeInjectRelMotion(emit: Emitter) {
+  return (dx: number, dy: number): boolean => {
+    const events: UInputEvent[] = [];
+    if (dx !== 0) events.push({ type: EV_REL, code: REL_X, value: dx });
+    if (dy !== 0) events.push({ type: EV_REL, code: REL_Y, value: dy });
+    if (events.length === 0) return true;
+    return emit(events);
+  };
+}
+
+// =============================================================================
 // Probe / availability
 // =============================================================================
 
