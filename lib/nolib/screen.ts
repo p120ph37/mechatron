@@ -10,6 +10,7 @@
  */
 
 import { openSync, readSync, closeSync } from "fs";
+import { getNolibVariant } from "../backend";
 import { getXConnection } from "../ffi/xconn";
 import { xprotoGrabScreen } from "../ffi/xproto";
 import { ioctlSync, ioctlBridgeAvailable } from "./ioctl";
@@ -21,6 +22,10 @@ import {
 
 const IS_LINUX = process.platform === "linux";
 const HAS_DISPLAY = !!process.env.DISPLAY;
+const VARIANT = getNolibVariant();
+
+const USE_X11 = HAS_DISPLAY && (VARIANT === "x11" || VARIANT === undefined);
+const USE_VT = (VARIANT === "vt" || VARIANT === undefined);
 
 interface RawRect { x: number; y: number; w: number; h: number; }
 interface ScreenInfo { bounds: RawRect; usable: RawRect; }
@@ -172,27 +177,34 @@ function fbGrabScreen(x: number, y: number, w: number, h: number): Uint32Array |
 // ─── Exported API ──────────────────────────────────────────────────
 
 export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
-  if (HAS_DISPLAY) {
+  if (USE_X11) {
     const result = await xprotoSynchronize();
     if (result) return result;
   }
-  return fbSynchronize();
+  if (USE_VT) return fbSynchronize();
+  return null;
 }
 
 export async function screen_grabScreen(
   x: number, y: number, w: number, h: number, windowHandle?: number,
 ): Promise<Uint32Array | null> {
-  if (HAS_DISPLAY) {
+  if (USE_X11) {
     const result = await xprotoGrabScreen(x, y, w, h, windowHandle);
     if (result) return result;
   }
-  return fbGrabScreen(x, y, w, h);
+  if (USE_VT) return fbGrabScreen(x, y, w, h);
+  return null;
 }
 
 if (!IS_LINUX) {
   throw new Error("nolib/screen: requires Linux");
 }
-
+if (VARIANT === "x11" && !HAS_DISPLAY) {
+  throw new Error("nolib/screen[x11]: requires $DISPLAY");
+}
+if (VARIANT === "vt" && !framebufferAvailable()) {
+  throw new Error("nolib/screen[vt]: requires /dev/fb0");
+}
 if (!HAS_DISPLAY && !framebufferAvailable()) {
   throw new Error("nolib/screen: requires $DISPLAY or /dev/fb0");
 }

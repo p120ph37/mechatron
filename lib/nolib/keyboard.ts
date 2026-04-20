@@ -1,17 +1,22 @@
 /**
  * nolib keyboard backend — pure TypeScript, no native libraries.
  *
- * Two input paths:
- *   1. X11 xproto (XTest FakeKeyEvent) — when $DISPLAY is set.
- *   2. uinput via ioctl bridge — headless/Wayland fallback via /dev/uinput.
+ * Two variants:
+ *   - x11: XTest FakeKeyEvent via xproto socket. Requires $DISPLAY.
+ *   - vt:  uinput via ioctl bridge. Requires /dev/uinput + interpreter.
  */
 
+import { getNolibVariant } from "../backend";
 import { getXConnection } from "../ffi/xconn";
 import { xprotoKeyPress, xprotoKeyRelease } from "../ffi/xproto";
 import { nolibUinputAvailable, injectKeysym } from "./uinput";
 
 const IS_LINUX = process.platform === "linux";
 const HAS_DISPLAY = !!process.env.DISPLAY;
+const VARIANT = getNolibVariant();
+
+const USE_X11 = HAS_DISPLAY && (VARIANT === "x11" || VARIANT === undefined);
+const USE_VT = !USE_X11 && (VARIANT === "vt" || VARIANT === undefined);
 
 let _hasUinput: boolean | undefined;
 function hasUinput(): boolean {
@@ -20,17 +25,17 @@ function hasUinput(): boolean {
 }
 
 async function linux_keyboard_press(keycode: number): Promise<void> {
-  if (HAS_DISPLAY) return xprotoKeyPress(keycode);
+  if (USE_X11) return xprotoKeyPress(keycode);
   injectKeysym(keycode, true);
 }
 
 async function linux_keyboard_release(keycode: number): Promise<void> {
-  if (HAS_DISPLAY) return xprotoKeyRelease(keycode);
+  if (USE_X11) return xprotoKeyRelease(keycode);
   injectKeysym(keycode, false);
 }
 
 async function linux_keyboard_getKeyState(keycode: number): Promise<boolean> {
-  if (!HAS_DISPLAY) return false;
+  if (!USE_X11) return false;
   const c = await getXConnection();
   if (!c) return false;
   const keymap = await c.queryKeymap();
@@ -43,6 +48,15 @@ export const keyboard_press = IS_LINUX ? linux_keyboard_press : null;
 export const keyboard_release = IS_LINUX ? linux_keyboard_release : null;
 export const keyboard_getKeyState = IS_LINUX ? linux_keyboard_getKeyState : null;
 
-if (!IS_LINUX || (!HAS_DISPLAY && !hasUinput())) {
-  throw new Error("nolib/keyboard: requires Linux with $DISPLAY or /dev/uinput");
+if (!IS_LINUX) {
+  throw new Error("nolib/keyboard: requires Linux");
+}
+if (VARIANT === "x11" && !HAS_DISPLAY) {
+  throw new Error("nolib/keyboard[x11]: requires $DISPLAY");
+}
+if (VARIANT === "vt" && !hasUinput()) {
+  throw new Error("nolib/keyboard[vt]: requires /dev/uinput");
+}
+if (!HAS_DISPLAY && !hasUinput()) {
+  throw new Error("nolib/keyboard: requires $DISPLAY or /dev/uinput");
 }

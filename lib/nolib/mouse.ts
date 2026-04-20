@@ -1,13 +1,14 @@
 /**
  * nolib mouse backend — pure TypeScript, no native libraries.
  *
- * Two input paths:
- *   1. X11 xproto (XTest FakeButtonEvent / WarpPointer) — when $DISPLAY is set.
- *   2. uinput via ioctl bridge — headless/Wayland fallback via /dev/uinput.
- *      Note: uinput only supports relative motion, not absolute positioning.
- *      getPos/setPos/getButtonState require X11.
+ * Two variants:
+ *   - x11: XTest FakeButtonEvent / WarpPointer via xproto. Requires $DISPLAY.
+ *   - vt:  uinput via ioctl bridge. Requires /dev/uinput + interpreter.
+ *     Note: vt only supports relative motion; getPos/setPos/getButtonState
+ *     are no-ops without X11.
  */
 
+import { getNolibVariant } from "../backend";
 import { getXConnection } from "../ffi/xconn";
 import {
   xprotoMousePress, xprotoMouseRelease,
@@ -21,6 +22,10 @@ import {
 
 const IS_LINUX = process.platform === "linux";
 const HAS_DISPLAY = !!process.env.DISPLAY;
+const VARIANT = getNolibVariant();
+
+const USE_X11 = HAS_DISPLAY && (VARIANT === "x11" || VARIANT === undefined);
+const USE_VT = !USE_X11 && (VARIANT === "vt" || VARIANT === undefined);
 
 let _hasUinput: boolean | undefined;
 function hasUinput(): boolean {
@@ -33,27 +38,27 @@ const Button2Mask = 1 << 9;
 const Button3Mask = 1 << 10;
 
 function linux_mouse_press(button: number): Promise<void> | void {
-  if (HAS_DISPLAY) return xprotoMousePress(button);
+  if (USE_X11) return xprotoMousePress(button);
   injectMouseButton(button, true);
 }
 
 function linux_mouse_release(button: number): Promise<void> | void {
-  if (HAS_DISPLAY) return xprotoMouseRelease(button);
+  if (USE_X11) return xprotoMouseRelease(button);
   injectMouseButton(button, false);
 }
 
 function linux_mouse_scrollH(amount: number): Promise<void> | void {
-  if (HAS_DISPLAY) return xprotoScrollH(amount);
+  if (USE_X11) return xprotoScrollH(amount);
   injectScrollH(amount);
 }
 
 function linux_mouse_scrollV(amount: number): Promise<void> | void {
-  if (HAS_DISPLAY) return xprotoScrollV(amount);
+  if (USE_X11) return xprotoScrollV(amount);
   injectScrollV(amount);
 }
 
 async function linux_mouse_getPos(): Promise<{ x: number; y: number }> {
-  if (!HAS_DISPLAY) return { x: 0, y: 0 };
+  if (!USE_X11) return { x: 0, y: 0 };
   const c = await getXConnection();
   if (!c) return { x: 0, y: 0 };
   const qp = await c.queryPointer();
@@ -61,12 +66,12 @@ async function linux_mouse_getPos(): Promise<{ x: number; y: number }> {
 }
 
 function linux_mouse_setPos(x: number, y: number): Promise<void> {
-  if (!HAS_DISPLAY) return Promise.resolve();
+  if (!USE_X11) return Promise.resolve();
   return xprotoSetPos(x, y);
 }
 
 async function linux_mouse_getButtonState(button: number): Promise<boolean> {
-  if (!HAS_DISPLAY) return false;
+  if (!USE_X11) return false;
   if (button === BUTTON_X1 || button === BUTTON_X2) return false;
   const c = await getXConnection();
   if (!c) return false;
@@ -88,6 +93,15 @@ export const mouse_getPos = IS_LINUX ? linux_mouse_getPos : null;
 export const mouse_setPos = IS_LINUX ? linux_mouse_setPos : null;
 export const mouse_getButtonState = IS_LINUX ? linux_mouse_getButtonState : null;
 
-if (!IS_LINUX || (!HAS_DISPLAY && !hasUinput())) {
-  throw new Error("nolib/mouse: requires Linux with $DISPLAY or /dev/uinput");
+if (!IS_LINUX) {
+  throw new Error("nolib/mouse: requires Linux");
+}
+if (VARIANT === "x11" && !HAS_DISPLAY) {
+  throw new Error("nolib/mouse[x11]: requires $DISPLAY");
+}
+if (VARIANT === "vt" && !hasUinput()) {
+  throw new Error("nolib/mouse[vt]: requires /dev/uinput");
+}
+if (!HAS_DISPLAY && !hasUinput()) {
+  throw new Error("nolib/mouse: requires $DISPLAY or /dev/uinput");
 }
