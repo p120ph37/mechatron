@@ -24,6 +24,13 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		log("  Mouse... ");
 
 		var Mouse = mechatron.Mouse;
+
+		if (!mechatron.isAvailable("mouse")) {
+			expectOrSkip("mouseSim", "mouse backend");
+			log("(backend unavailable) OK\n");
+			return true;
+		}
+
 		var m = new Mouse();
 
 		var old = await Mouse.getPos();

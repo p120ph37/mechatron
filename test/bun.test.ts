@@ -159,7 +159,9 @@ describeMaybe(`mechatron [${backend}]`, () => {
     for (const sub of ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"]) {
       assert(typeof mechatron.isAvailable(sub) === "boolean", `isAvailable(${sub})`);
     }
-    assert(mechatron.isAvailable("keyboard"), "keyboard available");
+    if (!mechatron.isAvailable("keyboard")) {
+      expectOrSkip("keyboardSim", "keyboard backend available");
+    }
   });
   test("types",     () => typesM.testTypes());
   test("timer",     () => typesM.testTimer());

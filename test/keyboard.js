@@ -25,7 +25,6 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 
 		var Keyboard = mechatron.Keyboard;
 		var KEYS = mechatron.KEYS;
-		var k = new Keyboard();
 
 		// --- compile (purely computational) ---
 		var list = Keyboard.compile("{SPACE}");
@@ -79,6 +78,14 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// Compile repetition edge: 0 count
 		list = Keyboard.compile("{SPACE 0}");
 		assert(list !== null && list.length === 0, "compile SPACE x0 empty");
+
+		if (!mechatron.isAvailable("keyboard")) {
+			expectOrSkip("keyboardSim", "keyboard backend");
+			log("(backend unavailable) OK\n");
+			return true;
+		}
+
+		var k = new Keyboard();
 
 		// --- autoDelay ---
 		assert(k.autoDelay instanceof mechatron.Range, "autoDelay is Range");

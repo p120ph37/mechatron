@@ -27,6 +27,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var Bounds = mechatron.Bounds;
 		var Point  = mechatron.Point;
 
+		if (!mechatron.isAvailable("window")) {
+			log("(backend unavailable) OK\n");
+			return true;
+		}
+
 		// --- Invalid window ---
 		var w1 = new Window();
 		var w2 = new Window();

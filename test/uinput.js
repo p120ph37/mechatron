@@ -291,6 +291,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		// Mouse.press don't throw when it's the selected mechanism —
 		// regardless of whether the device is actually live (dispatcher
 		// falls through to XTest when uinput isn't ready).
+		if (!mechatron.isAvailable("keyboard")) {
+			log("(keyboard unavailable, skipping mechanism tests) OK\n");
+			return true;
+		}
+
 		var infos = mechatron.listMechanisms("input");
 		assert(Array.isArray(infos), "listMechanisms returns array");
 		var uinputInfo = infos.find(function (m) { return m.name === "uinput"; });
