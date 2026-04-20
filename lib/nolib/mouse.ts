@@ -96,6 +96,9 @@ export const mouse_getButtonState = IS_LINUX ? linux_mouse_getButtonState : null
 if (!IS_LINUX) {
   throw new Error("nolib/mouse: requires Linux");
 }
+if (VARIANT === "portal") {
+  throw new Error("nolib/mouse[portal]: RemoteDesktop D-Bus backend not yet implemented");
+}
 if (VARIANT === "x11" && !HAS_DISPLAY) {
   throw new Error("nolib/mouse[x11]: requires $DISPLAY");
 }

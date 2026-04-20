@@ -44,7 +44,7 @@ export {
 
 // Native availability checking
 export { isAvailable, getBackend } from "./backend";
-export type { Subsystem, Backend, NolibVariant, BackendEntry } from "./backend";
+export type { Subsystem, Backend, Variant, BackendEntry } from "./backend";
 
 // Platform mechanism introspection — discover / select / override which
 // backend mechanism is in use per capability, and manage cacheable

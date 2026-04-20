@@ -433,6 +433,6 @@ const VARIANT = getNolibVariant();
 if (!IS_LINUX || !process.env.DISPLAY) {
   throw new Error("nolib/window: requires Linux with $DISPLAY");
 }
-if (VARIANT === "vt") {
-  throw new Error("nolib/window[vt]: window management requires X11");
+if (VARIANT === "portal" || VARIANT === "vt") {
+  throw new Error(`nolib/window[${VARIANT}]: window management requires X11`);
 }

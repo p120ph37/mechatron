@@ -1,5 +1,5 @@
 /**
- * Backend resolver — three-tier preference-list dispatch.
+ * Backend resolver — three-tier preference-list dispatch with variant support.
  *
  * Backends:
  *   - **napi**: Rust `.node` binaries from `@mechatronic/napi-<sub>`.
@@ -8,25 +8,36 @@
  *   - **ffi**: dlopen via `bun:ffi` (libX11/libXtst on Linux, user32 on
  *     Windows, CoreGraphics on macOS).  Bun only.  Fast; full coverage.
  *
- *   - **nolib**: Pure TypeScript — no native libraries.  Two variants:
- *       - **x11**: X11 wire protocol (xproto) over sockets.  Requires $DISPLAY.
- *       - **vt**: Device-level access (uinput + framebuffer).  Requires
- *         /dev/uinput and/or /dev/fb0.  Works headless.
- *     Bare `nolib` expands to `nolib[x11], nolib[vt]`.
+ *   - **nolib**: Pure TypeScript — no native libraries.  Uses direct
+ *     protocols, subprocess bridges, or device access.
+ *
+ * Variants (apply to all backends on Linux):
+ *   - **x11**:    X11-based (napi: libX11/libXtst, ffi: dlopen, nolib: xproto).
+ *   - **portal**: Wayland portal (napi: libei, ffi: dlopen libei,
+ *                 nolib: D-Bus RemoteDesktop + ScreenCast).
+ *   - **vt**:     Device-level (nolib only: uinput + framebuffer).
+ *
+ * On non-Linux, variants are ignored — napi/ffi use native OS APIs directly.
  *
  * Selection:
  *   `MECHATRON_BACKEND` env var accepts a comma-separated preference list.
  *   Per-subsystem overrides via `MECHATRON_BACKEND_KEYBOARD`, `_SCREEN`, etc.
  *
  *   Examples:
- *     MECHATRON_BACKEND=ffi,nolib              # ffi first, then all nolib
- *     MECHATRON_BACKEND=ffi,nolib[x11]         # ffi first, then xproto only
- *     MECHATRON_BACKEND=nolib[x11],nolib[vt]   # explicit nolib fallback order
- *     MECHATRON_BACKEND_SCREEN=nolib[vt]       # screen uses framebuffer only
+ *     MECHATRON_BACKEND=ffi,nolib               # all defaults per backend
+ *     MECHATRON_BACKEND=ffi[x11],nolib[portal]  # explicit variant selection
+ *     MECHATRON_BACKEND=napi[x11],napi[portal]  # x11 napi first, portal napi fallback
+ *     MECHATRON_BACKEND_SCREEN=nolib[vt]        # framebuffer for screen only
  *
- *   Defaults:
- *     Bun:  napi, ffi, nolib
- *     Node: napi, nolib
+ *   Defaults (Linux, Bun):
+ *     napi[x11], napi[portal], ffi[x11], ffi[portal],
+ *     nolib[x11], nolib[portal], nolib[vt]
+ *
+ *   Defaults (Linux, Node):
+ *     napi[x11], napi[portal], nolib[x11], nolib[portal], nolib[vt]
+ *
+ *   Defaults (non-Linux):
+ *     napi, ffi (Bun) or napi (Node)
  */
 
 export const SUBSYSTEMS = [
@@ -35,16 +46,29 @@ export const SUBSYSTEMS = [
 
 export type Subsystem = (typeof SUBSYSTEMS)[number];
 export type Backend = "napi" | "ffi" | "nolib";
-export type NolibVariant = "x11" | "vt";
+export type Variant = "x11" | "portal" | "vt";
 
 export interface BackendEntry {
   backend: Backend;
-  variant?: NolibVariant;
+  variant?: Variant;
 }
 
 const IS_BUN = typeof (globalThis as any).Bun !== "undefined";
+const IS_LINUX = process.platform === "linux";
 
-const NOLIB_VARIANTS: NolibVariant[] = ["x11", "vt"];
+const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "vt"];
+
+const NAPI_VARIANTS: readonly Variant[] = ["x11", "portal"];
+const FFI_VARIANTS: readonly Variant[] = ["x11", "portal"];
+const NOLIB_VARIANTS: readonly Variant[] = ["x11", "portal", "vt"];
+
+function variantsFor(backend: Backend): readonly Variant[] {
+  switch (backend) {
+    case "napi": return NAPI_VARIANTS;
+    case "ffi": return FFI_VARIANTS;
+    case "nolib": return NOLIB_VARIANTS;
+  }
+}
 
 function parseEntries(raw: string): BackendEntry[] {
   const parts = raw.toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
@@ -54,14 +78,15 @@ function parseEntries(raw: string): BackendEntry[] {
     if (!m) continue;
     const backend = m[1] as Backend;
     const variantStr = m[2];
-    if (backend === "nolib" && variantStr) {
+    if (variantStr) {
+      const allowed = variantsFor(backend);
       for (const v of variantStr.split(",").map(s => s.trim())) {
-        if (v === "x11" || v === "vt") {
-          entries.push({ backend, variant: v });
+        if (allowed.includes(v as Variant)) {
+          entries.push({ backend, variant: v as Variant });
         }
       }
-    } else if (backend === "nolib") {
-      for (const v of NOLIB_VARIANTS) entries.push({ backend, variant: v });
+    } else if (IS_LINUX) {
+      for (const v of variantsFor(backend)) entries.push({ backend, variant: v });
     } else {
       entries.push({ backend });
     }
@@ -85,64 +110,109 @@ function parseBackendPref(subsystem: Subsystem): BackendEntry[] | null {
 }
 
 function defaultOrder(): BackendEntry[] {
-  const base: BackendEntry[] = [{ backend: "napi" }];
-  if (IS_BUN) base.push({ backend: "ffi" });
-  for (const v of NOLIB_VARIANTS) base.push({ backend: "nolib", variant: v });
-  return base;
+  if (!IS_LINUX) {
+    const base: BackendEntry[] = [{ backend: "napi" }];
+    if (IS_BUN) base.push({ backend: "ffi" });
+    return base;
+  }
+  const entries: BackendEntry[] = [];
+  // napi[x11], napi[portal]
+  for (const v of NAPI_VARIANTS) entries.push({ backend: "napi", variant: v });
+  // ffi[x11], ffi[portal]  (Bun only)
+  if (IS_BUN) {
+    for (const v of FFI_VARIANTS) entries.push({ backend: "ffi", variant: v });
+  }
+  // nolib[x11], nolib[portal], nolib[vt]
+  for (const v of NOLIB_VARIANTS) entries.push({ backend: "nolib", variant: v });
+  return entries;
 }
 
-function tryLoadNapi(subsystem: Subsystem): any | null {
-  try {
-    return require(`./napi/${subsystem}`);
-  } catch {
+// ─── Variant state ──────────────────────────────────────────────────
+
+let _currentVariant: Variant | undefined;
+
+/** Read by backend modules at load time to know which variant is requested. */
+export function getRequestedVariant(): Variant | undefined {
+  return _currentVariant;
+}
+
+// Keep the old name as an alias for nolib modules that already import it.
+export { getRequestedVariant as getNolibVariant };
+
+// ─── Backend loaders ────────────────────────────────────────────────
+
+const _variantCache: Partial<Record<string, any>> = {};
+
+function cacheKey(backend: Backend, subsystem: Subsystem, variant?: Variant): string {
+  return variant ? `${backend}:${subsystem}:${variant}` : `${backend}:${subsystem}`;
+}
+
+function tryLoadVariant(
+  backend: Backend, subsystem: Subsystem, variant?: Variant,
+): any | null {
+  const key = cacheKey(backend, subsystem, variant);
+  if (key in _variantCache) return _variantCache[key];
+
+  if (backend === "ffi" && !IS_BUN) {
+    _variantCache[key] = null;
     return null;
   }
-}
 
-function tryLoadFfi(subsystem: Subsystem): any | null {
-  if (!IS_BUN) return null;
-  try {
-    return require(`./ffi/${subsystem}`);
-  } catch {
-    return null;
-  }
-}
+  // Determine the module path.  On Linux with a variant, backends that
+  // support variants load from a variant-suffixed path:
+  //   napi/<subsystem>-<variant>   (e.g. napi/screen-portal)
+  //   ffi/<subsystem>-<variant>    (e.g. ffi/keyboard-portal)
+  //   nolib/<subsystem>            (nolib modules dispatch internally)
+  //
+  // Non-Linux or no-variant: load from the base path (napi/<sub>, ffi/<sub>).
+  // For nolib, variants are always dispatched internally via getRequestedVariant().
 
-let _nolibVariant: NolibVariant | undefined;
+  let modPath: string;
+  let isVariantSpecific = false;
 
-/** Read by nolib modules at load time to know which variant is requested. */
-export function getNolibVariant(): NolibVariant | undefined {
-  return _nolibVariant;
-}
-
-const _nolibCache: Partial<Record<string, any>> = {};
-
-function tryLoadNolib(subsystem: Subsystem, variant: NolibVariant): any | null {
-  const cacheKey = `${subsystem}:${variant}`;
-  if (cacheKey in _nolibCache) return _nolibCache[cacheKey];
-
-  // If the module already loaded successfully for a different variant, Node's
-  // require cache returns the same object — but its USE_X11/USE_VT flags were
-  // baked at first load.  Don't reuse a module loaded under a different variant.
-  const modPath = require.resolve(`./nolib/${subsystem}`);
-  if (require.cache[modPath]) {
-    _nolibCache[cacheKey] = null;
-    return null;
+  if (backend === "nolib") {
+    // nolib modules dispatch internally via getRequestedVariant().
+    modPath = `./nolib/${subsystem}`;
+  } else if (variant) {
+    modPath = `./${backend}/${subsystem}-${variant}`;
+    try {
+      require.resolve(modPath);
+      isVariantSpecific = true;
+    } catch {
+      // No variant-specific file — fall back to the base module.
+      modPath = `./${backend}/${subsystem}`;
+    }
+  } else {
+    modPath = `./${backend}/${subsystem}`;
   }
 
-  const prev = _nolibVariant;
-  _nolibVariant = variant;
+  // If the resolved module is already in Node's require cache from a
+  // different variant load, don't reuse it — its internal state was
+  // baked at first load for that variant.  Variant-specific files
+  // (e.g. ffi/keyboard-portal.ts) are exempt since they're unique per variant.
+  if (variant && !isVariantSpecific) {
+    const resolved = require.resolve(modPath);
+    if (require.cache[resolved]) {
+      _variantCache[key] = null;
+      return null;
+    }
+  }
+
+  const prev = _currentVariant;
+  _currentVariant = variant;
   try {
-    const mod = require(`./nolib/${subsystem}`);
-    _nolibCache[cacheKey] = mod;
+    const mod = require(modPath);
+    _variantCache[key] = mod;
     return mod;
   } catch {
-    _nolibCache[cacheKey] = null;
+    _variantCache[key] = null;
     return null;
   } finally {
-    _nolibVariant = prev;
+    _currentVariant = prev;
   }
 }
+
+// ─── Resolution ─────────────────────────────────────────────────────
 
 const _cache: Partial<Record<Subsystem, any>> = {};
 const _backend: Partial<Record<Subsystem, string>> = {};
@@ -153,10 +223,7 @@ function tryLoad(subsystem: Subsystem): any | null {
   const order = parseBackendPref(subsystem) || defaultOrder();
 
   for (const entry of order) {
-    let mod: any | null = null;
-    if (entry.backend === "napi") mod = tryLoadNapi(subsystem);
-    else if (entry.backend === "ffi") mod = tryLoadFfi(subsystem);
-    else if (entry.backend === "nolib") mod = tryLoadNolib(subsystem, entry.variant!);
+    const mod = tryLoadVariant(entry.backend, subsystem, entry.variant);
     if (mod) {
       _cache[subsystem] = mod;
       _backend[subsystem] = entry.variant
@@ -178,8 +245,8 @@ export function getNative(subsystem: Subsystem): any {
   throw new Error(
     `mechatron: no backend available for "${subsystem}". ` +
     `Tried: ${tried.join(", ")}. ` +
-    `Install @mechatronic/napi-${subsystem}, or use a Bun runtime for FFI, ` +
-    `or ensure protocol prerequisites are met for nolib (e.g. $DISPLAY for x11, /dev/uinput for vt).`
+    `Install @mechatronic/napi-${subsystem}, use Bun for FFI, ` +
+    `or ensure prerequisites for nolib ($DISPLAY for x11, portal for wayland, /dev/uinput for vt).`
   );
 }
 
@@ -198,8 +265,12 @@ export function getBackend(subsystem: Subsystem): string | null {
 export function _resetBackend(subsystem: Subsystem): void {
   delete _cache[subsystem];
   delete _backend[subsystem];
-  // Also clear nolib variant caches for this subsystem
-  for (const v of NOLIB_VARIANTS) {
-    delete _nolibCache[`${subsystem}:${v}`];
+  for (const v of VALID_VARIANTS) {
+    for (const b of ["napi", "ffi", "nolib"] as const) {
+      delete _variantCache[cacheKey(b, subsystem, v)];
+    }
+    delete _variantCache[cacheKey("napi", subsystem)];
+    delete _variantCache[cacheKey("ffi", subsystem)];
+    delete _variantCache[cacheKey("nolib", subsystem)];
   }
 }

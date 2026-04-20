@@ -199,6 +199,9 @@ export async function screen_grabScreen(
 if (!IS_LINUX) {
   throw new Error("nolib/screen: requires Linux");
 }
+if (VARIANT === "portal") {
+  throw new Error("nolib/screen[portal]: ScreenCast D-Bus backend not yet implemented");
+}
 if (VARIANT === "x11" && !HAS_DISPLAY) {
   throw new Error("nolib/screen[x11]: requires $DISPLAY");
 }

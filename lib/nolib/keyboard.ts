@@ -51,6 +51,9 @@ export const keyboard_getKeyState = IS_LINUX ? linux_keyboard_getKeyState : null
 if (!IS_LINUX) {
   throw new Error("nolib/keyboard: requires Linux");
 }
+if (VARIANT === "portal") {
+  throw new Error("nolib/keyboard[portal]: RemoteDesktop D-Bus backend not yet implemented");
+}
 if (VARIANT === "x11" && !HAS_DISPLAY) {
   throw new Error("nolib/keyboard[x11]: requires $DISPLAY");
 }

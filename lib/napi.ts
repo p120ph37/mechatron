@@ -6,4 +6,4 @@
  * (or the old `require("./napi")` in tests) continues to work.
  */
 export { getNative, isAvailable, getBackend, SUBSYSTEMS, _resetBackend } from "./backend";
-export type { Subsystem, Backend, NolibVariant, BackendEntry } from "./backend";
+export type { Subsystem, Backend, Variant, BackendEntry } from "./backend";
