@@ -24,9 +24,10 @@ import { describe, test } from "bun:test";
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
 // is for `npm test` / `bun test` ergonomics.
 const _envBackend = (process.env.MECHATRON_BACKEND || "").toLowerCase();
-const backend: "ffi" | "napi" | "nolib" =
-  _envBackend === "ffi" || _envBackend === "napi" || _envBackend === "nolib"
-    ? _envBackend as "ffi" | "napi" | "nolib"
+const _baseBackend = _envBackend.replace(/\[.*$/, "").split(",")[0];
+const backend: string =
+  _baseBackend === "ffi" || _baseBackend === "napi" || _baseBackend === "nolib"
+    ? _envBackend
     : "ffi";
 process.env.MECHATRON_BACKEND = backend;
 
@@ -83,6 +84,16 @@ if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "uinput") {
 // regardless).  Demote the three sim flags to "may skip" — the xproto
 // code path is covered end-to-end in test/xproto.js via xprotoFlush().
 if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "xproto") {
+  gExpect.keyboardSim = false;
+  gExpect.mouseSim = false;
+  gExpect.mousePos = false;
+}
+// Portal backend: RemoteDesktop D-Bus has no state query API, so
+// getState/getPos can't verify input; grabScreen uses Screenshot portal
+// which creates a temp file per capture — works but slower.  Demote
+// sim/pos expectations since we can't round-trip verify through the
+// compositor's portal interface.
+if (_envBackend.includes("portal")) {
   gExpect.keyboardSim = false;
   gExpect.mouseSim = false;
   gExpect.mousePos = false;
