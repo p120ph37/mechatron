@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             arch: x64
           - os: ubuntu-22.04-arm
             arch: arm64
@@ -78,7 +78,11 @@ jobs:
         # x11-utils / x11-apps: xmessage ships in x11-utils on Debian-based
         #   runners; we use it as a lightweight, mapped test window so
         #   window_getList() has something to enumerate.
-        run: sudo apt-get update && sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+          # Wayland/portal packages for nolib[portal] tests (ubuntu-24.04+)
+          sudo apt-get install -y mutter xdg-desktop-portal xdg-desktop-portal-gnome 2>/dev/null || true
 
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
@@ -569,6 +573,76 @@ jobs:
               fi
               [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
             done
+          fi
+
+          # ── Linux-only: nolib[portal] via Wayland (mutter --headless).
+          #    Exercises the D-Bus wire protocol client (lib/dbus/),
+          #    RemoteDesktop portal session (lib/portal/remote-desktop.ts),
+          #    and the nolib[portal] keyboard/mouse dispatch paths.
+          #    Requires mutter, xdg-desktop-portal, and xdg-desktop-portal-gnome
+          #    (installed on ubuntu-24.04+).
+          if [ "${{ runner.os }}" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
+            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-nolib-portal.xml"
+            BE_COV_DIR="$COV_DIR/nolib-portal"
+            mkdir -p "$BE_COV_DIR"
+            BE_RC=0
+
+            # Start a headless Wayland session with mutter and portal.
+            # dbus-run-session gives us an isolated session bus; mutter
+            # --headless provides a Wayland compositor; xdg-desktop-portal
+            # provides the RemoteDesktop interface.
+            export BUN JUNIT_FILE BE_COV_DIR
+            dbus-run-session -- bash -c '
+              export XDG_SESSION_TYPE=wayland
+              export XDG_CURRENT_DESKTOP=GNOME
+
+              mutter --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
+              MUTTER_PID=$!
+
+              # Wait for mutter to create its Wayland socket
+              for _ in $(seq 1 100); do
+                WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | head -1 | xargs -r basename)
+                [ -n "$WAYLAND_DISPLAY" ] && break
+                sleep 0.1
+              done
+              export WAYLAND_DISPLAY
+
+              if [ -z "$WAYLAND_DISPLAY" ]; then
+                echo ">>> warning: mutter did not create a Wayland socket within 10s"
+                kill "$MUTTER_PID" 2>/dev/null || true
+                exit 1
+              fi
+
+              # Start xdg-desktop-portal
+              /usr/libexec/xdg-desktop-portal &
+              XDP_PID=$!
+              sleep 1
+
+              # Run the portal backend tests
+              MECHATRON_BACKEND="nolib[portal]" \
+                "$BUN" test test/bun.test.ts \
+                  --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+                  --reporter=junit --reporter-outfile="$JUNIT_FILE"
+              RC=$?
+
+              kill "$XDP_PID" "$MUTTER_PID" 2>/dev/null || true
+              exit $RC
+            ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
+            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+              MSG="nolib-portal test (mutter --headless + portal) exited ${BE_RC} without producing a JUnit report."
+              {
+                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+                printf '<testsuites tests="1" failures="1">\n'
+                printf '  <testsuite name="nolib-portal-backend" tests="1" failures="1">\n'
+                printf '    <testcase name="nolib-portal backend startup" classname="backend" time="0">\n'
+                printf '      <failure message="%s"/>\n' "$MSG"
+                printf '    </testcase>\n'
+                printf '  </testsuite>\n'
+                printf '</testsuites>\n'
+              } > "$JUNIT_FILE"
+            fi
+            # Portal test failures are non-blocking until the backend stabilizes
+            echo ">>> nolib-portal exited with rc=$BE_RC (non-blocking)"
           fi
 
           if [ "${{ runner.os }}" = "macOS" ]; then
