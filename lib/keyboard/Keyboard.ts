@@ -1,6 +1,6 @@
 import { Range } from "../types";
 import { Timer } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import { getKeyNames, getAllKeys } from "./constants";
 
 function resolveKeyName(name: Uppercase<string>): number | undefined {

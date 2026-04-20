@@ -1,5 +1,5 @@
 import { Range, Point, Timer } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "./constants";
 
 const ALL_BUTTONS = [BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2];

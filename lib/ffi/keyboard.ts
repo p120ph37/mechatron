@@ -1,6 +1,8 @@
-import { getXConnection } from "./xconn";
-import { xprotoKeyPress, xprotoKeyRelease } from "./xproto";
 import { injectKeysym, uinputSelected } from "./uinput";
+import {
+  getDisplay, isXTestAvailable, x11, xtest,
+} from "./x11";
+import { getBunFFI } from "./bun";
 import {
   user32, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC,
 } from "./win";
@@ -10,27 +12,38 @@ import {
 
 // ==================== Linux ====================
 
-function linux_keyboard_press(keycode: number): void | Promise<void> {
+function linux_keyboard_press(keycode: number): void {
   if (uinputSelected()) {
     if (injectKeysym(keycode, true)) return;
   }
-  return xprotoKeyPress(keycode);
+  const X = x11(); const XT = xtest(); const d = getDisplay();
+  if (!X || !XT || !d) return;
+  const xkeycode = X.XKeysymToKeycode(d, BigInt(keycode));
+  if (xkeycode === 0) return;
+  XT.XTestFakeKeyEvent(d, xkeycode, 1, 0n);
+  X.XSync(d, 0);
 }
 
-function linux_keyboard_release(keycode: number): void | Promise<void> {
+function linux_keyboard_release(keycode: number): void {
   if (uinputSelected()) {
     if (injectKeysym(keycode, false)) return;
   }
-  return xprotoKeyRelease(keycode);
+  const X = x11(); const XT = xtest(); const d = getDisplay();
+  if (!X || !XT || !d) return;
+  const xkeycode = X.XKeysymToKeycode(d, BigInt(keycode));
+  if (xkeycode === 0) return;
+  XT.XTestFakeKeyEvent(d, xkeycode, 0, 0n);
+  X.XSync(d, 0);
 }
 
-async function linux_keyboard_getKeyState(keycode: number): Promise<boolean> {
-  const c = await getXConnection();
-  if (!c) return false;
-  const km = await c.queryKeymap();
-  const xkeycode = c.keysymToKeycode(keycode);
+function linux_keyboard_getKeyState(keycode: number): boolean {
+  const X = x11(); const F = getBunFFI(); const d = getDisplay();
+  if (!X || !F || !d) return false;
+  const xkeycode = X.XKeysymToKeycode(d, BigInt(keycode));
   if (xkeycode === 0) return false;
-  return (km.keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
+  const keys = new Uint8Array(32);
+  X.XQueryKeymap(d, F.ptr(keys));
+  return (keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
 }
 
 // ==================== Windows ====================
@@ -112,3 +125,9 @@ export const keyboard_getKeyState =
   platform === "win32"  ? win_keyboard_getKeyState :
   platform === "darwin" ? mac_keyboard_getKeyState :
                           (_k: number) => false;
+
+// Signal unavailability to the backend resolver when the required native
+// libraries cannot be loaded on this platform.
+if (platform === "linux" && !isXTestAvailable() && !uinputSelected()) {
+  throw new Error("ffi/keyboard: requires libXtst or uinput on Linux");
+}

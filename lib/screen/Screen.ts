@@ -1,7 +1,7 @@
 import { Bounds } from "../types";
 import { Image } from "../types";
 import { Point } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 
 /**
  * Minimal structural type for a Window-like object accepted by

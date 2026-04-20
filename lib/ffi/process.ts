@@ -17,8 +17,10 @@ import {
   user32, kernel32, psapi, winFFI,
   w2js, js2w,
 } from "./win";
-import { getXConnection } from "./xconn";
-import type { XConnection } from "../x11proto/conn";
+import {
+  x11, ffi as x11ffi, getDisplay,
+  atom, getWindowProperty, getWindowAttributes, IsViewable,
+} from "./x11";
 import {
   libc as mac, macFFI, bufToStr,
   TASK_DYLD_INFO, TASK_DYLD_INFO_COUNT,
@@ -356,71 +358,93 @@ function makeRegex(s?: string): RegExp | null {
   try { return new RegExp(s); } catch { return null; }
 }
 
-async function xGetWindowPid(c: XConnection, win: number): Promise<number> {
-  const wmPid = await c.internAtom("_NET_WM_PID", true);
-  if (wmPid === 0) return 0;
-  try {
-    const gp = await c.getProperty({ window: win, property: wmPid });
-    if (gp.format !== 32 || gp.value.length < 4) return 0;
-    return gp.value.readUInt32LE(0);
-  } catch {
-    return 0;
-  }
+function getWindowPid(win: bigint): number {
+  const wmPid = atom("_NET_WM_PID");
+  if (wmPid === 0n) return 0;
+  const r = getWindowProperty(win, wmPid);
+  if (!r || r.nitems === 0n) return 0;
+  const F = x11ffi();
+  const X = x11();
+  if (!F || !X) return 0;
+  // Property is CARDINAL/32 → first value is a long.  Read it.
+  const pid = Number(F.read.u64(Number(r.data), 0) & 0xFFFFFFFFn);
+  X.XFree(r.data);
+  return pid;
 }
 
-async function xGetWindowTitle(c: XConnection, win: number): Promise<string> {
-  const wmName = await c.internAtom("_NET_WM_NAME", true);
-  if (wmName !== 0) {
-    try {
-      const gp = await c.getProperty({ window: win, property: wmName });
-      if (gp.value.length > 0) return gp.value.toString("utf8");
-    } catch {}
+function getWindowTitle(win: bigint): string {
+  const X = x11();
+  const F = x11ffi();
+  if (!X || !F) return "";
+  const wmName = atom("_NET_WM_NAME");
+  if (wmName !== 0n) {
+    const r = getWindowProperty(win, wmName);
+    if (r && r.nitems > 0n) {
+      const s = new (F as any).CString(r.data) as string;
+      X.XFree(r.data);
+      if (s) return s;
+    }
   }
-  const xaWmName = await c.internAtom("WM_NAME", false);
-  if (xaWmName !== 0) {
-    try {
-      const gp = await c.getProperty({ window: win, property: xaWmName });
-      if (gp.value.length > 0) return gp.value.toString("utf8");
-    } catch {}
+  const xaWmName = atom("WM_NAME", false);
+  if (xaWmName !== 0n) {
+    const r = getWindowProperty(win, xaWmName);
+    if (r && r.nitems > 0n) {
+      const s = new (F as any).CString(r.data) as string;
+      X.XFree(r.data);
+      return s;
+    }
   }
   return "";
 }
 
-async function xWinIsValid(c: XConnection, win: number): Promise<boolean> {
-  if (win === 0) return false;
-  const wmPid = await c.internAtom("_NET_WM_PID", true);
-  if (wmPid === 0) return false;
-  try {
-    const gp = await c.getProperty({ window: win, property: wmPid });
-    return gp.format !== 0 && gp.value.length > 0;
-  } catch {
-    return false;
-  }
+function winIsValid(win: bigint): boolean {
+  if (win === 0n) return false;
+  const wmPid = atom("_NET_WM_PID");
+  if (wmPid === 0n) return false;
+  const r = getWindowProperty(win, wmPid);
+  if (!r) return false;
+  const X = x11();
+  if (X) X.XFree(r.data);
+  return true;
 }
 
-async function xEnumWindows(
-  c: XConnection, win: number, re: RegExp | null, pidFilter: number, out: number[],
-): Promise<void> {
-  try {
-    const attr = await c.getWindowAttributes(win);
-    if (attr.mapState === 2 && await xWinIsValid(c, win)) {
-      const pid = pidFilter === 0 ? -1 : await xGetWindowPid(c, win);
-      if (pidFilter === 0 || pid === pidFilter) {
-        let ok = true;
-        if (re) {
-          const t = await xGetWindowTitle(c, win);
-          ok = re.test(t);
-        }
-        if (ok) out.push(win);
+function enumWindows(win: bigint, re: RegExp | null, pidFilter: number, out: number[]): void {
+  const X = x11();
+  const F = x11ffi();
+  const d = getDisplay();
+  if (!X || !F || !d) return;
+  const attr = getWindowAttributes(win);
+  if (attr && attr.map_state === IsViewable && winIsValid(win)) {
+    const pid = pidFilter === 0 ? -1 : getWindowPid(win);
+    if (pidFilter === 0 || pid === pidFilter) {
+      let ok = true;
+      if (re) {
+        const t = getWindowTitle(win);
+        ok = re.test(t);
       }
+      if (ok) out.push(Number(win));
     }
-  } catch {}
-  try {
-    const qt = await c.queryTree(win);
-    for (const child of qt.children) {
-      await xEnumWindows(c, child, re, pidFilter, out);
+  }
+  // recurse via XQueryTree
+  const root = new BigUint64Array(1);
+  const parent = new BigUint64Array(1);
+  const children = new BigUint64Array(1); // pointer
+  const ncount = new Uint32Array(1);
+  if (X.XQueryTree(d, win, F.ptr(root), F.ptr(parent), F.ptr(children), F.ptr(ncount)) !== 0) {
+    const ptr = children[0];
+    const n = ncount[0];
+    if (ptr !== 0n && n > 0) {
+      for (let i = 0; i < n; i++) {
+        // Bun's read.u64 rejects bigint pointer args with "Expected a
+        // pointer"; ptr came from BigUint64Array[0] (XQueryTree's Window**
+        // out-param).  Linux userspace VAs fit in 48 bits, so the
+        // Number round-trip is lossless.
+        const child = F.read.u64(Number(ptr), i * 8);
+        enumWindows(child, re, pidFilter, out);
+      }
+      X.XFree(ptr);
     }
-  } catch {}
+  }
 }
 
 // ── NAPI-compatible exports ────────────────────────────────────────────
@@ -672,14 +696,15 @@ export function process_getModules(pid: number, regexStr?: string): ModuleEntry[
   return out;
 }
 
-export async function process_getWindows(pid: number, regexStr?: string): Promise<number[]> {
+export function process_getWindows(pid: number, regexStr?: string): number[] {
   if (!IS_LINUX) return [];
-  const c = await getXConnection();
-  if (!c) return [];
+  const X = x11();
+  const d = getDisplay();
+  if (!X || !d) return [];
   const re = makeRegex(regexStr);
   const out: number[] = [];
-  const root = c.info.screens[0]?.root ?? 0;
-  await xEnumWindows(c, root, re, pid, out);
+  const root = X.XDefaultRootWindow(d);
+  enumWindows(root, re, pid, out);
   return out;
 }
 

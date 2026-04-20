@@ -1,5 +1,5 @@
 import { Window } from "../window";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import type { Module } from "./Module";
 
 export interface ModuleData {

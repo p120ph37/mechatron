@@ -1,5 +1,5 @@
 import { Image } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import * as linuxCb from "./linux";
 import { getMechanism } from "../platform";
 

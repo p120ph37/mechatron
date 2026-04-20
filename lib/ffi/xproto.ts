@@ -1,6 +1,6 @@
 import { XConnection } from "../x11proto/conn";
 import { getXConnection, closeXConnection, xconnOpenReason, _resetXConnForTests } from "./xconn";
-import { linux_xButton } from "./mouse";
+import { xButton as linux_xButton } from "../mouse/constants";
 
 const X_BTN_WHEEL_UP = 4, X_BTN_WHEEL_DOWN = 5;
 const X_BTN_WHEEL_LEFT = 6, X_BTN_WHEEL_RIGHT = 7;

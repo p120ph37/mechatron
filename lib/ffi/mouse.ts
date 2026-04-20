@@ -1,12 +1,11 @@
-import { getXConnection } from "./xconn";
-import {
-  xprotoMousePress, xprotoMouseRelease,
-  xprotoScrollV, xprotoScrollH, xprotoSetPos,
-} from "./xproto";
 import {
   injectMouseButton, injectScrollV, injectScrollH,
   uinputSelected,
 } from "./uinput";
+import {
+  getDisplay, isXTestAvailable, x11, xtest,
+} from "./x11";
+import { getBunFFI } from "./bun";
 import {
   user32, winFFI,
   MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
@@ -28,7 +27,9 @@ import {
   kCGScrollEventUnitPixel,
 } from "./mac";
 import type { Pointer } from "./bun";
-import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "../mouse/constants";
+import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2, xButton as linux_xButton } from "../mouse/constants";
+
+export { linux_xButton };
 
 const Button1Mask = 1 << 8;
 const Button2Mask = 1 << 9;
@@ -36,62 +37,99 @@ const Button3Mask = 1 << 10;
 
 // ==================== Linux ====================
 
-export function linux_xButton(button: number): number | null {
-  switch (button) {
-    case BUTTON_LEFT:  return 1;
-    case BUTTON_MID:   return 2;
-    case BUTTON_RIGHT: return 3;
-    case BUTTON_X1:    return 8;
-    case BUTTON_X2:    return 9;
-    default: return null;
-  }
-}
-
-function linux_mouse_press(button: number): void | Promise<void> {
+function linux_mouse_press(button: number): void {
   if (uinputSelected()) {
     if (injectMouseButton(button, true)) return;
   }
-  return xprotoMousePress(button);
+  const XT = xtest(); const X = x11(); const d = getDisplay();
+  if (!XT || !X || !d) return;
+  const xbtn = linux_xButton(button);
+  if (xbtn === null) return;
+  XT.XTestFakeButtonEvent(d, xbtn, 1, 0n);
+  X.XSync(d, 0);
 }
 
-function linux_mouse_release(button: number): void | Promise<void> {
+function linux_mouse_release(button: number): void {
   if (uinputSelected()) {
     if (injectMouseButton(button, false)) return;
   }
-  return xprotoMouseRelease(button);
+  const XT = xtest(); const X = x11(); const d = getDisplay();
+  if (!XT || !X || !d) return;
+  const xbtn = linux_xButton(button);
+  if (xbtn === null) return;
+  XT.XTestFakeButtonEvent(d, xbtn, 0, 0n);
+  X.XSync(d, 0);
 }
 
-function linux_mouse_scrollH(amount: number): void | Promise<void> {
+function linux_mouse_scrollH(amount: number): void {
   if (uinputSelected()) {
     if (injectScrollH(amount)) return;
   }
-  return xprotoScrollH(amount);
+  const XT = xtest(); const X = x11(); const d = getDisplay();
+  if (!XT || !X || !d) return;
+  const repeat = Math.abs(amount);
+  const btn = amount < 0 ? 6 : 7;
+  for (let i = 0; i < repeat; i++) {
+    XT.XTestFakeButtonEvent(d, btn, 1, 0n);
+    XT.XTestFakeButtonEvent(d, btn, 0, 0n);
+  }
+  X.XSync(d, 0);
 }
 
-function linux_mouse_scrollV(amount: number): void | Promise<void> {
+function linux_mouse_scrollV(amount: number): void {
   if (uinputSelected()) {
     if (injectScrollV(amount)) return;
   }
-  return xprotoScrollV(amount);
+  const XT = xtest(); const X = x11(); const d = getDisplay();
+  if (!XT || !X || !d) return;
+  const repeat = Math.abs(amount);
+  const btn = amount < 0 ? 5 : 4;
+  for (let i = 0; i < repeat; i++) {
+    XT.XTestFakeButtonEvent(d, btn, 1, 0n);
+    XT.XTestFakeButtonEvent(d, btn, 0, 0n);
+  }
+  X.XSync(d, 0);
 }
 
-async function linux_mouse_getPos(): Promise<{ x: number; y: number }> {
-  const c = await getXConnection();
-  if (!c) return { x: 0, y: 0 };
-  const qp = await c.queryPointer();
-  return { x: qp.rootX, y: qp.rootY };
+function linux_mouse_getPos(): { x: number; y: number } {
+  const X = x11(); const F = getBunFFI(); const d = getDisplay();
+  if (!X || !F || !d) return { x: 0, y: 0 };
+  const root = X.XDefaultRootWindow(d);
+  const rootRet = new BigUint64Array(1);
+  const childRet = new BigUint64Array(1);
+  const rootX = new Int32Array(1);
+  const rootY = new Int32Array(1);
+  const winX = new Int32Array(1);
+  const winY = new Int32Array(1);
+  const mask = new Uint32Array(1);
+  X.XQueryPointer(d, root, F.ptr(rootRet), F.ptr(childRet),
+    F.ptr(rootX), F.ptr(rootY), F.ptr(winX), F.ptr(winY), F.ptr(mask));
+  return { x: rootX[0], y: rootY[0] };
 }
 
-function linux_mouse_setPos(x: number, y: number): Promise<void> {
-  return xprotoSetPos(x, y);
+function linux_mouse_setPos(x: number, y: number): void {
+  const X = x11(); const d = getDisplay();
+  if (!X || !d) return;
+  const root = X.XDefaultRootWindow(d);
+  X.XWarpPointer(d, 0n, root, 0, 0, 0, 0, x, y);
+  X.XSync(d, 0);
 }
 
-async function linux_mouse_getButtonState(button: number): Promise<boolean> {
+function linux_mouse_getButtonState(button: number): boolean {
   if (button === BUTTON_X1 || button === BUTTON_X2) return false;
-  const c = await getXConnection();
-  if (!c) return false;
-  const qp = await c.queryPointer();
-  const m = qp.mask;
+  const X = x11(); const F = getBunFFI(); const d = getDisplay();
+  if (!X || !F || !d) return false;
+  const root = X.XDefaultRootWindow(d);
+  const rootRet = new BigUint64Array(1);
+  const childRet = new BigUint64Array(1);
+  const rootX = new Int32Array(1);
+  const rootY = new Int32Array(1);
+  const winX = new Int32Array(1);
+  const winY = new Int32Array(1);
+  const mask = new Uint32Array(1);
+  X.XQueryPointer(d, root, F.ptr(rootRet), F.ptr(childRet),
+    F.ptr(rootX), F.ptr(rootY), F.ptr(winX), F.ptr(winY), F.ptr(mask));
+  const m = mask[0];
   switch (button) {
     case BUTTON_LEFT:  return ((m & Button1Mask) >>> 8) !== 0;
     case BUTTON_MID:   return ((m & Button2Mask) >>> 8) !== 0;
@@ -314,3 +352,9 @@ export const mouse_getButtonState =
   platform === "win32" ? win_mouse_getButtonState :
   platform === "darwin" ? mac_mouse_getButtonState :
                          (_b: number) => false;
+
+// Signal unavailability to the backend resolver when the required native
+// libraries cannot be loaded on this platform.
+if (platform === "linux" && !isXTestAvailable() && !uinputSelected()) {
+  throw new Error("ffi/mouse: requires libXtst or uinput on Linux");
+}

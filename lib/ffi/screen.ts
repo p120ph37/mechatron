@@ -16,11 +16,14 @@
  * to crop the desired subregion out of the full-display image.
  */
 
-import { getXConnection } from "./xconn";
-import { xprotoGrabScreen } from "./xproto";
+import {
+  x11, ffi as x11ffi, xrandr, isXrandrAvailable, getDisplay,
+  ZPixmap, AllPlanes, XA_CARDINAL, AnyPropertyType, True, False,
+} from "./x11";
 import { framebufferSelected, captureSelected } from "./framebuffer";
 import { user32, kernel32, gdi32, winFFI } from "./win";
 import { cg, macFFI, BITMAP_INFO_BGRA_PMA } from "./mac";
+import { cstr } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -39,67 +42,176 @@ function intersectBounds(a: RawRect, b: RawRect): RawRect {
   return r > l && bot > t ? { x: l, y: t, w: r - l, h: bot - t } : { x: 0, y: 0, w: 0, h: 0 };
 }
 
-// ── Linux: synchronize via xproto ────────────────────────────────────
+// ── Linux: synchronize ───────────────────────────────────────────────
 
-async function linuxSynchronize(): Promise<ScreenInfo[] | null> {
-  const c = await getXConnection();
-  if (!c) return null;
+function linuxSynchronize(): ScreenInfo[] | null {
+  const X = x11();
+  const F = x11ffi();
+  const d = getDisplay();
+  if (!X || !F || !d) return null;
 
-  const screens: ScreenInfo[] = [];
+  const screens: { bounds: RawRect; usable: RawRect }[] = [];
 
-  try {
-    const mons = await c.getMonitors({ activeOnly: true });
-    let primarySeen = false;
-    for (const m of mons.monitors) {
-      const bounds: RawRect = { x: m.x, y: m.y, w: m.width, h: m.height };
-      const item: ScreenInfo = { bounds, usable: bounds };
-      if (m.primary && !primarySeen) { screens.unshift(item); primarySeen = true; }
-      else                           { screens.push(item); }
+  // Prefer XRandR 1.5 (XRRGetMonitors) over the older Xinerama query:
+  // RandR exposes a primary-monitor flag and per-output metadata that
+  // Xinerama lacks, and has shipped with X.org since 2015.  The
+  // dlopen-catch path in x11.ts leaves isXrandrAvailable() == false when
+  // libXrandr.so.2 isn't present, at which point we fall through to the
+  // single-XScreenOfDisplay branch below.
+  let usedXrandr = false;
+  const count = X.XScreenCount(d);
+  if (isXrandrAvailable()) {
+    const xrr = xrandr();
+    if (xrr) {
+      const root = X.XDefaultRootWindow(d);
+      const nOut = new Int32Array(1);
+      // get_active=1 filters out disabled outputs so we don't enumerate
+      // monitors that aren't currently driving a display.
+      const info = xrr.XRRGetMonitors(d, root, True, F.ptr(nOut));
+      const n = nOut[0];
+      if (info !== 0n && n > 0) {
+        // Bun's read.* rejects bigint ptr args; convert to Number (userspace
+        // VAs fit in 48 bits on Linux so this is lossless).
+        const infoN = Number(info);
+        // XRRMonitorInfo on LP64 (56 bytes):
+        //   Atom name            @ 0  (u64)
+        //   Bool primary         @ 8  (i32)
+        //   Bool automatic       @ 12 (i32)
+        //   int  noutput         @ 16
+        //   int  x               @ 20
+        //   int  y               @ 24
+        //   int  width           @ 28
+        //   int  height          @ 32
+        //   int  mwidth          @ 36
+        //   int  mheight         @ 40
+        //   (4 bytes padding    @ 44)
+        //   RROutput *outputs    @ 48 (u64)
+        const STRIDE = 56;
+        // Primary first to match Windows/macOS convention + legacy
+        // XDefaultScreen ordering; any subsequent monitor appends.
+        let primarySeen = false;
+        for (let i = 0; i < n; i++) {
+          const off = i * STRIDE;
+          const primary = F.read.i32(infoN, off + 8);
+          const x = F.read.i32(infoN, off + 20);
+          const y = F.read.i32(infoN, off + 24);
+          const w = F.read.i32(infoN, off + 28);
+          const h = F.read.i32(infoN, off + 32);
+          const bounds: RawRect = { x, y, w, h };
+          const item = { bounds, usable: bounds };
+          if (primary !== 0 && !primarySeen) { screens.unshift(item); primarySeen = true; }
+          else                               { screens.push(item); }
+        }
+        xrr.XRRFreeMonitors(info);
+        usedXrandr = true;
+      }
     }
-  } catch {
-    // RandR unavailable — fall back to connection setup screen info
   }
 
   if (screens.length === 0) {
-    for (let i = 0; i < c.info.screens.length; i++) {
-      const s = c.info.screens[i];
-      const bounds: RawRect = { x: 0, y: 0, w: s.widthPx, h: s.heightPx };
-      const item: ScreenInfo = { bounds, usable: bounds };
-      if (i === 0) screens.unshift(item);
+    const primary = X.XDefaultScreen(d);
+    for (let i = 0; i < count; i++) {
+      const screen = X.XScreenOfDisplay(d, i);
+      const w = X.XWidthOfScreen(screen);
+      const h = X.XHeightOfScreen(screen);
+      const bounds: RawRect = { x: 0, y: 0, w, h };
+      const item = { bounds, usable: bounds };
+      if (i === primary) screens.unshift(item);
       else screens.push(item);
     }
   }
 
-  const root = c.info.screens[0]?.root ?? 0;
-  try {
-    const netWorkarea = await c.internAtom("_NET_WORKAREA", true);
-    if (netWorkarea !== 0) {
-      const gp = await c.getProperty({ window: root, property: netWorkarea });
-      if (gp.format === 32 && gp.value.length >= 16) {
-        const x = gp.value.readUInt32LE(0) | 0;
-        const y = gp.value.readUInt32LE(4) | 0;
-        const w = gp.value.readUInt32LE(8) | 0;
-        const h = gp.value.readUInt32LE(12) | 0;
+  // _NET_WORKAREA for usable bounds
+  const buf = cstr("_NET_WORKAREA");
+  const netWorkarea = X.XInternAtom(d, F.ptr(buf), True);
+  if (netWorkarea !== 0n) {
+    // When XRandR gave us the geometry, all monitors share the single
+    // X screen indexed by XDefaultScreen — no need to recompute per iteration.
+    const defaultScreen = usedXrandr ? X.XDefaultScreen(d) : -1;
+    for (let i = 0; i < screens.length; i++) {
+      const rootScreen = usedXrandr ? defaultScreen : i;
+      const win = X.XRootWindow(d, rootScreen);
+
+      const actualType = new BigUint64Array(1);
+      const actualFormat = new Int32Array(1);
+      const nitems = new BigUint64Array(1);
+      const bytesAfter = new BigUint64Array(1);
+      const propRet = new BigUint64Array(1);
+
+      const status = X.XGetWindowProperty(
+        d, win, netWorkarea, 0n, 4n, False, AnyPropertyType,
+        F.ptr(actualType), F.ptr(actualFormat),
+        F.ptr(nitems), F.ptr(bytesAfter), F.ptr(propRet),
+      );
+      if (status === 0 && propRet[0] !== 0n
+          && actualType[0] === XA_CARDINAL
+          && actualFormat[0] === 32 && nitems[0] === 4n) {
+        // Bun's read.u64 rejects bigint pointer args ("Expected a pointer");
+        // convert the BigUint64Array slot to Number (Linux userspace VAs fit
+        // in 48 bits so this is lossless).
+        const pr = Number(propRet[0]);
+        const x = Number(F.read.u64(pr, 0)) | 0;
+        const y = Number(F.read.u64(pr, 8)) | 0;
+        const w = Number(F.read.u64(pr, 16)) | 0;
+        const h = Number(F.read.u64(pr, 24)) | 0;
         const u: RawRect = { x, y, w, h };
-        for (let i = 0; i < screens.length; i++) {
-          screens[i].usable = screens.length > 1
-            ? intersectBounds(u, screens[i].bounds) : u;
-        }
+        screens[i].usable = usedXrandr ? intersectBounds(u, screens[i].bounds) : u;
       }
+      if (propRet[0] !== 0n) X.XFree(propRet[0]);
     }
-  } catch {}
+  }
 
   return screens.length > 0 ? screens : null;
 }
 
-// ── Linux: grabScreen via xproto GetImage ────────────────────────────
+// ── Linux: grabScreen via XGetImage + XGetPixel ──────────────────────
 
-async function linuxGrabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Promise<Uint32Array | null> {
+function linuxGrabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Uint32Array | null {
+  // When the caller has pinned framebuffer/drm, skip the X11 path.  The
+  // null return on failure triggers the usual fallback in Screen.grabScreen.
   if (framebufferSelected()) {
     const out = captureSelected(x, y, w, h);
     if (out) return out;
   }
-  return xprotoGrabScreen(x, y, w, h, windowHandle);
+  const X = x11();
+  const F = x11ffi();
+  const d = getDisplay();
+  if (!X || !F || !d || w <= 0 || h <= 0) return null;
+  const win = windowHandle && windowHandle !== 0 ? BigInt(windowHandle) : X.XDefaultRootWindow(d);
+  const img = X.XGetImage(d, win, x, y, w, h, AllPlanes, ZPixmap);
+  if (!img || (img as bigint) === 0n) return null;
+  try {
+    // XImage layout: width@0(i32), height@4(i32), red_mask@56(u64),
+    // green_mask@64(u64), blue_mask@72(u64).
+    // Normalise pointer to Number (Bun's read.* rejects bigint ptr args).
+    const imgN = Number(img);
+    const iw = F.read.i32(imgN, 0);
+    const ih = F.read.i32(imgN, 4);
+    if (iw <= 0 || ih <= 0) return null;
+    const redMask   = F.read.u64(imgN, 56);
+    const greenMask = F.read.u64(imgN, 64);
+    const blueMask  = F.read.u64(imgN, 72);
+
+    // Guard against RangeError on absurd sizes (see macGrabScreen note).
+    let pixels: Uint32Array;
+    try {
+      pixels = new Uint32Array(iw * ih);
+    } catch (_) {
+      return null;
+    }
+    for (let yy = 0; yy < ih; yy++) {
+      for (let xx = 0; xx < iw; xx++) {
+        const pixel = X.XGetPixel(img, xx, yy);
+        const r = Number((pixel & redMask) >> 16n) & 0xFF;
+        const g = Number((pixel & greenMask) >> 8n) & 0xFF;
+        const b = Number(pixel & blueMask) & 0xFF;
+        pixels[yy * iw + xx] = (0xFF000000 | (r << 16) | (g << 8) | b) >>> 0;
+      }
+    }
+    return pixels;
+  } finally {
+    X.XDestroyImage(img);
+  }
 }
 
 // ── Windows: synchronize via EnumDisplayMonitors ─────────────────────
@@ -279,16 +391,20 @@ function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle
 
 // ── NAPI-compatible exports ──────────────────────────────────────────
 
-export function screen_synchronize(): Promise<ScreenInfo[] | null> | ScreenInfo[] | null {
+export function screen_synchronize(): ScreenInfo[] | null {
   if (IS_LINUX) return linuxSynchronize();
   if (IS_WIN) return winSynchronize();
   if (IS_MAC) return macSynchronize();
   return null;
 }
 
-export function screen_grabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Promise<Uint32Array | null> | Uint32Array | null {
+export function screen_grabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Uint32Array | null {
   if (IS_LINUX) return linuxGrabScreen(x, y, w, h, windowHandle);
   if (IS_WIN) return winGrabScreen(x, y, w, h, windowHandle);
   if (IS_MAC) return macGrabScreen(x, y, w, h, windowHandle);
   return null;
+}
+
+if (IS_LINUX && !getDisplay()) {
+  throw new Error("ffi/screen: requires libX11 on Linux");
 }

@@ -43,8 +43,8 @@ export {
 } from "./memory";
 
 // Native availability checking
-export { isAvailable, getBackend } from "./napi";
-export type { Subsystem, Backend } from "./napi";
+export { isAvailable, getBackend } from "./backend";
+export type { Subsystem, Backend } from "./backend";
 
 // Platform mechanism introspection — discover / select / override which
 // backend mechanism is in use per capability, and manage cacheable

@@ -1,5 +1,5 @@
 import { Process } from "../process";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 
 export class Stats {
   systemReads: number = 0;

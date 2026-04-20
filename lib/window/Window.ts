@@ -1,6 +1,6 @@
 import { Bounds } from "../types";
 import { Point } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 
 export class Window {
   private _handle: number;

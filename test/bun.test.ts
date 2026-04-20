@@ -24,8 +24,10 @@ import { describe, test } from "bun:test";
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
 // is for `npm test` / `bun test` ergonomics.
 const _envBackend = (process.env.MECHATRON_BACKEND || "").toLowerCase();
-const backend: "ffi" | "napi" =
-  _envBackend === "ffi" || _envBackend === "napi" ? _envBackend : "ffi";
+const backend: "ffi" | "napi" | "nolib" =
+  _envBackend === "ffi" || _envBackend === "napi" || _envBackend === "nolib"
+    ? _envBackend as "ffi" | "napi" | "nolib"
+    : "ffi";
 process.env.MECHATRON_BACKEND = backend;
 
 const SKIP_PLATFORM = false;
