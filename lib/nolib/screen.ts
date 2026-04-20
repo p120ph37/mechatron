@@ -1,12 +1,14 @@
 /**
  * nolib screen backend — pure TypeScript, no native libraries.
  *
- * Two capture paths:
+ * Three capture paths:
  *   1. X11 xproto (GetImage) — when $DISPLAY is set.
- *   2. Linux framebuffer (/dev/fb0) — headless/TTY fallback via ioctl bridge.
+ *   2. Portal (Screenshot D-Bus) — Wayland session with xdg-desktop-portal.
+ *   3. Linux framebuffer (/dev/fb0) — headless/TTY fallback via ioctl bridge.
  *
  * Monitor enumeration uses xproto (RandR GetMonitors) when available,
- * or a single-screen geometry derived from the framebuffer ioctl.
+ * Mutter DisplayConfig via D-Bus for portal, or a single-screen geometry
+ * derived from the framebuffer ioctl.
  */
 
 import { openSync, readSync, closeSync } from "fs";
@@ -19,12 +21,15 @@ import {
   framebufferAvailable, parseFbVarScreenInfo, parseFbFixLineLength,
   rowToArgb, type FbGeometry,
 } from "../screen/framebuffer";
+import { remoteDesktopAvailable } from "../portal/remote-desktop";
+import { portalScreenshot, portalGetMonitors } from "../portal/screenshot";
 
 const IS_LINUX = process.platform === "linux";
 const HAS_DISPLAY = !!process.env.DISPLAY;
 const VARIANT = getNolibVariant();
 
 const USE_X11 = HAS_DISPLAY && (VARIANT === "x11" || VARIANT === undefined);
+const USE_PORTAL = VARIANT === "portal";
 const USE_VT = (VARIANT === "vt" || VARIANT === undefined);
 
 interface RawRect { x: number; y: number; w: number; h: number; }
@@ -174,6 +179,41 @@ function fbGrabScreen(x: number, y: number, w: number, h: number): Uint32Array |
   }
 }
 
+// ─── Portal path ──────────────────────────────────────────────────
+
+async function portalSynchronize(): Promise<ScreenInfo[] | null> {
+  const monitors = await portalGetMonitors();
+  if (!monitors) return null;
+  return monitors.map(m => ({ bounds: m.bounds, usable: m.usable }));
+}
+
+async function portalGrabScreen(
+  x: number, y: number, w: number, h: number,
+): Promise<Uint32Array | null> {
+  const shot = await portalScreenshot();
+  if (!shot) return null;
+
+  // Crop the full screenshot to the requested region
+  const srcW = shot.width;
+  const srcH = shot.height;
+  const clampX = Math.max(0, Math.min(x, srcW));
+  const clampY = Math.max(0, Math.min(y, srcH));
+  const clampW = Math.min(w, srcW - clampX);
+  const clampH = Math.min(h, srcH - clampY);
+  if (clampW <= 0 || clampH <= 0) return null;
+
+  if (clampX === 0 && clampY === 0 && clampW === srcW && clampH === srcH) {
+    return shot;
+  }
+
+  const cropped = new Uint32Array(clampW * clampH);
+  for (let row = 0; row < clampH; row++) {
+    const srcOff = (clampY + row) * srcW + clampX;
+    cropped.set(shot.subarray(srcOff, srcOff + clampW), row * clampW);
+  }
+  return cropped;
+}
+
 // ─── Exported API ──────────────────────────────────────────────────
 
 export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
@@ -181,6 +221,7 @@ export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
     const result = await xprotoSynchronize();
     if (result) return result;
   }
+  if (USE_PORTAL) return portalSynchronize();
   if (USE_VT) return fbSynchronize();
   return null;
 }
@@ -192,6 +233,7 @@ export async function screen_grabScreen(
     const result = await xprotoGrabScreen(x, y, w, h, windowHandle);
     if (result) return result;
   }
+  if (USE_PORTAL) return portalGrabScreen(x, y, w, h);
   if (USE_VT) return fbGrabScreen(x, y, w, h);
   return null;
 }
@@ -199,8 +241,8 @@ export async function screen_grabScreen(
 if (!IS_LINUX) {
   throw new Error("nolib/screen: requires Linux");
 }
-if (VARIANT === "portal") {
-  throw new Error("nolib/screen[portal]: ScreenCast D-Bus backend not yet implemented");
+if (VARIANT === "portal" && !remoteDesktopAvailable()) {
+  throw new Error("nolib/screen[portal]: requires Wayland session + D-Bus session bus");
 }
 if (VARIANT === "x11" && !HAS_DISPLAY) {
   throw new Error("nolib/screen[x11]: requires $DISPLAY");
@@ -208,6 +250,6 @@ if (VARIANT === "x11" && !HAS_DISPLAY) {
 if (VARIANT === "vt" && !framebufferAvailable()) {
   throw new Error("nolib/screen[vt]: requires /dev/fb0");
 }
-if (!HAS_DISPLAY && !framebufferAvailable()) {
-  throw new Error("nolib/screen: requires $DISPLAY or /dev/fb0");
+if (!HAS_DISPLAY && !remoteDesktopAvailable() && !framebufferAvailable()) {
+  throw new Error("nolib/screen: requires $DISPLAY, Wayland portal, or /dev/fb0");
 }
