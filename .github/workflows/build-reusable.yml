@@ -593,8 +593,12 @@ jobs:
             # provides the RemoteDesktop interface.
             export BUN JUNIT_FILE BE_COV_DIR
             dbus-run-session -- bash -c '
+              set -x
               export XDG_SESSION_TYPE=wayland
               export XDG_CURRENT_DESKTOP=GNOME
+
+              echo ">>> XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+              echo ">>> DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
 
               mutter --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
               MUTTER_PID=$!
@@ -609,14 +613,23 @@ jobs:
 
               if [ -z "$WAYLAND_DISPLAY" ]; then
                 echo ">>> warning: mutter did not create a Wayland socket within 10s"
+                ls -la "$XDG_RUNTIME_DIR"/ 2>/dev/null || true
                 kill "$MUTTER_PID" 2>/dev/null || true
                 exit 1
               fi
+              echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
-              # Start xdg-desktop-portal
+              # Start xdg-desktop-portal and GNOME portal backend.
+              # The GNOME backend implements RemoteDesktop/ScreenCast and
+              # talks to mutter; without it the portal interfaces are empty.
               /usr/libexec/xdg-desktop-portal &
               XDP_PID=$!
-              sleep 1
+              /usr/libexec/xdg-desktop-portal-gnome &
+              XDP_GNOME_PID=$!
+              sleep 2
+
+              # Verify portal is reachable
+              busctl --user list 2>/dev/null | grep -i portal || echo ">>> warning: portal not on session bus"
 
               # Run the portal backend tests
               MECHATRON_BACKEND="nolib[portal]" \
@@ -625,7 +638,7 @@ jobs:
                   --reporter=junit --reporter-outfile="$JUNIT_FILE"
               RC=$?
 
-              kill "$XDP_PID" "$MUTTER_PID" 2>/dev/null || true
+              kill "$XDP_GNOME_PID" "$XDP_PID" "$MUTTER_PID" 2>/dev/null || true
               exit $RC
             ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
             if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
