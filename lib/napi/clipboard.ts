@@ -12,4 +12,4 @@ export const clipboard_setText: (text: string) => void = native.clipboard_setTex
 export const clipboard_hasImage: () => boolean = native.clipboard_hasImage;
 export const clipboard_getImage: () => { width: number; height: number; data: Uint32Array } | null = native.clipboard_getImage;
 export const clipboard_setImage: (width: number, height: number, data: Uint32Array) => void = native.clipboard_setImage;
-export const clipboard_sequence: () => number = native.clipboard_sequence;
+export const clipboard_getSequence: () => number = native.clipboard_getSequence;

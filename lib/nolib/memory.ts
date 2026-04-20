@@ -149,6 +149,22 @@ export function memory_setAccessFlags(_pid: number, _address: number, _size: num
   return false;
 }
 
+export function memory_createCache(_pid: number, _address: number, _size: number, _blockSize: number, _maxBlocks?: number, _flags?: number): boolean {
+  return false;
+}
+
+export function memory_clearCache(_pid: number): void {}
+
+export function memory_deleteCache(_pid: number): void {}
+
+export function memory_isCaching(_pid: number): boolean {
+  return false;
+}
+
+export function memory_getCacheSize(_pid: number): number {
+  return 0;
+}
+
 if (!IS_LINUX) {
   throw new Error("nolib/memory: requires Linux");
 }

@@ -132,7 +132,7 @@ export function clipboard_getImage(): { width: number; height: number; data: Uin
 
 export function clipboard_setImage(_width: number, _height: number, _data: Uint32Array): void {}
 
-export function clipboard_sequence(): number {
+export function clipboard_getSequence(): number {
   return 0;
 }
 
