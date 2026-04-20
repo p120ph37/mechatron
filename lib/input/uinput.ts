@@ -317,10 +317,7 @@ export function encodeEventBurst(
 // Shared inject helpers (used by both ffi/uinput.ts and nolib/uinput.ts)
 // =============================================================================
 
-import {
-  BUTTON_LEFT as BTN_IDX_LEFT, BUTTON_MID as BTN_IDX_MID,
-  BUTTON_RIGHT as BTN_IDX_RIGHT, BUTTON_X1 as BTN_IDX_X1, BUTTON_X2 as BTN_IDX_X2,
-} from "../mouse/constants";
+import { evdevButton } from "../mouse/constants";
 
 type Emitter = (events: UInputEvent[]) => boolean;
 
@@ -334,15 +331,8 @@ export function makeInjectKeysym(emit: Emitter) {
 
 export function makeInjectMouseButton(emit: Emitter) {
   return (button: number, press: boolean): boolean => {
-    let code: number;
-    switch (button) {
-      case BTN_IDX_LEFT:  code = BTN_LEFT; break;
-      case BTN_IDX_MID:   code = BTN_MIDDLE; break;
-      case BTN_IDX_RIGHT: code = BTN_RIGHT; break;
-      case BTN_IDX_X1:    code = BTN_SIDE; break;
-      case BTN_IDX_X2:    code = BTN_EXTRA; break;
-      default: return false;
-    }
+    const code = evdevButton(button);
+    if (code === null) return false;
     return emit([{ type: EV_KEY, code, value: press ? 1 : 0 }]);
   };
 }
