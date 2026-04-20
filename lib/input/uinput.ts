@@ -64,12 +64,8 @@ export const REL_Y      = 0x01;
 export const REL_HWHEEL = 0x06;
 export const REL_WHEEL  = 0x08;
 
-// Mouse buttons — evdev codes from <linux/input-event-codes.h> BTN_MOUSE block.
-export const BTN_LEFT   = 0x110;
-export const BTN_RIGHT  = 0x111;
-export const BTN_MIDDLE = 0x112;
-export const BTN_SIDE   = 0x113;
-export const BTN_EXTRA  = 0x114;
+import { BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA } from "../mouse/constants";
+export { BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA };
 
 // =============================================================================
 // uinput ioctl request numbers (from <linux/uinput.h>)

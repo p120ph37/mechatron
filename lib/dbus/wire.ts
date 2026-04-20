@@ -82,7 +82,11 @@ export function parseSingleType(sig: string, pos: number): [string, number] {
   }
 }
 
+const _sigCache = new Map<string, string[]>();
+
 export function parseSignature(sig: string): string[] {
+  let cached = _sigCache.get(sig);
+  if (cached) return cached;
   const types: string[] = [];
   let pos = 0;
   while (pos < sig.length) {
@@ -90,6 +94,7 @@ export function parseSignature(sig: string): string[] {
     types.push(t);
     pos = next;
   }
+  _sigCache.set(sig, types);
   return types;
 }
 
