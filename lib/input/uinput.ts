@@ -7,15 +7,17 @@
  * input device via `/dev/uinput`:
  *
  *   1. `open("/dev/uinput", O_RDWR)`
- *   2. `ioctl(UI_SET_EVBIT, EV_KEY | EV_REL | EV_SYN)`
+ *   2. `ioctl(UI_SET_EVBIT, EV_KEY | EV_REL | EV_ABS | EV_SYN)`
  *   3. `ioctl(UI_SET_KEYBIT, <each keycode we might emit>)`
  *   4. `ioctl(UI_SET_RELBIT, REL_X | REL_Y | REL_WHEEL | REL_HWHEEL)`
- *   5. `ioctl(UI_DEV_SETUP, &uinput_setup)` (Linux ≥ 4.5; simpler than the
+ *   5. `ioctl(UI_SET_ABSBIT, ABS_X | ABS_Y)`
+ *   6. `ioctl(UI_ABS_SETUP, &uinput_abs_setup)` for each axis
+ *   7. `ioctl(UI_DEV_SETUP, &uinput_setup)` (Linux ≥ 4.5; simpler than the
  *      legacy `write(uinput_user_dev)` path — 92 bytes vs 1116)
- *   6. `ioctl(UI_DEV_CREATE)`
- *   7. For each event `write(struct input_event{sec,usec,type,code,value})`
+ *   8. `ioctl(UI_DEV_CREATE)`
+ *   9. For each event `write(struct input_event{sec,usec,type,code,value})`
  *      followed by a `SYN_REPORT` to commit.
- *   8. `ioctl(UI_DEV_DESTROY)` + close on shutdown.
+ *  10. `ioctl(UI_DEV_DESTROY)` + close on shutdown.
  *
  * The kernel then creates a regular `/dev/input/eventN` node that the
  * display server (X11, Wayland, or a headless evdev consumer) picks up
@@ -51,6 +53,7 @@ import { openSync, closeSync } from "fs";
 export const EV_SYN = 0x00;
 export const EV_KEY = 0x01;
 export const EV_REL = 0x02;
+export const EV_ABS = 0x03;
 
 export const SYN_REPORT = 0;
 
@@ -63,6 +66,9 @@ export const REL_X      = 0x00;
 export const REL_Y      = 0x01;
 export const REL_HWHEEL = 0x06;
 export const REL_WHEEL  = 0x08;
+
+export const ABS_X = 0x00;
+export const ABS_Y = 0x01;
 
 import { BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA } from "../mouse/constants";
 export { BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA };
@@ -84,9 +90,14 @@ export const UI_DEV_DESTROY  = 0x5502;   // _IO('U', 2)
 export const UI_SET_EVBIT    = 0x40045564; // _IOW('U', 100, int)
 export const UI_SET_KEYBIT   = 0x40045565; // _IOW('U', 101, int)
 export const UI_SET_RELBIT   = 0x40045566; // _IOW('U', 102, int)
+export const UI_SET_ABSBIT   = 0x40045567; // _IOW('U', 103, int)
 // UI_DEV_SETUP takes a uinput_setup struct (92 bytes): _IOW('U', 3, uinput_setup)
 // = (1 << 30) | (92 << 16) | (0x55 << 8) | 3 = 0x405c5503
 export const UI_DEV_SETUP    = 0x405c5503;
+// UI_ABS_SETUP takes a uinput_abs_setup struct (28 bytes): _IOW('U', 4, uinput_abs_setup)
+// sizeof(uinput_abs_setup) = __u16 code(2) + pad(2) + input_absinfo(24) = 28
+// = (1 << 30) | (28 << 16) | (0x55 << 8) | 4 = 0x401c5504
+export const UI_ABS_SETUP    = 0x401c5504;
 
 // Bus types (from <linux/input.h>) — BUS_VIRTUAL avoids collisions with
 // real USB/PS/2 hardware IDs on the compositor side.
@@ -268,6 +279,36 @@ export function encodeUinputSetup(
 }
 
 /**
+ * Encode a `struct uinput_abs_setup` (28 bytes) for the `UI_ABS_SETUP` ioctl.
+ * Layout:
+ *   __u16 code;          // 0   — axis code (ABS_X, ABS_Y, ...)
+ *   // 2 bytes padding   // 2   — implicit alignment padding
+ *   struct input_absinfo {
+ *     __s32 value;       // 4   — initial value (usually 0)
+ *     __s32 minimum;     // 8
+ *     __s32 maximum;     // 12
+ *     __s32 fuzz;        // 16
+ *     __s32 flat;        // 20
+ *     __s32 resolution;  // 24
+ *   };                   // total = 28 bytes
+ */
+export function encodeAbsSetup(
+  code: number,
+  opts: { minimum?: number; maximum?: number; fuzz?: number; flat?: number; resolution?: number } = {},
+): Buffer {
+  const buf = Buffer.alloc(28);
+  buf.writeUInt16LE(code & 0xFFFF, 0);
+  // bytes 2-3: padding (already zero)
+  buf.writeInt32LE(0, 4);                           // value (initial, usually 0)
+  buf.writeInt32LE(opts.minimum ?? 0, 8);            // minimum
+  buf.writeInt32LE(opts.maximum ?? 0, 12);           // maximum
+  buf.writeInt32LE(opts.fuzz ?? 0, 16);              // fuzz
+  buf.writeInt32LE(opts.flat ?? 0, 20);              // flat
+  buf.writeInt32LE(opts.resolution ?? 0, 24);        // resolution
+  return buf;
+}
+
+/**
  * Encode an event burst: the given events followed by a `SYN_REPORT`.
  *
  * Callers batch related events (press+release for a click, dx+dy for
@@ -347,6 +388,15 @@ export function makeInjectRelMotion(emit: Emitter) {
     if (dy !== 0) events.push({ type: EV_REL, code: REL_Y, value: dy });
     if (events.length === 0) return true;
     return emit(events);
+  };
+}
+
+export function makeInjectAbsMotion(emit: Emitter) {
+  return (x: number, y: number): boolean => {
+    return emit([
+      { type: EV_ABS, code: ABS_X, value: x },
+      { type: EV_ABS, code: ABS_Y, value: y },
+    ]);
   };
 }
 

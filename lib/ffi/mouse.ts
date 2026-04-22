@@ -1,6 +1,6 @@
 import {
-  injectMouseButton, injectScrollV, injectScrollH,
-  uinputSelected,
+  injectMouseButton, injectScrollV, injectScrollH, injectAbsMotion,
+  uinputSelected, UINPUT_ABS_MAX,
 } from "./uinput";
 import {
   getDisplay, isXTestAvailable, x11, xtest,
@@ -108,6 +108,25 @@ function linux_mouse_getPos(): { x: number; y: number } {
 }
 
 function linux_mouse_setPos(x: number, y: number): void {
+  if (uinputSelected()) {
+    // Map screen coordinates to device coordinates (0–65535 range).
+    // Get screen dimensions from X11 to compute the mapping.
+    const X = x11(); const d = getDisplay();
+    if (X && d) {
+      const screen = X.XDefaultScreen(d);
+      const screenPtr = X.XScreenOfDisplay(d, screen);
+      if (screenPtr) {
+        const sw = X.XWidthOfScreen(screenPtr);
+        const sh = X.XHeightOfScreen(screenPtr);
+        if (sw > 0 && sh > 0) {
+          const absX = Math.round((x * UINPUT_ABS_MAX) / sw);
+          const absY = Math.round((y * UINPUT_ABS_MAX) / sh);
+          if (injectAbsMotion(absX, absY)) return;
+        }
+      }
+    }
+  }
+  // Fallback to XWarpPointer
   const X = x11(); const d = getDisplay();
   if (!X || !d) return;
   const root = X.XDefaultRootWindow(d);

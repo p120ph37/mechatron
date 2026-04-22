@@ -51,6 +51,11 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(ui.REL_X === 0x00 && ui.REL_Y === 0x01, "REL_X/Y");
 		assert(ui.REL_WHEEL === 0x08, "REL_WHEEL");
 		assert(ui.REL_HWHEEL === 0x06, "REL_HWHEEL");
+		assert(ui.EV_ABS === 0x03, "EV_ABS");
+		assert(ui.ABS_X === 0x00, "ABS_X");
+		assert(ui.ABS_Y === 0x01, "ABS_Y");
+		assert(ui.UI_SET_ABSBIT === 0x40045567, "UI_SET_ABSBIT value");
+		assert(ui.UI_ABS_SETUP === 0x401c5504, "UI_ABS_SETUP value");
 		assert(ui.BTN_LEFT === 0x110, "BTN_LEFT");
 		assert(ui.BTN_RIGHT === 0x111, "BTN_RIGHT");
 		assert(ui.BTN_MIDDLE === 0x112, "BTN_MIDDLE");
@@ -186,6 +191,26 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		var ffSetup = ui.encodeUinputSetup("ff", { ffEffectsMax: 7 });
 		assert(ffSetup.readUInt32LE(88) === 7, "ff_effects_max override");
 
+		// ── encodeAbsSetup (struct uinput_abs_setup, 28 bytes) ──────
+		var absSetup = ui.encodeAbsSetup(ui.ABS_X, { minimum: 0, maximum: 65535, resolution: 1 });
+		assert(absSetup.length === 28, "uinput_abs_setup length 28");
+		assert(absSetup.readUInt16LE(0) === ui.ABS_X, "abs code");
+		assert(absSetup.readInt32LE(4) === 0, "abs initial value");
+		assert(absSetup.readInt32LE(8) === 0, "abs minimum");
+		assert(absSetup.readInt32LE(12) === 65535, "abs maximum");
+		assert(absSetup.readInt32LE(16) === 0, "abs fuzz");
+		assert(absSetup.readInt32LE(20) === 0, "abs flat");
+		assert(absSetup.readInt32LE(24) === 1, "abs resolution");
+
+		// Default values
+		var absDefSetup = ui.encodeAbsSetup(ui.ABS_Y);
+		assert(absDefSetup.readUInt16LE(0) === ui.ABS_Y, "abs Y code");
+		assert(absDefSetup.readInt32LE(8) === 0, "abs Y default min");
+		assert(absDefSetup.readInt32LE(12) === 0, "abs Y default max");
+		assert(absDefSetup.readInt32LE(16) === 0, "abs Y default fuzz");
+		assert(absDefSetup.readInt32LE(20) === 0, "abs Y default flat");
+		assert(absDefSetup.readInt32LE(24) === 0, "abs Y default resolution");
+
 		// ── encodeEventBurst (concatenation + trailing SYN_REPORT) ───
 		var burst = ui.encodeEventBurst([
 			{ type: ui.EV_KEY, code: 30, value: 1 },
@@ -241,6 +266,8 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		assert(typeof ffi.injectMouseButton === "function", "ffi.injectMouseButton");
 		assert(typeof ffi.injectScrollV === "function", "ffi.injectScrollV");
 		assert(typeof ffi.injectScrollH === "function", "ffi.injectScrollH");
+		assert(typeof ffi.injectAbsMotion === "function", "ffi.injectAbsMotion");
+		assert(ffi.UINPUT_ABS_MAX === 65535, "UINPUT_ABS_MAX value");
 		assert(typeof ffi.closeUinputDevice === "function", "ffi.closeUinputDevice");
 
 		var ready = ffi.uinputReady();
@@ -277,6 +304,8 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(ffi.injectScrollV(0) === true, "scrollV 0 no-op");
 			assert(ffi.injectScrollH(-1) === true, "scrollH -1 accepted");
 			assert(ffi.injectScrollH(0) === true, "scrollH 0 no-op");
+			assert(ffi.injectAbsMotion(32768, 32768) === true, "absMotion center accepted");
+			assert(ffi.injectAbsMotion(0, 0) === true, "absMotion origin accepted");
 			// Tear down explicitly so process exit doesn't leak the device.
 			ffi.closeUinputDevice();
 			// After close, getUinputDevice returns null (re-open is
@@ -326,9 +355,9 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 			assert(false, "Keyboard under uinput pin threw: " + e.message);
 		}
 
-		// Mouse buttons + scroll under uinput pin.  setPos intentionally
-		// stays on the XTest path (uinput has no EV_ABS capability), so
-		// we don't exercise that here — the normal mouse test covers it.
+		// Mouse buttons + scroll under uinput pin.  setPos uses EV_ABS
+		// through uinput (emulated digitizer) when uinput is selected,
+		// falling back to XWarpPointer if the coordinate mapping fails.
 		try {
 			mouse.press(mechatron.BUTTON_LEFT);
 			mouse.release(mechatron.BUTTON_LEFT);

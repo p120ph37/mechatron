@@ -10,13 +10,14 @@
 
 import { ioctlStream, ioctlBridgeAvailable, type IoctlCall, type IoctlStream } from "./ioctl";
 import {
-  EV_SYN, EV_KEY, EV_REL,
+  EV_SYN, EV_KEY, EV_REL, EV_ABS,
   REL_X, REL_Y, REL_WHEEL, REL_HWHEEL,
+  ABS_X, ABS_Y,
   UI_DEV_CREATE, UI_DEV_SETUP,
-  UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT,
-  encodeEventBurst, encodeUinputSetup,
+  UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT, UI_SET_ABSBIT, UI_ABS_SETUP,
+  encodeEventBurst, encodeUinputSetup, encodeAbsSetup,
   allSupportedEvdevCodes, uinputAvailable,
-  makeInjectKeysym, makeInjectMouseButton, makeInjectScroll, makeInjectRelMotion,
+  makeInjectKeysym, makeInjectMouseButton, makeInjectScroll, makeInjectRelMotion, makeInjectAbsMotion,
   type UInputEvent,
 } from "../input/uinput";
 
@@ -27,7 +28,7 @@ let _openReason: string | null = null;
 function buildSetupIoctls(): IoctlCall[] {
   const calls: IoctlCall[] = [];
 
-  for (const ev of [EV_KEY, EV_REL, EV_SYN]) {
+  for (const ev of [EV_KEY, EV_REL, EV_ABS, EV_SYN]) {
     const data = Buffer.alloc(4);
     data.writeInt32LE(ev, 0);
     calls.push({ request: UI_SET_EVBIT, data });
@@ -43,6 +44,18 @@ function buildSetupIoctls(): IoctlCall[] {
     const data = Buffer.alloc(4);
     data.writeInt32LE(rel, 0);
     calls.push({ request: UI_SET_RELBIT, data });
+  }
+
+  for (const abs of [ABS_X, ABS_Y]) {
+    const data = Buffer.alloc(4);
+    data.writeInt32LE(abs, 0);
+    calls.push({ request: UI_SET_ABSBIT, data });
+  }
+
+  // Configure axis ranges: 0–65535 (standard digitizer resolution).
+  const ABS_MAX = 65535;
+  for (const code of [ABS_X, ABS_Y]) {
+    calls.push({ request: UI_ABS_SETUP, data: encodeAbsSetup(code, { minimum: 0, maximum: ABS_MAX }) });
   }
 
   calls.push({ request: UI_DEV_SETUP, data: encodeUinputSetup("mechatron nolib input") });
@@ -93,6 +106,10 @@ export const injectMouseButton = makeInjectMouseButton(emit);
 export const injectScrollV = makeInjectScroll(emit, REL_WHEEL);
 export const injectScrollH = makeInjectScroll(emit, REL_HWHEEL);
 export const injectRelMotion = makeInjectRelMotion(emit);
+export const injectAbsMotion = makeInjectAbsMotion(emit);
+
+/** Maximum device coordinate for EV_ABS axes (standard digitizer range). */
+export const UINPUT_ABS_MAX = 65535;
 
 export function closeNolibUinput(): void {
   if (_stream) {

@@ -13,11 +13,11 @@
  * on an explicit `closeUinputDevice()` or process exit.
  *
  * The device we expose advertises EV_KEY (all mechatron-public keysyms +
- * BTN_LEFT/RIGHT/MIDDLE/SIDE/EXTRA), EV_REL (X, Y, WHEEL, HWHEEL), and
- * EV_SYN.  That's sufficient for the full Keyboard/Mouse public API
- * except absolute positioning (`Mouse.setPos`), which stays on the
- * XTest path — uinput can't teleport the X cursor without also
- * implementing EV_ABS + compositor-side pointer-acceleration bypass.
+ * BTN_LEFT/RIGHT/MIDDLE/SIDE/EXTRA), EV_REL (X, Y, WHEEL, HWHEEL),
+ * EV_ABS (X, Y — emulated digitizer, 0–65535 range), and EV_SYN.
+ * That's sufficient for the full Keyboard/Mouse public API.
+ * Mouse.setPos uses EV_ABS (emulated digitizer) for absolute positioning;
+ * Mouse.getPos reads from X11 since uinput is write-only.
  *
  * Falls back cleanly on non-Linux, non-Bun, or uinput-unavailable
  * systems: `getUinputDevice()` returns null and the caller reverts to
@@ -28,13 +28,14 @@ import { openSync, writeSync, closeSync } from "fs";
 import { libc, libcFFI, libcOpenReason, O_RDWR } from "./libc";
 import { getMechanism } from "../platform";
 import {
-  EV_SYN, EV_KEY, EV_REL,
+  EV_SYN, EV_KEY, EV_REL, EV_ABS,
   REL_X, REL_Y, REL_WHEEL, REL_HWHEEL,
+  ABS_X, ABS_Y,
   UI_DEV_CREATE, UI_DEV_DESTROY, UI_DEV_SETUP,
-  UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT,
-  encodeEventBurst, encodeUinputSetup,
+  UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT, UI_SET_ABSBIT, UI_ABS_SETUP,
+  encodeEventBurst, encodeUinputSetup, encodeAbsSetup,
   allSupportedEvdevCodes,
-  makeInjectKeysym, makeInjectMouseButton, makeInjectScroll,
+  makeInjectKeysym, makeInjectMouseButton, makeInjectScroll, makeInjectAbsMotion,
   type UInputEvent,
 } from "../input/uinput";
 
@@ -94,7 +95,7 @@ export function getUinputDevice(): UInputDevice | null {
     return _libc!.ioctl(fd, BigInt(req), typeof arg === "bigint" ? arg : BigInt(arg));
   };
 
-  for (const ev of [EV_KEY, EV_REL, EV_SYN]) {
+  for (const ev of [EV_KEY, EV_REL, EV_ABS, EV_SYN]) {
     if (ioctl(UI_SET_EVBIT, ev) < 0) {
       return closeOnErr(`UI_SET_EVBIT ${ev} failed`);
     }
@@ -107,6 +108,25 @@ export function getUinputDevice(): UInputDevice | null {
   for (const rel of [REL_X, REL_Y, REL_WHEEL, REL_HWHEEL]) {
     if (ioctl(UI_SET_RELBIT, rel) < 0) {
       return closeOnErr(`UI_SET_RELBIT ${rel} failed`);
+    }
+  }
+  for (const abs of [ABS_X, ABS_Y]) {
+    if (ioctl(UI_SET_ABSBIT, abs) < 0) {
+      return closeOnErr(`UI_SET_ABSBIT ${abs} failed`);
+    }
+  }
+
+  // Configure axis ranges: 0–65535 (standard digitizer resolution).
+  // The compositor / X input driver maps device coordinates proportionally
+  // to screen coordinates based on these declared ranges.
+  const ABS_MAX = 65535;
+  for (const code of [ABS_X, ABS_Y]) {
+    const absBuf = encodeAbsSetup(code, { minimum: 0, maximum: ABS_MAX });
+    const absU8 = new Uint8Array(absBuf.buffer, absBuf.byteOffset, absBuf.byteLength);
+    const absPtr = _ffi.ptr(absU8);
+    if (absPtr == null) return closeOnErr("encodeAbsSetup ptr null");
+    if (ioctl(UI_ABS_SETUP, absPtr) < 0) {
+      return closeOnErr(`UI_ABS_SETUP ${code} failed`);
     }
   }
 
@@ -180,6 +200,10 @@ export const injectKeysym = makeInjectKeysym(emit);
 export const injectMouseButton = makeInjectMouseButton(emit);
 export const injectScrollV = makeInjectScroll(emit, REL_WHEEL);
 export const injectScrollH = makeInjectScroll(emit, REL_HWHEEL);
+export const injectAbsMotion = makeInjectAbsMotion(emit);
+
+/** Maximum device coordinate for EV_ABS axes (standard digitizer range). */
+export const UINPUT_ABS_MAX = 65535;
 
 /**
  * Is the uinput path fully operational?  True when the module has

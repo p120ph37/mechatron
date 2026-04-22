@@ -74,6 +74,8 @@ interface CoreGraphics {
   CGImageGetHeight: (image: Pointer) => bigint;
   CGColorSpaceCreateDeviceRGB: () => Pointer;
   CGColorSpaceRelease: (space: Pointer) => void;
+  // Window enumeration
+  CGWindowListCopyWindowInfo: (option: number, relativeToWindow: number) => Pointer;
 }
 
 interface CoreFoundation {
@@ -83,6 +85,20 @@ interface CoreFoundation {
   CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => number;
   CFStringGetLength: (s: Pointer) => bigint;
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
+  // CFArray
+  CFArrayGetCount: (theArray: Pointer) => bigint;
+  CFArrayGetValueAtIndex: (theArray: Pointer, idx: bigint) => Pointer;
+  // CFDictionary
+  CFDictionaryGetValue: (dict: Pointer, key: Pointer) => Pointer;
+  // CFNumber
+  CFNumberGetValue: (number: Pointer, theType: number, valuePtr: Pointer) => number;
+  // CFBoolean
+  CFBooleanGetValue: (boolean: Pointer) => number;
+  // CF type identification
+  CFGetTypeID: (cf: Pointer) => bigint;
+  CFStringGetTypeID: () => bigint;
+  CFNumberGetTypeID: () => bigint;
+  CFBooleanGetTypeID: () => bigint;
 }
 
 interface Objc {
@@ -92,6 +108,20 @@ interface Objc {
   objc_msgSend: (receiver: Pointer, selector: Pointer) => Pointer;
   objc_autoreleasePoolPush: () => Pointer;
   objc_autoreleasePoolPop: (pool: Pointer) => void;
+}
+
+interface Accessibility {
+  AXIsProcessTrusted: () => number;
+  AXIsProcessTrustedWithOptions: (options: Pointer) => number;
+  AXUIElementCreateApplication: (pid: number) => Pointer;
+  AXUIElementCreateSystemWide: () => Pointer;
+  AXUIElementCopyAttributeValue: (element: Pointer, attribute: Pointer, value: Pointer) => number;
+  AXUIElementSetAttributeValue: (element: Pointer, attribute: Pointer, value: Pointer) => number;
+  AXUIElementCopyAttributeNames: (element: Pointer, names: Pointer) => number;
+  AXUIElementPerformAction: (element: Pointer, action: Pointer) => number;
+  AXValueGetValue: (value: Pointer, type: number, valuePtr: Pointer) => number;
+  AXValueCreate: (type: number, valuePtr: Pointer) => Pointer;
+  _AXUIElementGetWindow: (element: Pointer, windowId: Pointer) => number;
 }
 
 interface Libc {
@@ -138,6 +168,7 @@ let _cg: CoreGraphics | null = null;
 let _cf: CoreFoundation | null = null;
 let _objc: Objc | null = null;
 let _libc: Libc | null = null;
+let _ax: Accessibility | null = null;
 let _appkitLoaded = false;
 
 // ── Load ──────────────────────────────────────────────────────────────
@@ -189,6 +220,7 @@ function tryDlopen(): void {
       CGImageGetHeight:                     { args: [T.ptr], returns: T.u64 },
       CGColorSpaceCreateDeviceRGB:          { args: [], returns: T.ptr },
       CGColorSpaceRelease:                  { args: [T.ptr], returns: T.void },
+      CGWindowListCopyWindowInfo:           { args: [T.u32, T.u32], returns: T.ptr },
     });
     _cg = lib.symbols;
   } catch (_) { _cg = null; }
@@ -201,6 +233,15 @@ function tryDlopen(): void {
       CFStringGetCString:                 { args: [T.ptr, T.ptr, T.u64, T.u32], returns: T.i32 },
       CFStringGetLength:                  { args: [T.ptr], returns: T.i64 },
       CFStringGetMaximumSizeForEncoding:  { args: [T.i64, T.u32], returns: T.i64 },
+      CFArrayGetCount:                    { args: [T.ptr], returns: T.i64 },
+      CFArrayGetValueAtIndex:             { args: [T.ptr, T.i64], returns: T.ptr },
+      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.ptr },
+      CFNumberGetValue:                   { args: [T.ptr, T.i32, T.ptr], returns: T.i32 },
+      CFBooleanGetValue:                  { args: [T.ptr], returns: T.i32 },
+      CFGetTypeID:                        { args: [T.ptr], returns: T.u64 },
+      CFStringGetTypeID:                  { args: [], returns: T.u64 },
+      CFNumberGetTypeID:                  { args: [], returns: T.u64 },
+      CFBooleanGetTypeID:                 { args: [], returns: T.u64 },
     });
     _cf = lib.symbols;
   } catch (_) { _cf = null; }
@@ -229,6 +270,24 @@ function tryDlopen(): void {
     });
     _appkitLoaded = true;
   } catch (_) { _appkitLoaded = false; }
+
+  const AX_PATH = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
+  try {
+    const lib = _ffi.dlopen<Accessibility>(AX_PATH, {
+      AXIsProcessTrusted:                 { args: [], returns: T.i32 },
+      AXIsProcessTrustedWithOptions:      { args: [T.ptr], returns: T.i32 },
+      AXUIElementCreateApplication:       { args: [T.i32], returns: T.ptr },
+      AXUIElementCreateSystemWide:        { args: [], returns: T.ptr },
+      AXUIElementCopyAttributeValue:      { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
+      AXUIElementSetAttributeValue:       { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
+      AXUIElementCopyAttributeNames:      { args: [T.ptr, T.ptr], returns: T.i32 },
+      AXUIElementPerformAction:           { args: [T.ptr, T.ptr], returns: T.i32 },
+      AXValueGetValue:                    { args: [T.ptr, T.i32, T.ptr], returns: T.i32 },
+      AXValueCreate:                      { args: [T.i32, T.ptr], returns: T.ptr },
+      _AXUIElementGetWindow:              { args: [T.ptr, T.ptr], returns: T.i32 },
+    });
+    _ax = lib.symbols;
+  } catch (_) { _ax = null; }
 
   try {
     const lib = _ffi.dlopen<Libc>(LIBC_PATH, {
@@ -263,6 +322,7 @@ export function cg(): CoreGraphics | null { tryDlopen(); return _cg; }
 export function cf(): CoreFoundation | null { tryDlopen(); return _cf; }
 export function objc(): Objc | null { tryDlopen(); return _objc; }
 export function libc(): Libc | null { tryDlopen(); return _libc; }
+export function ax(): Accessibility | null { tryDlopen(); return _ax; }
 export function macFFI(): BunFFI | null { tryDlopen(); return _ffi; }
 export function hasAppKit(): boolean { tryDlopen(); return _appkitLoaded; }
 
@@ -295,6 +355,9 @@ export const BITMAP_INFO_BGRA_PMA = (2 << 12) | 2;
 
 // kCFStringEncodingUTF8
 export const kCFStringEncodingUTF8 = 0x08000100;
+
+// kCFNumberSInt32Type
+export const kCFNumberSInt32Type = 3;
 
 // ── Constants (mach / process) ───────────────────────────────────────
 
