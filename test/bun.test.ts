@@ -116,7 +116,7 @@ const expectOrSkip = (capability: string, label: string) => {
 // Skip when SKIP_PLATFORM is true so that requiring an unsupported subsystem
 // doesn't blow up at file load time.
 
-let typesM: any, kbM: any, mouseM: any, clipM: any, procM: any, winM: any, scrM: any, memM: any, uinputM: any, xprotoM: any;
+let typesM: any, kbM: any, mouseM: any, clipM: any, procM: any, winM: any, scrM: any, memM: any, uinputM: any, xprotoM: any, compatM: any;
 let waitFor: (cond: () => boolean, timeoutMs: number) => boolean;
 
 if (!SKIP_PLATFORM) {
@@ -145,6 +145,7 @@ if (!SKIP_PLATFORM) {
   memM   = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
   uinputM = require("./uinput")(mechatron, log, assert, waitFor, expectOrSkip);
   xprotoM = require("./xproto")(mechatron, log, assert, waitFor, expectOrSkip);
+  compatM = require("./compatibility")(mechatron, log, assert);
 
   log(`\nMECHATRON [${backend.toUpperCase()} backend] ${gPlatformKey}\n`);
   const expected = Object.keys(gExpect).filter((k) => gExpect[k]).join(", ");
@@ -179,4 +180,5 @@ describeMaybe(`mechatron [${backend}]`, () => {
   test("memory",    () => memM.testMemory());
   test("uinput",    () => uinputM.testUinput());
   test("xproto",    () => xprotoM.testXproto());
+  test("compatibility", () => compatM.testCompatibility());
 });

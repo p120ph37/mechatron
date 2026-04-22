@@ -5,8 +5,9 @@
  *   - x11:    XTest FakeButtonEvent / WarpPointer via xproto. Requires $DISPLAY.
  *   - portal: RemoteDesktop D-Bus NotifyPointerButton/Motion/Axis. Requires Wayland + portal.
  *   - vt:     uinput via ioctl bridge. Requires /dev/uinput + interpreter.
- *     Note: vt and portal only support relative motion; getPos/setPos/getButtonState
- *     are no-ops without X11.
+ *     setPos uses EV_ABS (emulated digitizer, 0–65535 range) with screen
+ *     dimensions from the framebuffer.  getPos/getButtonState are unavailable
+ *     (uinput is write-only).
  */
 
 import { getNolibVariant } from "../backend";
@@ -19,7 +20,13 @@ import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2, evdevButto
 import {
   nolibUinputAvailable,
   injectMouseButton, injectScrollV, injectScrollH,
+  injectAbsMotion, UINPUT_ABS_MAX,
 } from "./uinput";
+import { ioctlSync, ioctlBridgeAvailable } from "./ioctl";
+import {
+  FRAMEBUFFER_DEV, FBIOGET_VSCREENINFO,
+  framebufferAvailable, parseFbVarScreenInfo,
+} from "../screen/framebuffer";
 import {
   remoteDesktopAvailable,
   notifyPointerButton, notifyPointerAxisDiscrete,
@@ -36,6 +43,23 @@ let _hasUinput: boolean | undefined;
 function hasUinput(): boolean {
   if (_hasUinput === undefined) _hasUinput = IS_LINUX && nolibUinputAvailable();
   return _hasUinput;
+}
+
+let _fbScreenDims: { w: number; h: number } | null | undefined;
+function getFbScreenDims(): { w: number; h: number } | null {
+  if (_fbScreenDims !== undefined) return _fbScreenDims;
+  if (!ioctlBridgeAvailable() || !framebufferAvailable()) {
+    _fbScreenDims = null;
+    return null;
+  }
+  const result = ioctlSync(FRAMEBUFFER_DEV, [
+    { request: FBIOGET_VSCREENINFO, data: Buffer.alloc(160) },
+  ]);
+  if (!result || result.outputs.length < 1) { _fbScreenDims = null; return null; }
+  const geom = parseFbVarScreenInfo(result.outputs[0]);
+  if (geom.width === 0 || geom.height === 0) { _fbScreenDims = null; return null; }
+  _fbScreenDims = { w: geom.width, h: geom.height };
+  return _fbScreenDims;
 }
 
 const Button1Mask = 1 << 8;
@@ -89,8 +113,15 @@ async function linux_mouse_getPos(): Promise<{ x: number; y: number }> {
 
 async function linux_mouse_setPos(x: number, y: number): Promise<void> {
   if (USE_PORTAL) return;
-  if (!USE_X11) return;
-  return xprotoSetPos(x, y);
+  if (USE_X11) return xprotoSetPos(x, y);
+  if (hasUinput()) {
+    const dims = getFbScreenDims();
+    if (dims && dims.w > 0 && dims.h > 0) {
+      const absX = Math.round((x * UINPUT_ABS_MAX) / dims.w);
+      const absY = Math.round((y * UINPUT_ABS_MAX) / dims.h);
+      injectAbsMotion(absX, absY);
+    }
+  }
 }
 
 async function linux_mouse_getButtonState(button: number): Promise<boolean> {
