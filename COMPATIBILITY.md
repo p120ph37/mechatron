@@ -21,7 +21,9 @@ the ctor cell is `skip` and all tests in the subsystem are skipped.
 | Column | Backend | Platform | Notes |
 |--------|---------|----------|-------|
 | napi | Pre-built Rust .node binary | Linux, Windows, macOS | Gold-standard reference |
-| ffi/linux | bun:ffi | Linux (X11/EWMH) | Requires libX11; XTest or uinput for input |
+| ffi/linux | bun:ffi | Linux (X11/EWMH) | Requires libX11; XTest for input |
+| ffi/linux[uinput] | bun:ffi | Linux (X11 + uinput input) | Input via /dev/uinput; Xvfb can't observe |
+| ffi/linux[xproto] | bun:ffi | Linux (X11 + xproto input) | Input via X11 wire protocol; async bridge |
 | ffi/win32 | bun:ffi | Windows | user32.dll / kernel32.dll |
 | ffi/mac | bun:ffi | macOS | CoreGraphics + Accessibility framework |
 | nolib/x11 | Pure TS (xproto wire) | Linux with $DISPLAY | No native libraries at all |
@@ -33,25 +35,25 @@ the ctor cell is `skip` and all tests in the subsystem are skipped.
 
 ## Keyboard
 
-| Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
-|----------|------|-----------|-----------|---------|-----------|--------------|----------|
-| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_press | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_release | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_getKeyState | ok | ok | ok | ok | ok | skip | skip |
+| Function | napi | ffi/linux | ffi/linux[uinput] | ffi/linux[xproto] | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
+|----------|------|-----------|-------------------|-------------------|-----------|---------|-----------|--------------|----------|
+| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_getKeyState | ok | ok | skip | skip | ok | ok | ok | skip | skip |
 
 ## Mouse
 
-| Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
-|----------|------|-----------|-----------|---------|-----------|--------------|----------|
-| mouse_ctor | ok | ok | ok | ok | ok | ok | ok |
-| mouse_press | ok | ok | ok | ok | ok | ok | ok |
-| mouse_release | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok |
-| mouse_getPos | ok | ok | ok | ok | ok | skip | n/a |
-| mouse_setPos | ok | ok | ok | ok | ok | skip | ok |
-| mouse_getButtonState | ok | ok | ok | ok | ok | skip | n/a |
+| Function | napi | ffi/linux | ffi/linux[uinput] | ffi/linux[xproto] | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
+|----------|------|-----------|-------------------|-------------------|-----------|---------|-----------|--------------|----------|
+| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_getPos | ok | ok | skip | skip | ok | ok | ok | skip | n/a |
+| mouse_setPos | ok | ok | ok | ok | ok | ok | ok | skip | ok |
+| mouse_getButtonState | ok | ok | skip | skip | ok | ok | ok | skip | n/a |
 
 ## Window
 
