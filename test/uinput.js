@@ -325,6 +325,17 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			return true;
 		}
 
+		// nolib[vt] IS the uinput mechanism — there's no XTest↔uinput
+		// dispatch to exercise, and lazy-init of the ioctl-bridge stream
+		// blocks in Bun's event loop (synchronous spin on child stdout).
+		var kbBackend = mechatron.getBackend("keyboard");
+		var mouseBackend = mechatron.getBackend("mouse");
+		if ((kbBackend && kbBackend.indexOf("nolib") === 0) ||
+			(mouseBackend && mouseBackend.indexOf("nolib") === 0)) {
+			log("(nolib backend, skipping mechanism-pin tests) OK\n");
+			return true;
+		}
+
 		var infos = mechatron.listMechanisms("input");
 		assert(Array.isArray(infos), "listMechanisms returns array");
 		var uinputInfo = infos.find(function (m) { return m.name === "uinput"; });
