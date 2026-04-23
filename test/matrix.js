@@ -136,9 +136,12 @@ function computeDemotions() {
 	var mechanism = (process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase();
 	var backend = (process.env.MECHATRON_BACKEND || "").toLowerCase();
 
-	// libXtst blocked: XTest-dependent observation fails
+	// libXtst blocked: ffi[x11] keyboard/mouse backends fail to load
+	// entirely, and XTest-dependent observation functions are unavailable
 	if (blocked.includes("libxtst")) {
+		demoted["keyboard_ctor"] = "libXtst blocked";
 		demoted["keyboard_getKeyState"] = "libXtst blocked";
+		demoted["mouse_ctor"] = "libXtst blocked";
 		demoted["mouse_getButtonState"] = "libXtst blocked";
 		demoted["mouse_getPos"] = "libXtst blocked";
 	}
@@ -176,13 +179,6 @@ module.exports = {
 		var columns = null;
 		var demoted = computeDemotions();
 
-		var ctorSubs = ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"];
-		for (var c = 0; c < ctorSubs.length; c++) {
-			if (!mechatron.isAvailable(ctorSubs[c])) {
-				demoted[ctorSubs[c] + "_ctor"] = "backend unavailable";
-			}
-		}
-
 		if (fs.existsSync(mdPath)) {
 			matrix = parseMatrix(mdPath);
 			columns = detectColumns(mechatron);
@@ -211,7 +207,6 @@ module.exports = {
 				for (var i = 0; i < functions.length; i++) {
 					var fn = functions[i];
 					if (demoted[fn]) return false;
-					if (fn.indexOf("_ctor") === fn.length - 5) continue;
 					var found = false;
 					var subsystems = Object.keys(matrix);
 					for (var s = 0; s < subsystems.length; s++) {

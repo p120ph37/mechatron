@@ -1,9 +1,12 @@
 # Mechatron Compatibility Matrix
 
 This file is both documentation and the **single source of truth** for CI test
-expectations.  The test harness (`test/compatibility.js`) reads these tables and
-validates that every `ok` cell corresponds to working functionality on the
-current CI backend/platform combination.
+expectations.  The test runner (`test/matrix.js`) reads these tables and decides
+whether each annotated test entry should run on the current backend/platform.
+
+Every subsystem table includes a `_ctor` row that controls whether any test
+in that subsystem can run — when the backend can't load (e.g. blocked dlopen),
+the ctor cell is `skip` and all tests in the subsystem are skipped.
 
 ## Cell Values
 
@@ -32,6 +35,7 @@ current CI backend/platform combination.
 
 | Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
 |----------|------|-----------|-----------|---------|-----------|--------------|----------|
+| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_press | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_release | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_getKeyState | ok | ok | ok | ok | ok | skip | skip |
@@ -40,6 +44,7 @@ current CI backend/platform combination.
 
 | Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
 |----------|------|-----------|-----------|---------|-----------|--------------|----------|
+| mouse_ctor | ok | ok | ok | ok | ok | ok | ok |
 | mouse_press | ok | ok | ok | ok | ok | ok | ok |
 | mouse_release | ok | ok | ok | ok | ok | ok | ok |
 | mouse_scrollH | ok | ok | ok | ok | ok | ok | ok |
@@ -52,6 +57,7 @@ current CI backend/platform combination.
 
 | Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/x11 |
 |----------|------|-----------|-----------|---------|-----------|
+| window_ctor | ok | ok | ok | ok | ok |
 | window_isValid | ok | ok | ok | ok | ok |
 | window_close | ok | ok | ok | ok | ok |
 | window_isTopMost | ok | ok | ok | ok | ok |
@@ -83,6 +89,7 @@ current CI backend/platform combination.
 
 | Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/linux |
 |----------|------|-----------|-----------|---------|-------------|
+| process_ctor | ok | ok | ok | ok | ok |
 | process_open | ok | ok | ok | ok | ok |
 | process_close | ok | ok | ok | ok | ok |
 | process_isValid | ok | ok | ok | ok | ok |
@@ -105,6 +112,7 @@ current CI backend/platform combination.
 
 | Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/x11 | nolib/portal | nolib/vt |
 |----------|------|-----------|-----------|---------|-----------|--------------|----------|
+| screen_ctor | ok | ok | ok | ok | ok | ok | ok |
 | screen_synchronize | ok | ok | ok | ok | ok | ok | ok |
 | screen_grabScreen | ok | ok | ok | ok | ok | ok | ok |
 
@@ -112,6 +120,7 @@ current CI backend/platform combination.
 
 | Function | napi | ffi/linux | ffi/win32 | ffi/mac | nolib/linux | nolib/mac |
 |----------|------|-----------|-----------|---------|-------------|-----------|
+| clipboard_ctor | ok | ok | ok | ok | ok | ok |
 | clipboard_clear | ok | skip | ok | ok | ok | ok |
 | clipboard_hasText | ok | skip | ok | ok | ok | ok |
 | clipboard_getText | ok | skip | ok | ok | ok | ok |
@@ -120,3 +129,9 @@ current CI backend/platform combination.
 | clipboard_getImage | ok | skip | ok | ok | skip | skip |
 | clipboard_setImage | ok | skip | ok | ok | skip | skip |
 | clipboard_getSequence | ok | skip | ok | ok | skip | skip |
+
+## Memory
+
+| Function | napi | ffi/linux | ffi/win32 | ffi/mac |
+|----------|------|-----------|-----------|---------|
+| memory_ctor | ok | ok | ok | ok |
