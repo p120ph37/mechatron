@@ -176,6 +176,13 @@ module.exports = {
 		var columns = null;
 		var demoted = computeDemotions();
 
+		var ctorSubs = ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"];
+		for (var c = 0; c < ctorSubs.length; c++) {
+			if (!mechatron.isAvailable(ctorSubs[c])) {
+				demoted[ctorSubs[c] + "_ctor"] = "backend unavailable";
+			}
+		}
+
 		if (fs.existsSync(mdPath)) {
 			matrix = parseMatrix(mdPath);
 			columns = detectColumns(mechatron);
@@ -204,6 +211,7 @@ module.exports = {
 				for (var i = 0; i < functions.length; i++) {
 					var fn = functions[i];
 					if (demoted[fn]) return false;
+					if (fn.indexOf("_ctor") === fn.length - 5) continue;
 					var found = false;
 					var subsystems = Object.keys(matrix);
 					for (var s = 0; s < subsystems.length; s++) {

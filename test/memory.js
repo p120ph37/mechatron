@@ -594,6 +594,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	}
 
 	return [
-		{ name: "memory", functions: [], test: testMemory },
+		{ name: "memory", functions: ["memory_ctor"], test: testMemory },
 	];
 };

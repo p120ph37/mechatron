@@ -54,20 +54,20 @@ const compatMatrix = require("./matrix").create(mechatron);
 
 type TestEntry = { name: string; functions: string[]; test: () => any };
 
-// The `subsystem` field gates the entire module on backend availability:
-// when the backend for a subsystem didn't load (e.g. dlopen blocked),
-// every entry in that module is skipped regardless of the matrix cell.
-const allModules: Array<{ prefix: string; subsystem: string | null; entries: TestEntry[] }> = [
-  { prefix: "types",     subsystem: null,        entries: require("./types")(mechatron, log, assert, waitFor) },
-  { prefix: "keyboard",  subsystem: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
-  { prefix: "mouse",     subsystem: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
-  { prefix: "clipboard", subsystem: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
-  { prefix: "process",   subsystem: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
-  { prefix: "window",    subsystem: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
-  { prefix: "screen",    subsystem: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
-  { prefix: "memory",    subsystem: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
-  { prefix: "uinput",    subsystem: null,        entries: require("./uinput")(mechatron, log, assert, waitFor) },
-  { prefix: "xproto",    subsystem: null,        entries: require("./xproto")(mechatron, log, assert, waitFor) },
+// Every subsystem entry declares its ctor as a touched function; matrix.js
+// demotes the ctor when the backend isn't loaded, so shouldRun() is the
+// single gate for both backend availability and function-level status.
+const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
+  { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
+  { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
+  { prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
+  { prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
+  { prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
+  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
+  { prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
+  { prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
+  { prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor) },
+  { prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor) },
 ];
 
 log(`\nMECHATRON [${backend.toUpperCase()} backend] ${process.platform}-${process.arch}\n`);
@@ -85,15 +85,10 @@ describe(`mechatron [${backend}]`, () => {
   });
 
   for (const mod of allModules) {
-    const subAvail = !mod.subsystem || mechatron.isAvailable(mod.subsystem);
     for (const entry of mod.entries) {
       const displayName = `${mod.prefix}: ${entry.name}`;
       const timeout = mod.prefix === "window" ? 15000 : undefined;
       test(displayName, () => {
-        if (!subAvail) {
-          log(`  ${displayName} (skipped: backend unavailable)\n`);
-          return;
-        }
         if (!compatMatrix.shouldRun(entry.functions)) {
           const reason = compatMatrix.getDemotionReason(entry.functions) || "matrix skip";
           log(`  ${displayName} (skipped: ${reason})\n`);

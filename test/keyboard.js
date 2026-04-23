@@ -30,7 +30,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile SPACE",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("{SPACE}");
 				assert(list.length === 2, "compile SPACE length");
@@ -43,7 +43,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile TAB+ESC",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("{TAB}{ESCAPE}");
 				assert(list.length === 4, "compile TAB+ESC length");
@@ -52,7 +52,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile F1-F12",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("{F1}{F2}{F3}{F4}{F5}{F6}{F7}{F8}{F9}{F10}{F11}{F12}");
 				assert(list.length === 24, "compile F1-F12 length");
@@ -61,7 +61,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile modifiers",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("{SHIFT}{CONTROL}{ALT}");
 				assert(list.length === 6, "compile modifiers length");
@@ -70,7 +70,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile SPACE repetition",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("{SPACE 3}");
 				assert(list.length === 6, "compile SPACE x3 length");
@@ -79,7 +79,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile plain characters",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("abc");
 				assert(list.length === 6, "compile 'abc' length");
@@ -88,7 +88,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile modifier prefix +a",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("+a");
 				assert(list.length >= 4, "compile +a has shift down+up + a down+up");
@@ -98,7 +98,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile modifier group +(ab)",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("+(ab)");
 				assert(list !== null, "compile +(ab) not null");
@@ -108,7 +108,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile error cases",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				assert(Keyboard.compile("}").length === 0, "compile unmatched } empty");
 				assert(Keyboard.compile("{").length === 0, "compile unmatched { empty");
@@ -120,7 +120,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile whitespace",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("\t\n");
 				assert(list !== null && list.length === 0, "compile whitespace empty");
@@ -129,7 +129,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "compile repetition zero",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var list = Keyboard.compile("{SPACE 0}");
 				assert(list !== null && list.length === 0, "compile SPACE x0 empty");
@@ -140,7 +140,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "KEYS record",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				assert(typeof KEYS === "object", "KEYS is object");
 				assert(typeof KEYS.KEY_SPACE === "number", "KEY_SPACE is number");
@@ -155,7 +155,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getAllKeys and getKeyNames",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var allKeys = mechatron.getAllKeys();
 				assert(allKeys.length > 0, "getAllKeys non-empty");
@@ -168,7 +168,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "autoDelay is Range",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var k = new Keyboard();
 				assert(k.autoDelay instanceof mechatron.Range, "autoDelay is Range");
@@ -177,7 +177,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "clone",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var k = new Keyboard();
 				var kc = k.clone();
@@ -187,7 +187,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "copy constructor",
-			functions: [],
+			functions: ["keyboard_ctor"],
 			test: async function () {
 				var k = new Keyboard();
 				var kCopy = new Keyboard(k);
@@ -199,7 +199,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getState returns object",
-			functions: ["keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_getKeyState"],
 			test: async function () {
 				var state = await Keyboard.getState();
 				assert(typeof state === "object", "getState returns object");
@@ -208,7 +208,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getState without keycode returns object",
-			functions: ["keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_getKeyState"],
 			test: async function () {
 				var kState = await Keyboard.getState();
 				assert(typeof kState === "object", "getState() returns object");
@@ -219,7 +219,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press + getState",
-			functions: ["keyboard_press", "keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_press", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				try {
@@ -237,7 +237,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "release + getState",
-			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.press(KEYS.KEY_SHIFT);
@@ -255,7 +255,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click + getState",
-			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.click(KEYS.KEY_SHIFT);
@@ -269,7 +269,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press then release pair",
-			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				try {
@@ -293,7 +293,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click string SPACE",
-			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.click("{SPACE}");
@@ -305,7 +305,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click string 'a'",
-			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.click("a");

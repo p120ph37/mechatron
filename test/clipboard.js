@@ -25,28 +25,28 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			return [
 				{
 					name: "linux clear returns false (no tool)",
-					functions: [],
+					functions: ["clipboard_ctor"],
 					test: async function () {
 						assert(await Clipboard.clear() === false, "linux clear (no tool)");
 					}
 				},
 				{
 					name: "linux hasText returns false (no tool)",
-					functions: [],
+					functions: ["clipboard_ctor"],
 					test: async function () {
 						assert(await Clipboard.hasText() === false, "linux hasText (no tool)");
 					}
 				},
 				{
 					name: "linux getText returns empty (no tool)",
-					functions: [],
+					functions: ["clipboard_ctor"],
 					test: async function () {
 						assert((await Clipboard.getText()).length === 0, "linux getText (no tool)");
 					}
 				},
 				{
 					name: "linux setText returns false (no tool)",
-					functions: [],
+					functions: ["clipboard_ctor"],
 					test: async function () {
 						assert(await Clipboard.setText("Hello") === false, "linux setText (no tool)");
 					}
@@ -58,7 +58,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return [
 			{
 				name: "linux setText + getText round-trip via " + caps.active,
-				functions: ["clipboard_setText", "clipboard_getText"],
+				functions: ["clipboard_ctor", "clipboard_setText", "clipboard_getText"],
 				test: async function () {
 					assert(await Clipboard.setText("Hello"), "linux setText Hello via " + caps.active);
 					assert(await Clipboard.getText() === "Hello", "linux getText Hello via " + caps.active);
@@ -66,7 +66,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			},
 			{
 				name: "linux hasText after setText via " + caps.active,
-				functions: ["clipboard_setText", "clipboard_hasText"],
+				functions: ["clipboard_ctor", "clipboard_setText", "clipboard_hasText"],
 				test: async function () {
 					assert(await Clipboard.setText("Hello"), "linux setText Hello via " + caps.active);
 					assert(await Clipboard.hasText(), "linux hasText after set via " + caps.active);
@@ -74,7 +74,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			},
 			{
 				name: "linux image ops unsupported",
-				functions: ["clipboard_setImage", "clipboard_hasImage", "clipboard_getImage"],
+				functions: ["clipboard_ctor", "clipboard_setImage", "clipboard_hasImage", "clipboard_getImage"],
 				test: async function () {
 					var img = new Image();
 					assert(await Clipboard.hasImage() === false, "linux hasImage");
@@ -84,7 +84,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			},
 			{
 				name: "linux getSequence returns number",
-				functions: ["clipboard_getSequence"],
+				functions: ["clipboard_ctor", "clipboard_getSequence"],
 				test: async function () {
 					var seq = await Clipboard.getSequence();
 					assert(typeof seq === "number", "linux getSequence returns number");
@@ -97,7 +97,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	return [
 		{
 			name: "setText + getText round-trip",
-			functions: ["clipboard_setText", "clipboard_getText"],
+			functions: ["clipboard_ctor", "clipboard_setText", "clipboard_getText"],
 			test: async function () {
 				assert(await Clipboard.setText("Hello"), "setText Hello");
 				assert(await Clipboard.getText() === "Hello", "getText Hello");
@@ -108,7 +108,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "hasText after setText",
-			functions: ["clipboard_setText", "clipboard_hasText"],
+			functions: ["clipboard_ctor", "clipboard_setText", "clipboard_hasText"],
 			test: async function () {
 				assert(await Clipboard.setText("Hello"), "setText Hello");
 				assert(await Clipboard.hasText(), "hasText after set");
@@ -116,7 +116,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "getSequence consistency and change detection",
-			functions: ["clipboard_getSequence"],
+			functions: ["clipboard_ctor", "clipboard_getSequence"],
 			test: async function () {
 				var s1 = await Clipboard.getSequence();
 				assert(s1 !== 0, "getSequence non-zero");
@@ -125,7 +125,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "clear + verify empty",
-			functions: ["clipboard_clear", "clipboard_hasText"],
+			functions: ["clipboard_ctor", "clipboard_clear", "clipboard_hasText"],
 			test: async function () {
 				assert(await Clipboard.setText("temp"), "setText temp for clear test");
 				var s1 = await Clipboard.getSequence();
@@ -138,7 +138,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "large text round-trip (64K)",
-			functions: ["clipboard_setText", "clipboard_getText"],
+			functions: ["clipboard_ctor", "clipboard_setText", "clipboard_getText"],
 			test: async function () {
 				var big = new Array(65536).join("X");
 				assert(await Clipboard.setText(big), "setText large");
@@ -147,7 +147,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "setImage + hasImage",
-			functions: ["clipboard_setImage", "clipboard_hasImage"],
+			functions: ["clipboard_ctor", "clipboard_setImage", "clipboard_hasImage"],
 			test: async function () {
 				var src = new Image(4, 4);
 				src.fill(128, 64, 32);
@@ -158,7 +158,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "setImage + getImage round-trip",
-			functions: ["clipboard_setImage", "clipboard_getImage"],
+			functions: ["clipboard_ctor", "clipboard_setImage", "clipboard_getImage"],
 			test: async function () {
 				var src = new Image(4, 4);
 				src.fill(128, 64, 32);

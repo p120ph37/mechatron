@@ -21,7 +21,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Screen class construction / clone ---
 		{
 			name: "Screen construction and clone",
-			functions: [],
+			functions: ["screen_ctor"],
 			test: async function () {
 				// Before synchronize, getTotalBounds still returns a Bounds
 				var tb = Screen.getTotalBounds();
@@ -47,7 +47,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- synchronize + post-sync property tests ---
 		{
 			name: "Screen.synchronize and properties",
-			functions: ["screen_synchronize"],
+			functions: ["screen_ctor", "screen_synchronize"],
 			test: async function () {
 				var synced = await Screen.synchronize();
 				assert(synced === true, "synchronize returns true");
@@ -112,7 +112,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- grabScreen tests ---
 		{
 			name: "Screen.grabScreen",
-			functions: ["screen_synchronize", "screen_grabScreen"],
+			functions: ["screen_ctor", "screen_synchronize", "screen_grabScreen"],
 			test: async function () {
 				await Screen.synchronize();
 
@@ -159,7 +159,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Oversize grab (handle-allocation failure path) ---
 		{
 			name: "Screen.grabScreen oversize allocation",
-			functions: ["screen_grabScreen"],
+			functions: ["screen_ctor", "screen_grabScreen"],
 			test: async function () {
 				if (mechatron.getBackend("screen") !== "ffi") {
 					log("(skipped: not ffi backend) ");
@@ -179,7 +179,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Promise-returning assertions ---
 		{
 			name: "Screen async methods return Promises",
-			functions: ["screen_synchronize", "screen_grabScreen"],
+			functions: ["screen_ctor", "screen_synchronize", "screen_grabScreen"],
 			test: async function () {
 				var pa1 = Screen.synchronize();
 				assert(pa1 instanceof Promise, "synchronize returns Promise");
@@ -198,7 +198,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Framebuffer / DRM pure-encoding tests ---
 		{
 			name: "Framebuffer/DRM pure-encoding helpers",
-			functions: [],
+			functions: ["screen_ctor"],
 			test: async function () {
 				var IS_BUN = typeof globalThis.Bun !== "undefined";
 				var fb = IS_BUN
@@ -302,7 +302,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- FFI framebuffer layer (gated on ffi backend) ---
 		{
 			name: "FFI framebuffer layer",
-			functions: [],
+			functions: ["screen_ctor"],
 			test: async function () {
 				var be = (process.env.MECHATRON_BACKEND || "").toLowerCase();
 				if (be !== "ffi" || process.platform !== "linux") {
