@@ -18,6 +18,7 @@ import {
   encodeEventBurst, encodeUinputSetup, encodeAbsSetup,
   allSupportedEvdevCodes, uinputAvailable,
   makeInjectKeysym, makeInjectMouseButton, makeInjectScroll, makeInjectRelMotion, makeInjectAbsMotion,
+  UINPUT_ABS_MAX,
   type UInputEvent,
 } from "../input/uinput";
 
@@ -52,10 +53,8 @@ function buildSetupIoctls(): IoctlCall[] {
     calls.push({ request: UI_SET_ABSBIT, data });
   }
 
-  // Configure axis ranges: 0–65535 (standard digitizer resolution).
-  const ABS_MAX = 65535;
   for (const code of [ABS_X, ABS_Y]) {
-    calls.push({ request: UI_ABS_SETUP, data: encodeAbsSetup(code, { minimum: 0, maximum: ABS_MAX }) });
+    calls.push({ request: UI_ABS_SETUP, data: encodeAbsSetup(code, { minimum: 0, maximum: UINPUT_ABS_MAX }) });
   }
 
   calls.push({ request: UI_DEV_SETUP, data: encodeUinputSetup("mechatron nolib input") });
@@ -108,8 +107,7 @@ export const injectScrollH = makeInjectScroll(emit, REL_HWHEEL);
 export const injectRelMotion = makeInjectRelMotion(emit);
 export const injectAbsMotion = makeInjectAbsMotion(emit);
 
-/** Maximum device coordinate for EV_ABS axes (standard digitizer range). */
-export const UINPUT_ABS_MAX = 65535;
+export { UINPUT_ABS_MAX };
 
 export function closeNolibUinput(): void {
   if (_stream) {

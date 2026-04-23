@@ -36,6 +36,7 @@ import {
   encodeEventBurst, encodeUinputSetup, encodeAbsSetup,
   allSupportedEvdevCodes,
   makeInjectKeysym, makeInjectMouseButton, makeInjectScroll, makeInjectAbsMotion,
+  UINPUT_ABS_MAX,
   type UInputEvent,
 } from "../input/uinput";
 
@@ -116,12 +117,8 @@ export function getUinputDevice(): UInputDevice | null {
     }
   }
 
-  // Configure axis ranges: 0–65535 (standard digitizer resolution).
-  // The compositor / X input driver maps device coordinates proportionally
-  // to screen coordinates based on these declared ranges.
-  const ABS_MAX = 65535;
   for (const code of [ABS_X, ABS_Y]) {
-    const absBuf = encodeAbsSetup(code, { minimum: 0, maximum: ABS_MAX });
+    const absBuf = encodeAbsSetup(code, { minimum: 0, maximum: UINPUT_ABS_MAX });
     const absU8 = new Uint8Array(absBuf.buffer, absBuf.byteOffset, absBuf.byteLength);
     const absPtr = _ffi.ptr(absU8);
     if (absPtr == null) return closeOnErr("encodeAbsSetup ptr null");
@@ -202,8 +199,7 @@ export const injectScrollV = makeInjectScroll(emit, REL_WHEEL);
 export const injectScrollH = makeInjectScroll(emit, REL_HWHEEL);
 export const injectAbsMotion = makeInjectAbsMotion(emit);
 
-/** Maximum device coordinate for EV_ABS axes (standard digitizer range). */
-export const UINPUT_ABS_MAX = 65535;
+export { UINPUT_ABS_MAX };
 
 /**
  * Is the uinput path fully operational?  True when the module has

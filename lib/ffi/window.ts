@@ -15,7 +15,7 @@ import {
   sendClientMessage, IsViewable, PropModeReplace, CurrentTime,
 } from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
-import { getBunFFI, type Pointer } from "./bun";
+import { getBunFFI, cstr, type Pointer } from "./bun";
 import { cg, cf, ax, macFFI, cfStringFromJS, cfStringToJS, kCFNumberSInt32Type } from "./mac";
 
 const IS_LINUX = process.platform === "linux";
@@ -276,6 +276,10 @@ let _axFullScreen: Pointer = null;
 let _axRaise: Pointer = null;
 let _axSubrole: Pointer = null;
 let _axStandardWindow: Pointer = null;
+let _axCloseButton: Pointer = null;
+let _axPress: Pointer = null;
+let _axMinimize: Pointer = null;
+let _axZoomAction: Pointer = null;
 
 function mac_initKeys(): void {
   if (_macKeysInited) return;
@@ -296,9 +300,39 @@ function mac_initKeys(): void {
   _axRaise = cfStringFromJS("AXRaise");
   _axSubrole = cfStringFromJS("AXSubrole");
   _axStandardWindow = cfStringFromJS("AXStandardWindow");
+  _axCloseButton = cfStringFromJS("AXCloseButton");
+  _axPress = cfStringFromJS("AXPress");
+  _axMinimize = cfStringFromJS("AXMinimize");
+  _axZoomAction = cfStringFromJS("AXZoomAction");
 }
 
 // ── macOS helpers ──────────────────────────────────────────────────
+
+/**
+ * Scan CGWindowListCopyWindowInfo for the dict matching windowId,
+ * call `visitor` with it, then release the list.  Returns visitor's
+ * return value, or `fallback` if not found.
+ */
+function mac_withWindowDict<T>(windowId: number, fallback: T, visitor: (dict: Pointer) => T): T {
+  const C = cg(); const CF = cf();
+  if (!C || !CF) return fallback;
+  mac_initKeys();
+  const info = C.CGWindowListCopyWindowInfo(
+    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
+  if (!info) return fallback;
+  const count = Number(CF.CFArrayGetCount(info));
+  let result = fallback;
+  for (let i = 0; i < count; i++) {
+    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
+    if (!dict) continue;
+    if (mac_cfDictGetInt32(dict, _kCGWindowNumber) === windowId) {
+      result = visitor(dict);
+      break;
+    }
+  }
+  CF.CFRelease(info);
+  return result;
+}
 
 /** Read a CFNumber (SInt32) from a CFDictionary value. */
 function mac_cfDictGetInt32(dict: Pointer, key: Pointer): number {
@@ -326,25 +360,7 @@ function mac_cfDictGetString(dict: Pointer, key: Pointer): string {
  * CGWindowListCopyWindowInfo.
  */
 function mac_getPidForWindow(windowId: number): number {
-  const C = cg(); const CF = cf();
-  if (!C || !CF) return 0;
-  mac_initKeys();
-  const info = C.CGWindowListCopyWindowInfo(
-    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-  if (!info) return 0;
-  const count = Number(CF.CFArrayGetCount(info));
-  let pid = 0;
-  for (let i = 0; i < count; i++) {
-    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
-    if (!dict) continue;
-    const wid = mac_cfDictGetInt32(dict, _kCGWindowNumber);
-    if (wid === windowId) {
-      pid = mac_cfDictGetInt32(dict, _kCGWindowOwnerPID);
-      break;
-    }
-  }
-  CF.CFRelease(info);
-  return pid;
+  return mac_withWindowDict(windowId, 0, (dict) => mac_cfDictGetInt32(dict, _kCGWindowOwnerPID));
 }
 
 /**
@@ -377,21 +393,7 @@ function mac_getAXElement(windowId: number): Pointer {
     if (!elem) continue;
     widBuf[0] = 0;
     if (AX._AXUIElementGetWindow(elem, F.ptr(widBuf)) === 0 && widBuf[0] === windowId) {
-      // Retain the element by not releasing it — caller must CFRelease.
-      // CFArrayGetValueAtIndex returns a non-owning reference; we don't
-      // need to retain since the array keeps it alive while we hold winArray.
-      // But we want the element to survive after we release winArray, so
-      // we skip releasing winArray until the caller is done.  Actually,
-      // since the caller will use the element synchronously, we can just
-      // return a copy — but AXUIElement doesn't have a copy function.
-      // Instead, we keep winArray alive by not releasing it here. The
-      // caller must release both element and winArray... that's messy.
-      //
-      // Simpler: just do the operations inline.  But the caller wants a
-      // generic element.  Let's use CFRetain-equivalent — actually
-      // AXUIElements are CFTypes so CFRetain works, but we don't have
-      // CFRetain bound.  Instead, just don't release winArray and return.
-      // The small leak is acceptable for short-lived calls.
+      // Keep winArray alive so the non-owning element pointer stays valid.
       found = elem;
       break;
     }
@@ -492,70 +494,26 @@ function mac_setAXSize(element: Pointer, w: number, h: number): void {
 
 function mac_isValid(handle: number): boolean {
   if (handle === 0) return false;
-  const C = cg(); const CF = cf();
-  if (!C || !CF) return false;
-  mac_initKeys();
-  const info = C.CGWindowListCopyWindowInfo(
-    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-  if (!info) return false;
-  const count = Number(CF.CFArrayGetCount(info));
-  let found = false;
-  for (let i = 0; i < count; i++) {
-    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
-    if (!dict) continue;
-    if (mac_cfDictGetInt32(dict, _kCGWindowNumber) === handle) {
-      found = true;
-      break;
-    }
-  }
-  CF.CFRelease(info);
-  return found;
+  return mac_withWindowDict(handle, false, () => true);
 }
 
 function mac_close(handle: number): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
-  const AX = ax(); const CF = cf();
-  if (!AX || !CF) return;
-  // Get the close button via AXCloseButton attribute
-  const F = macFFI();
-  if (!F) return;
-  const closeBtnKey = cfStringFromJS("AXCloseButton");
-  if (!closeBtnKey) return;
+  const AX = ax(); const CF = cf(); const F = macFFI();
+  if (!AX || !CF || !F) return;
+  mac_initKeys();
   const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(elem, closeBtnKey, F.ptr(valueBuf));
-  CF.CFRelease(closeBtnKey);
+  const err = AX.AXUIElementCopyAttributeValue(elem, _axCloseButton, F.ptr(valueBuf));
   if (err === 0 && valueBuf[0] !== 0n) {
     const closeBtn = valueBuf[0] as unknown as Pointer;
-    const pressAction = cfStringFromJS("AXPress");
-    if (pressAction) {
-      AX.AXUIElementPerformAction(closeBtn, pressAction);
-      CF.CFRelease(pressAction);
-    }
+    AX.AXUIElementPerformAction(closeBtn, _axPress!);
     CF.CFRelease(closeBtn);
   }
 }
 
 function mac_isTopMost(handle: number): boolean {
-  const C = cg(); const CF = cf();
-  if (!C || !CF) return false;
-  mac_initKeys();
-  const info = C.CGWindowListCopyWindowInfo(
-    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-  if (!info) return false;
-  const count = Number(CF.CFArrayGetCount(info));
-  let topMost = false;
-  for (let i = 0; i < count; i++) {
-    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
-    if (!dict) continue;
-    if (mac_cfDictGetInt32(dict, _kCGWindowNumber) === handle) {
-      const layer = mac_cfDictGetInt32(dict, _kCGWindowLayer);
-      topMost = layer > 0;
-      break;
-    }
-  }
-  CF.CFRelease(info);
-  return topMost;
+  return mac_withWindowDict(handle, false, (dict) => mac_cfDictGetInt32(dict, _kCGWindowLayer) > 0);
 }
 
 function mac_isBorderless(handle: number): boolean {
@@ -609,27 +567,12 @@ function mac_setBorderless(_handle: number, _borderless: boolean): void {
 function mac_setMinimized(handle: number, minimized: boolean): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
-  const AX = ax(); const CF = cf();
-  if (!AX || !CF) return;
+  const AX = ax();
+  if (!AX) return;
   mac_initKeys();
-  const val = cfStringFromJS(minimized ? "true" : "false");
-  // AXMinimized takes a CFBoolean, not a CFString.  Use kCFBooleanTrue /
-  // kCFBooleanFalse.  These are singletons we can obtain via
-  // CFBooleanGetValue — but we need the pointer itself.
-  // Actually, AXUIElementSetAttributeValue with the attribute kAXMinimizedAttribute
-  // accepts a CFBoolean.  We need the kCFBooleanTrue/False pointers.
-  // We can get them via resolving symbols, or we can use the simpler approach:
-  // just use AXUIElementPerformAction with minimize/deminiaturize if available.
-  if (val) CF.CFRelease(val);
-
   if (minimized) {
-    const action = cfStringFromJS("AXMinimize");
-    if (action) {
-      AX.AXUIElementPerformAction(elem, action);
-      CF.CFRelease(action);
-    }
+    AX.AXUIElementPerformAction(elem, _axMinimize!);
   } else {
-    // Un-minimize by raising
     AX.AXUIElementPerformAction(elem, _axRaise!);
   }
 }
@@ -637,30 +580,13 @@ function mac_setMinimized(handle: number, minimized: boolean): void {
 function mac_setMaximized(handle: number, maximized: boolean): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
-  const AX = ax(); const CF = cf();
-  if (!AX || !CF) return;
+  const AX = ax();
+  if (!AX) return;
   mac_initKeys();
   if (maximized) {
-    // Enter fullscreen
-    const fullScreenKey = cfStringFromJS("AXFullScreen");
-    if (fullScreenKey) {
-      // Try toggling the zoom action first
-      const zoomAction = cfStringFromJS("AXZoomAction");
-      if (zoomAction) {
-        AX.AXUIElementPerformAction(elem, zoomAction);
-        CF.CFRelease(zoomAction);
-      }
-      CF.CFRelease(fullScreenKey);
-    }
-  } else {
-    // If fullscreen, toggle out
-    if (mac_getAXBool(elem, _axFullScreen)) {
-      const zoomAction = cfStringFromJS("AXZoomAction");
-      if (zoomAction) {
-        AX.AXUIElementPerformAction(elem, zoomAction);
-        CF.CFRelease(zoomAction);
-      }
-    }
+    AX.AXUIElementPerformAction(elem, _axZoomAction!);
+  } else if (mac_getAXBool(elem, _axFullScreen)) {
+    AX.AXUIElementPerformAction(elem, _axZoomAction!);
   }
 }
 
@@ -670,30 +596,10 @@ function mac_getPid(handle: number): number {
 }
 
 function mac_getTitle(handle: number): string {
-  // Try CGWindowListCopyWindowInfo first (no Accessibility needed)
-  const C = cg(); const CF = cf();
-  if (!C || !CF) return "";
-  mac_initKeys();
-  const info = C.CGWindowListCopyWindowInfo(
-    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-  if (!info) return "";
-  const count = Number(CF.CFArrayGetCount(info));
-  let title = "";
-  for (let i = 0; i < count; i++) {
-    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
-    if (!dict) continue;
-    if (mac_cfDictGetInt32(dict, _kCGWindowNumber) === handle) {
-      title = mac_cfDictGetString(dict, _kCGWindowName);
-      break;
-    }
-  }
-  CF.CFRelease(info);
-  // Fall back to AX if CGWindowList didn't return a title
+  let title = mac_withWindowDict(handle, "", (dict) => mac_cfDictGetString(dict, _kCGWindowName));
   if (title === "") {
     const elem = mac_getAXElement(handle);
-    if (elem) {
-      title = mac_getAXString(elem, _axTitle);
-    }
+    if (elem) title = mac_getAXString(elem, _axTitle);
   }
   return title;
 }
@@ -790,19 +696,6 @@ function mac_setActive(handle: number): void {
   if (!AX) return;
   mac_initKeys();
   AX.AXUIElementPerformAction(elem, _axRaise!);
-
-  // Also bring the owning application to front via NSRunningApplication
-  const pid = mac_getPidForWindow(handle);
-  if (pid !== 0) {
-    const O = macFFI();
-    if (O) {
-      // Use objc_msgSend to call
-      // [[NSRunningApplication runningApplicationWithProcessIdentifier:pid]
-      //   activateWithOptions:NSApplicationActivateIgnoringOtherApps]
-      // This requires typed msgSend variants; for simplicity we just use
-      // AXRaise which is usually sufficient.
-    }
-  }
 }
 
 function mac_isAxEnabled(prompt?: boolean): boolean {
@@ -1185,10 +1078,7 @@ export function window_getProcess(handle: number): number {
 }
 
 export function window_getPID(handle: number): number {
-  if (IS_LINUX) return winIsValid(handle) ? getPid(BigInt(handle)) : 0;
-  if (IS_WIN) return win_isValid(handle) ? win_getPid(handle) : 0;
-  if (IS_MAC) return mac_isValid(handle) ? mac_getPid(handle) : 0;
-  return 0;
+  return window_getProcess(handle);
 }
 
 export function window_getHandle(handle: number): number { return handle; }
@@ -1215,11 +1105,7 @@ export function window_setTitle(handle: number, title: string): void {
     const F = x11ffi();
     const d = getDisplay();
     if (!X || !F || !d) return;
-    const buf = new TextEncoder().encode(title);
-    const nul = new Uint8Array(buf.length + 1);
-    nul.set(buf);
-    nul[buf.length] = 0;
-    X.XStoreName(d, BigInt(handle), F.ptr(nul));
+    X.XStoreName(d, BigInt(handle), F.ptr(cstr(title)));
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setTitle(handle, title);

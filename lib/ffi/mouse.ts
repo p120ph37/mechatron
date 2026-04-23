@@ -107,23 +107,28 @@ function linux_mouse_getPos(): { x: number; y: number } {
   return { x: rootX[0], y: rootY[0] };
 }
 
+let _screenDims: { w: number; h: number } | undefined;
+function getScreenDims(): { w: number; h: number } | null {
+  if (_screenDims) return _screenDims;
+  const X = x11(); const d = getDisplay();
+  if (!X || !d) return null;
+  const screen = X.XDefaultScreen(d);
+  const screenPtr = X.XScreenOfDisplay(d, screen);
+  if (!screenPtr) return null;
+  const w = X.XWidthOfScreen(screenPtr);
+  const h = X.XHeightOfScreen(screenPtr);
+  if (w <= 0 || h <= 0) return null;
+  _screenDims = { w, h };
+  return _screenDims;
+}
+
 function linux_mouse_setPos(x: number, y: number): void {
   if (uinputSelected()) {
-    // Map screen coordinates to device coordinates (0–65535 range).
-    // Get screen dimensions from X11 to compute the mapping.
-    const X = x11(); const d = getDisplay();
-    if (X && d) {
-      const screen = X.XDefaultScreen(d);
-      const screenPtr = X.XScreenOfDisplay(d, screen);
-      if (screenPtr) {
-        const sw = X.XWidthOfScreen(screenPtr);
-        const sh = X.XHeightOfScreen(screenPtr);
-        if (sw > 0 && sh > 0) {
-          const absX = Math.round((x * UINPUT_ABS_MAX) / sw);
-          const absY = Math.round((y * UINPUT_ABS_MAX) / sh);
-          if (injectAbsMotion(absX, absY)) return;
-        }
-      }
+    const dims = getScreenDims();
+    if (dims) {
+      const absX = Math.round((x * UINPUT_ABS_MAX) / dims.w);
+      const absY = Math.round((y * UINPUT_ABS_MAX) / dims.h);
+      if (injectAbsMotion(absX, absY)) return;
     }
   }
   // Fallback to XWarpPointer

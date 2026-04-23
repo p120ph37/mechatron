@@ -3,14 +3,16 @@
 //                                                                            //
 //                Mechatron Compatibility Matrix Validator                     //
 //                                                                            //
-//  Reads COMPATIBILITY.md and validates that every "ok" cell corresponds     //
-//  to a loadable, callable function on the current backend/platform.         //
+//  Reads COMPATIBILITY.md and validates every "ok" cell by running a         //
+//  per-function behavioral test that proves the function is implemented       //
+//  and works on the current backend/platform.                                //
 //                                                                            //
-//  Behavioral correctness is verified by the dedicated subsystem tests       //
-//  (keyboard.js, mouse.js, etc.).  This test ensures the matrix document     //
-//  stays in sync with reality: if a cell says "ok", the backend module       //
-//  must load and the function must exist; if "skip", the function either     //
-//  doesn't exist or is a documented stub.                                    //
+//  Each function in the matrix has a dedicated test that calls the API       //
+//  method and validates the return type/value.  The matrix cell controls     //
+//  whether the test runs:                                                    //
+//    - "ok"   → run the test; failure = CI failure                           //
+//    - "skip" → skip gracefully                                              //
+//    - "n/a"  → skip (backend doesn't run on this platform)                  //
 //                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
@@ -80,7 +82,7 @@ function parseMatrix(mdPath) {
 // Column detection
 // =============================================================================
 
-function detectColumn(mechatron) {
+function detectColumns(mechatron) {
 	var subsystems = ["keyboard", "mouse", "window", "process", "screen", "clipboard"];
 	var backendStr = null;
 	for (var i = 0; i < subsystems.length; i++) {
@@ -94,143 +96,353 @@ function detectColumn(mechatron) {
 	var varMatch = backendStr.match(/\[(\w+)\]/);
 	if (varMatch) variant = varMatch[1];
 
-	if (base === "napi") return "napi";
+	if (base === "napi") return ["napi"];
 
 	if (base === "ffi") {
 		switch (process.platform) {
-			case "linux": return "ffi/linux";
-			case "win32": return "ffi/win32";
-			case "darwin": return "ffi/mac";
+			case "linux": return ["ffi/linux"];
+			case "win32": return ["ffi/win32"];
+			case "darwin": return ["ffi/mac"];
 			default: return null;
 		}
 	}
 
+	// nolib: return variant-specific column first, then platform-generic
+	// fallback.  Some subsystems (Process, Clipboard) use "nolib/linux"
+	// or "nolib/mac" as a single column covering all Linux variants.
 	if (base === "nolib") {
-		if (variant === "x11") return "nolib/x11";
-		if (variant === "portal") return "nolib/portal";
-		if (variant === "vt") return "nolib/vt";
-		if (process.platform === "darwin") return "nolib/mac";
-		if (process.platform === "linux") return "nolib/x11";
-		return null;
+		var cols = [];
+		if (variant === "x11") cols.push("nolib/x11");
+		else if (variant === "portal") cols.push("nolib/portal");
+		else if (variant === "vt") cols.push("nolib/vt");
+		else if (process.platform === "darwin") cols.push("nolib/mac");
+		else if (process.platform === "linux") cols.push("nolib/x11");
+
+		if (process.platform === "linux" && cols[0] !== "nolib/linux") {
+			cols.push("nolib/linux");
+		}
+		if (process.platform === "darwin" && cols[0] !== "nolib/mac") {
+			cols.push("nolib/mac");
+		}
+		return cols.length > 0 ? cols : null;
 	}
 
 	return null;
 }
 
+function lookupStatus(statusMap, columns) {
+	for (var i = 0; i < columns.length; i++) {
+		var s = statusMap[columns[i]];
+		if (s) return s;
+	}
+	return null;
+}
+
 // =============================================================================
-// Method-existence maps
+// Per-function behavioral tests
 //
-// Maps function names from the matrix to [class, methodName, isStatic] tuples.
-// The validator checks that the method exists on the class prototype (instance
-// methods) or the class itself (static methods).  This is intentionally
-// shallow: behavioral testing is done by the dedicated subsystem tests.
+// Each test calls the actual API method and validates its return type or
+// value.  Tests are async to support the modern async API surface.
+// A test function returns true on success or throws on failure.
 // =============================================================================
 
-var SUBSYSTEM_MAP = {
-	keyboard: {
-		"keyboard_press":       ["Keyboard", "press", false],
-		"keyboard_release":     ["Keyboard", "release", false],
-		"keyboard_getKeyState": ["Keyboard", "getState", true],
-	},
-	mouse: {
-		"mouse_press":          ["Mouse", "press", false],
-		"mouse_release":        ["Mouse", "release", false],
-		"mouse_scrollH":        ["Mouse", "scrollH", false],
-		"mouse_scrollV":        ["Mouse", "scrollV", false],
-		"mouse_getPos":         ["Mouse", "getPos", true],
-		"mouse_setPos":         ["Mouse", "setPos", true],
-		"mouse_getButtonState": ["Mouse", "getState", true],
-	},
-	window: {
-		"window_isValid":       ["Window", "isValid", false],
-		"window_close":         ["Window", "close", false],
-		"window_isTopMost":     ["Window", "isTopMost", false],
-		"window_isBorderless":  ["Window", "isBorderless", false],
-		"window_isMinimized":   ["Window", "isMinimized", false],
-		"window_isMaximized":   ["Window", "isMaximized", false],
-		"window_setTopMost":    ["Window", "setTopMost", false],
-		"window_setBorderless": ["Window", "setBorderless", false],
-		"window_setMinimized":  ["Window", "setMinimized", false],
-		"window_setMaximized":  ["Window", "setMaximized", false],
-		"window_getProcess":    ["Window", "getProcess", false],
-		"window_getPID":        ["Window", "getPID", false],
-		"window_getHandle":     ["Window", "getHandle", false],
-		"window_setHandle":     ["Window", "setHandle", false],
-		"window_getTitle":      ["Window", "getTitle", false],
-		"window_setTitle":      ["Window", "setTitle", false],
-		"window_getBounds":     ["Window", "getBounds", false],
-		"window_setBounds":     ["Window", "setBounds", false],
-		"window_getClient":     ["Window", "getClient", false],
-		"window_setClient":     ["Window", "setClient", false],
-		"window_mapToClient":   ["Window", "mapToClient", false],
-		"window_mapToScreen":   ["Window", "mapToScreen", false],
-		"window_getList":       ["Window", "getList", true],
-		"window_getActive":     ["Window", "getActive", true],
-		"window_setActive":     ["Window", "setActive", true],
-		"window_isAxEnabled":   ["Window", "isAxEnabled", true],
-	},
-	process: {
-		"process_open":         ["Process", "open", false],
-		"process_close":        ["Process", "close", false],
-		"process_isValid":      ["Process", "isValid", false],
-		"process_is64Bit":      ["Process", "is64Bit", false],
-		"process_isDebugged":   ["Process", "isDebugged", false],
-		"process_getHandle":    ["Process", "getHandle", false],
-		"process_getName":      ["Process", "getName", false],
-		"process_getPath":      ["Process", "getPath", false],
-		"process_exit":         ["Process", "exit", false],
-		"process_kill":         ["Process", "kill", false],
-		"process_hasExited":    ["Process", "hasExited", false],
-		"process_getCurrent":   ["Process", "getCurrent", true],
-		"process_isSys64Bit":   ["Process", "isSys64Bit", true],
-		"process_getList":      ["Process", "getList", true],
-		"process_getWindows":   ["Process", "getWindows", false],
-		"process_getModules":   ["Process", "getModules", false],
-		"process_getSegments":  [null, null, null],
-	},
-	screen: {
-		"screen_synchronize":   ["Screen", "synchronize", true],
-		"screen_grabScreen":    ["Screen", "grabScreen", true],
-	},
-	clipboard: {
-		"clipboard_clear":       ["Clipboard", "clear", true],
-		"clipboard_hasText":     ["Clipboard", "hasText", true],
-		"clipboard_getText":     ["Clipboard", "getText", true],
-		"clipboard_setText":     ["Clipboard", "setText", true],
-		"clipboard_hasImage":    ["Clipboard", "hasImage", true],
-		"clipboard_getImage":    ["Clipboard", "getImage", true],
-		"clipboard_setImage":    ["Clipboard", "setImage", true],
-		"clipboard_getSequence": ["Clipboard", "getSequence", true],
-	},
-};
+function buildTestRegistry(mechatron, assert) {
+	var Keyboard = mechatron.Keyboard;
+	var Mouse = mechatron.Mouse;
+	var Window = mechatron.Window;
+	var Process = mechatron.Process;
+	var Screen = mechatron.Screen;
+	var Clipboard = mechatron.Clipboard;
+	var Image = mechatron.Image;
+	var KEYS = mechatron.KEYS;
 
-function validateFunction(mechatron, subsystem, fnName, status, assert) {
-	var map = SUBSYSTEM_MAP[subsystem];
-	if (!map) return "skip";
-	var entry = map[fnName];
-	if (!entry || !entry[0]) return "skip";
+	return {
+		// ── Keyboard ──────────────────────────────────────────────
+		keyboard_press: async function () {
+			var k = new Keyboard();
+			await k.press(KEYS.KEY_SHIFT);
+			await k.release(KEYS.KEY_SHIFT);
+		},
+		keyboard_release: async function () {
+			var k = new Keyboard();
+			await k.press(KEYS.KEY_SHIFT);
+			await k.release(KEYS.KEY_SHIFT);
+		},
+		keyboard_getKeyState: async function () {
+			var state = await Keyboard.getState(KEYS.KEY_SHIFT);
+			assert(typeof state === "boolean", "getState returns boolean");
+		},
 
-	var className = entry[0];
-	var methodName = entry[1];
-	var isStatic = entry[2];
+		// ── Mouse ─────────────────────────────────────────────────
+		mouse_press: async function () {
+			var m = new Mouse();
+			await m.press(mechatron.BUTTON_LEFT);
+			await m.release(mechatron.BUTTON_LEFT);
+		},
+		mouse_release: async function () {
+			var m = new Mouse();
+			await m.press(mechatron.BUTTON_LEFT);
+			await m.release(mechatron.BUTTON_LEFT);
+		},
+		mouse_scrollH: async function () {
+			var m = new Mouse();
+			await m.scrollH(1);
+			await m.scrollH(-1);
+		},
+		mouse_scrollV: async function () {
+			var m = new Mouse();
+			await m.scrollV(1);
+			await m.scrollV(-1);
+		},
+		mouse_getPos: async function () {
+			var pos = await Mouse.getPos();
+			assert(typeof pos.x === "number" && typeof pos.y === "number",
+				"getPos returns {x, y} with numbers");
+		},
+		mouse_setPos: async function () {
+			var old = await Mouse.getPos();
+			await Mouse.setPos(50, 50);
+			await Mouse.setPos(old.x, old.y);
+		},
+		mouse_getButtonState: async function () {
+			var state = await Mouse.getState(mechatron.BUTTON_LEFT);
+			assert(typeof state === "boolean", "getState returns boolean");
+		},
 
-	var cls = mechatron[className];
-	if (!cls) {
-		if (status === "ok") {
-			assert(false, fnName + ": class " + className + " not found on mechatron");
-		}
-		return "skip";
-	}
+		// ── Window ────────────────────────────────────────────────
+		window_isValid: async function () {
+			var w = new Window();
+			assert(typeof await w.isValid() === "boolean", "isValid returns boolean");
+		},
+		window_close: async function () {
+			var w = new Window();
+			await w.close();
+		},
+		window_isTopMost: async function () {
+			var w = new Window();
+			assert(typeof await w.isTopMost() === "boolean", "isTopMost returns boolean");
+		},
+		window_isBorderless: async function () {
+			var w = new Window();
+			assert(typeof await w.isBorderless() === "boolean", "isBorderless returns boolean");
+		},
+		window_isMinimized: async function () {
+			var w = new Window();
+			assert(typeof await w.isMinimized() === "boolean", "isMinimized returns boolean");
+		},
+		window_isMaximized: async function () {
+			var w = new Window();
+			assert(typeof await w.isMaximized() === "boolean", "isMaximized returns boolean");
+		},
+		window_setTopMost: async function () {
+			var w = new Window();
+			await w.setTopMost(false);
+		},
+		window_setBorderless: async function () {
+			var w = new Window();
+			await w.setBorderless(false);
+		},
+		window_setMinimized: async function () {
+			var w = new Window();
+			await w.setMinimized(false);
+		},
+		window_setMaximized: async function () {
+			var w = new Window();
+			await w.setMaximized(false);
+		},
+		window_getProcess: async function () {
+			var w = new Window();
+			var p = await w.getProcess();
+			assert(typeof p === "object", "getProcess returns object");
+		},
+		window_getPID: async function () {
+			var w = new Window();
+			assert(typeof await w.getPID() === "number", "getPID returns number");
+		},
+		window_getHandle: function () {
+			var w = new Window();
+			assert(typeof w.getHandle() === "number", "getHandle returns number");
+		},
+		window_setHandle: async function () {
+			var w = new Window();
+			var result = await w.setHandle(0);
+			assert(typeof result === "boolean", "setHandle returns boolean");
+		},
+		window_getTitle: async function () {
+			var w = new Window();
+			assert(typeof await w.getTitle() === "string", "getTitle returns string");
+		},
+		window_setTitle: async function () {
+			var w = new Window();
+			await w.setTitle("");
+		},
+		window_getBounds: async function () {
+			var w = new Window();
+			var b = await w.getBounds();
+			assert(b instanceof mechatron.Bounds, "getBounds returns Bounds");
+		},
+		window_setBounds: async function () {
+			var w = new Window();
+			await w.setBounds(0, 0, 100, 100);
+		},
+		window_getClient: async function () {
+			var w = new Window();
+			var c = await w.getClient();
+			assert(c instanceof mechatron.Bounds, "getClient returns Bounds");
+		},
+		window_setClient: async function () {
+			var w = new Window();
+			await w.setClient(0, 0, 100, 100);
+		},
+		window_mapToClient: async function () {
+			var w = new Window();
+			var p = await w.mapToClient(10, 10);
+			assert(p instanceof mechatron.Point, "mapToClient returns Point");
+		},
+		window_mapToScreen: async function () {
+			var w = new Window();
+			var p = await w.mapToScreen(10, 10);
+			assert(p instanceof mechatron.Point, "mapToScreen returns Point");
+		},
+		window_getList: async function () {
+			var list = await Window.getList();
+			assert(list instanceof Array, "getList returns Array");
+		},
+		window_getActive: async function () {
+			var active = await Window.getActive();
+			assert(active instanceof Window, "getActive returns Window");
+		},
+		window_setActive: async function () {
+			var w = new Window();
+			await Window.setActive(w);
+		},
+		window_isAxEnabled: async function () {
+			assert(typeof await Window.isAxEnabled() === "boolean", "isAxEnabled returns boolean");
+		},
 
-	var target = isStatic ? cls : cls.prototype;
-	var fn = target && target[methodName];
-	if (status === "ok") {
-		assert(typeof fn === "function",
-			fnName + ": " + className + (isStatic ? "." : ".prototype.") +
-			methodName + " must be a function (got " + typeof fn + ")");
-		return "ok";
-	}
-	return "skip";
+		// ── Process ───────────────────────────────────────────────
+		process_open: async function () {
+			var p = new Process();
+			var result = await p.open(process.pid);
+			assert(typeof result === "boolean", "open returns boolean");
+			await p.close();
+		},
+		process_close: async function () {
+			var p = new Process();
+			await p.close();
+		},
+		process_isValid: async function () {
+			var p = new Process();
+			assert(typeof await p.isValid() === "boolean", "isValid returns boolean");
+		},
+		process_is64Bit: async function () {
+			var curr = await Process.getCurrent();
+			assert(typeof await curr.is64Bit() === "boolean", "is64Bit returns boolean");
+		},
+		process_isDebugged: async function () {
+			var curr = await Process.getCurrent();
+			assert(typeof await curr.isDebugged() === "boolean", "isDebugged returns boolean");
+		},
+		process_getHandle: async function () {
+			var curr = await Process.getCurrent();
+			assert(typeof await curr.getHandle() === "number", "getHandle returns number");
+		},
+		process_getName: async function () {
+			var curr = await Process.getCurrent();
+			var name = await curr.getName();
+			assert(typeof name === "string" && name.length > 0, "getName returns non-empty string");
+		},
+		process_getPath: async function () {
+			var curr = await Process.getCurrent();
+			var p = await curr.getPath();
+			assert(typeof p === "string" && p.length > 0, "getPath returns non-empty string");
+		},
+		process_exit: async function () {
+			// Test on an invalid process — should not crash
+			var p = new Process();
+			await p.exit();
+		},
+		process_kill: async function () {
+			var p = new Process();
+			await p.kill();
+		},
+		process_hasExited: async function () {
+			var p = new Process();
+			assert(typeof await p.hasExited() === "boolean", "hasExited returns boolean");
+		},
+		process_getCurrent: async function () {
+			var curr = await Process.getCurrent();
+			assert(await curr.isValid(), "getCurrent returns valid process");
+			assert(curr.getPID() > 0, "getCurrent has positive PID");
+		},
+		process_isSys64Bit: async function () {
+			assert(typeof await Process.isSys64Bit() === "boolean", "isSys64Bit returns boolean");
+		},
+		process_getList: async function () {
+			var list = await Process.getList();
+			assert(list instanceof Array && list.length > 0, "getList returns non-empty array");
+		},
+		process_getWindows: async function () {
+			var curr = await Process.getCurrent();
+			var wins = await curr.getWindows();
+			assert(wins instanceof Array, "getWindows returns Array");
+		},
+		process_getModules: async function () {
+			var curr = await Process.getCurrent();
+			var mods = await curr.getModules();
+			assert(mods instanceof Array && mods.length > 0, "getModules returns non-empty array");
+		},
+		process_getSegments: null,
+
+		// ── Screen ────────────────────────────────────────────────
+		screen_synchronize: async function () {
+			var result = await Screen.synchronize();
+			assert(result === true, "synchronize returns true");
+		},
+		screen_grabScreen: async function () {
+			var img = new Image();
+			var result = await Screen.grabScreen(img, 0, 0, 10, 10);
+			assert(typeof result === "boolean", "grabScreen returns boolean");
+		},
+
+		// ── Clipboard ─────────────────────────────────────────────
+		clipboard_clear: async function () {
+			var result = await Clipboard.clear();
+			assert(typeof result === "boolean", "clear returns boolean");
+		},
+		clipboard_hasText: async function () {
+			assert(typeof await Clipboard.hasText() === "boolean", "hasText returns boolean");
+		},
+		clipboard_getText: async function () {
+			assert(typeof await Clipboard.getText() === "string", "getText returns string");
+		},
+		clipboard_setText: async function () {
+			var result = await Clipboard.setText("mechatron_compat_test");
+			assert(typeof result === "boolean", "setText returns boolean");
+			if (result) {
+				var text = await Clipboard.getText();
+				assert(text === "mechatron_compat_test", "setText round-trip");
+			}
+		},
+		clipboard_hasImage: async function () {
+			assert(typeof await Clipboard.hasImage() === "boolean", "hasImage returns boolean");
+		},
+		clipboard_getImage: async function () {
+			var img = new Image();
+			var result = await Clipboard.getImage(img);
+			assert(typeof result === "boolean", "getImage returns boolean");
+		},
+		clipboard_setImage: async function () {
+			var img = new Image(2, 2);
+			img.fill(128, 64, 32);
+			var result = await Clipboard.setImage(img);
+			assert(typeof result === "boolean", "setImage returns boolean");
+		},
+		clipboard_getSequence: async function () {
+			var seq = await Clipboard.getSequence();
+			assert(typeof seq === "number", "getSequence returns number");
+		},
+	};
 }
 
 // =============================================================================
@@ -239,7 +451,7 @@ function validateFunction(mechatron, subsystem, fnName, status, assert) {
 
 module.exports = function (mechatron, log, assert) {
 
-	function testCompatibility() {
+	async function testCompatibility() {
 		log("  Compatibility matrix... ");
 
 		var mdPath = path.resolve(__dirname, "..", "COMPATIBILITY.md");
@@ -249,44 +461,64 @@ module.exports = function (mechatron, log, assert) {
 		}
 
 		var matrix = parseMatrix(mdPath);
-		var column = detectColumn(mechatron);
-		if (!column) {
+		var columns = detectColumns(mechatron);
+		if (!columns) {
 			log("SKIP (could not detect column: no backend loaded)\n");
 			return true;
 		}
 
-		log("(column: " + column + ") ");
+		log("(columns: " + columns.join(", ") + ")\n");
+
+		var registry = buildTestRegistry(mechatron, assert);
 
 		var checked = 0;
 		var skipped = 0;
+		var failed = 0;
 		var subsystems = Object.keys(matrix);
+
 		for (var s = 0; s < subsystems.length; s++) {
 			var subsystem = subsystems[s];
 			var functions = matrix[subsystem];
-
-			if (!mechatron.isAvailable(subsystem)) {
-				skipped += Object.keys(functions).length;
-				continue;
-			}
-
 			var fnNames = Object.keys(functions);
+
 			for (var f = 0; f < fnNames.length; f++) {
 				var fnName = fnNames[f];
 				var statusMap = functions[fnName];
-				var status = statusMap[column];
+				var status = lookupStatus(statusMap, columns);
 
-				if (!status || status === "n/a") { skipped++; continue; }
-
-				var result = validateFunction(mechatron, subsystem, fnName, status, assert);
-				if (result === "ok") {
-					checked++;
-				} else {
+				if (!status || status === "n/a" || status === "skip") {
 					skipped++;
+					continue;
+				}
+
+				if (status !== "ok") {
+					skipped++;
+					continue;
+				}
+
+				var testFn = registry[fnName];
+				if (!testFn) {
+					skipped++;
+					continue;
+				}
+
+				try {
+					await testFn();
+					checked++;
+				} catch (e) {
+					log("    FAIL: " + fnName + " — " + e.message + "\n");
+					failed++;
 				}
 			}
 		}
 
-		log("(" + checked + " ok, " + skipped + " skipped) OK\n");
+		log("    (" + checked + " passed, " + skipped + " skipped" +
+			(failed > 0 ? ", " + failed + " FAILED" : "") + ")\n");
+
+		if (failed > 0) {
+			assert(false, failed + " compatibility test(s) failed");
+		}
+
 		return true;
 	}
 

@@ -391,6 +391,9 @@ export function makeInjectRelMotion(emit: Emitter) {
   };
 }
 
+/** Maximum device coordinate for EV_ABS axes (standard digitizer range). */
+export const UINPUT_ABS_MAX = 65535;
+
 export function makeInjectAbsMotion(emit: Emitter) {
   return (x: number, y: number): boolean => {
     return emit([
