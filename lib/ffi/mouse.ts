@@ -377,6 +377,17 @@ export const mouse_getButtonState =
   platform === "darwin" ? mac_mouse_getButtonState :
                          (_b: number) => false;
 
+// Release cached CGEventSource on exit so CoreGraphics can be cleanly unloaded.
+if (platform === "darwin") {
+  process.on('exit', () => {
+    if (_macMouseSource) {
+      const F = cf();
+      if (F) F.CFRelease(_macMouseSource as any);
+      _macMouseSource = null;
+    }
+  });
+}
+
 // Signal unavailability to the backend resolver when the required native
 // libraries cannot be loaded on this platform.
 if (platform === "linux" && !isXTestAvailable() && !uinputSelected()) {

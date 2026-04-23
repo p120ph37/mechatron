@@ -79,6 +79,7 @@ interface CoreGraphics {
 }
 
 interface CoreFoundation {
+  CFRetain: (cf: Pointer) => Pointer;
   CFRelease: (cf: Pointer) => void;
   CFStringCreateMutable: (alloc: Pointer, maxLength: bigint) => Pointer;
   CFStringAppendCString: (s: Pointer, cstr: Pointer, encoding: number) => void;
@@ -227,6 +228,7 @@ function tryDlopen(): void {
 
   try {
     const lib = _ffi.dlopen<CoreFoundation>(CF_PATH, {
+      CFRetain:                           { args: [T.ptr], returns: T.ptr },
       CFRelease:                          { args: [T.ptr], returns: T.void },
       CFStringCreateMutable:              { args: [T.ptr, T.i64], returns: T.ptr },
       CFStringAppendCString:              { args: [T.ptr, T.ptr, T.u32], returns: T.void },

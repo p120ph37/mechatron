@@ -393,17 +393,13 @@ function mac_getAXElement(windowId: number): Pointer {
     if (!elem) continue;
     widBuf[0] = 0;
     if (AX._AXUIElementGetWindow(elem, F.ptr(widBuf)) === 0 && widBuf[0] === windowId) {
-      // Keep winArray alive so the non-owning element pointer stays valid.
+      CF.CFRetain(elem);
       found = elem;
       break;
     }
   }
-  if (!found) {
-    CF.CFRelease(winArray as any);
-  }
+  CF.CFRelease(winArray as any);
   CF.CFRelease(app);
-  // Note: if found, winArray is intentionally not released so the element
-  // pointer remains valid.  This is a small, bounded leak per call.
   return found;
 }
 
@@ -501,7 +497,7 @@ function mac_close(handle: number): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
   const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F) return;
+  if (!AX || !CF || !F) { CF?.CFRelease(elem); return; }
   mac_initKeys();
   const valueBuf = new BigUint64Array(1);
   const err = AX.AXUIElementCopyAttributeValue(elem, _axCloseButton, F.ptr(valueBuf));
@@ -510,6 +506,7 @@ function mac_close(handle: number): void {
     AX.AXUIElementPerformAction(closeBtn, _axPress!);
     CF.CFRelease(closeBtn);
   }
+  CF.CFRelease(elem);
 }
 
 function mac_isTopMost(handle: number): boolean {
@@ -521,6 +518,7 @@ function mac_isBorderless(handle: number): boolean {
   if (!elem) return false;
   mac_initKeys();
   const subrole = mac_getAXString(elem, _axSubrole);
+  cf()!.CFRelease(elem);
   // AXStandardWindow means it has a standard window frame (not borderless).
   // If the subrole is something else (e.g. AXDialog, AXFloatingWindow),
   // it may or may not have a border, but for our purposes only
@@ -532,7 +530,9 @@ function mac_isMinimized(handle: number): boolean {
   const elem = mac_getAXElement(handle);
   if (!elem) return false;
   mac_initKeys();
-  return mac_getAXBool(elem, _axMinimized);
+  const result = mac_getAXBool(elem, _axMinimized);
+  cf()!.CFRelease(elem);
+  return result;
 }
 
 function mac_isMaximized(handle: number): boolean {
@@ -541,13 +541,14 @@ function mac_isMaximized(handle: number): boolean {
   const elem = mac_getAXElement(handle);
   if (!elem) return false;
   mac_initKeys();
-  if (mac_getAXBool(elem, _axFullScreen)) return true;
+  const isFullScreen = mac_getAXBool(elem, _axFullScreen);
+  const pos = isFullScreen ? null : mac_getAXPosition(elem);
+  const size = isFullScreen ? null : mac_getAXSize(elem);
+  cf()!.CFRelease(elem);
+  if (isFullScreen) return true;
   // Compare window bounds to main display size
   const C = cg();
-  if (!C) return false;
-  const pos = mac_getAXPosition(elem);
-  const size = mac_getAXSize(elem);
-  if (!pos || !size) return false;
+  if (!C || !pos || !size) return false;
   const screenW = Number(C.CGDisplayPixelsWide(C.CGMainDisplayID()));
   const screenH = Number(C.CGDisplayPixelsHigh(C.CGMainDisplayID()));
   // Consider maximized if window occupies nearly all of the screen
@@ -568,26 +569,28 @@ function mac_setMinimized(handle: number, minimized: boolean): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
   const AX = ax();
-  if (!AX) return;
+  if (!AX) { cf()!.CFRelease(elem); return; }
   mac_initKeys();
   if (minimized) {
     AX.AXUIElementPerformAction(elem, _axMinimize!);
   } else {
     AX.AXUIElementPerformAction(elem, _axRaise!);
   }
+  cf()!.CFRelease(elem);
 }
 
 function mac_setMaximized(handle: number, maximized: boolean): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
   const AX = ax();
-  if (!AX) return;
+  if (!AX) { cf()!.CFRelease(elem); return; }
   mac_initKeys();
   if (maximized) {
     AX.AXUIElementPerformAction(elem, _axZoomAction!);
   } else if (mac_getAXBool(elem, _axFullScreen)) {
     AX.AXUIElementPerformAction(elem, _axZoomAction!);
   }
+  cf()!.CFRelease(elem);
 }
 
 function mac_getPid(handle: number): number {
@@ -599,7 +602,10 @@ function mac_getTitle(handle: number): string {
   let title = mac_withWindowDict(handle, "", (dict) => mac_cfDictGetString(dict, _kCGWindowName));
   if (title === "") {
     const elem = mac_getAXElement(handle);
-    if (elem) title = mac_getAXString(elem, _axTitle);
+    if (elem) {
+      title = mac_getAXString(elem, _axTitle);
+      cf()!.CFRelease(elem);
+    }
   }
   return title;
 }
@@ -608,12 +614,13 @@ function mac_setTitle(handle: number, title: string): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
   const AX = ax(); const CF = cf();
-  if (!AX || !CF) return;
+  if (!AX || !CF) { CF?.CFRelease(elem); return; }
   mac_initKeys();
   const val = cfStringFromJS(title);
-  if (!val) return;
+  if (!val) { CF.CFRelease(elem); return; }
   AX.AXUIElementSetAttributeValue(elem, _axTitle, val);
   CF.CFRelease(val);
+  CF.CFRelease(elem);
 }
 
 function mac_getBounds(handle: number): { x: number; y: number; w: number; h: number } {
@@ -621,6 +628,7 @@ function mac_getBounds(handle: number): { x: number; y: number; w: number; h: nu
   if (!elem) return { x: 0, y: 0, w: 0, h: 0 };
   const pos = mac_getAXPosition(elem);
   const size = mac_getAXSize(elem);
+  cf()!.CFRelease(elem);
   if (!pos || !size) return { x: 0, y: 0, w: 0, h: 0 };
   return { x: Math.round(pos.x), y: Math.round(pos.y), w: Math.round(size.w), h: Math.round(size.h) };
 }
@@ -630,6 +638,7 @@ function mac_setBounds(handle: number, x: number, y: number, w: number, h: numbe
   if (!elem) return;
   mac_setAXPosition(elem, x, y);
   mac_setAXSize(elem, Math.max(1, w), Math.max(1, h));
+  cf()!.CFRelease(elem);
 }
 
 function mac_getList(regexStr?: string): number[] {
@@ -693,9 +702,10 @@ function mac_setActive(handle: number): void {
   const elem = mac_getAXElement(handle);
   if (!elem) return;
   const AX = ax();
-  if (!AX) return;
+  if (!AX) { cf()!.CFRelease(elem); return; }
   mac_initKeys();
   AX.AXUIElementPerformAction(elem, _axRaise!);
+  cf()!.CFRelease(elem);
 }
 
 function mac_isAxEnabled(prompt?: boolean): boolean {
@@ -1252,6 +1262,24 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   if (IS_LINUX || IS_WIN) return true;
   if (IS_MAC) return mac_isAxEnabled(prompt);
   return false;
+}
+
+// Release cached CFStrings on exit so CoreFoundation can be cleanly unloaded.
+if (IS_MAC) {
+  process.on('exit', () => {
+    if (!_macKeysInited) return;
+    const CF = cf();
+    if (!CF) return;
+    const keys = [
+      _kCGWindowNumber, _kCGWindowOwnerPID, _kCGWindowName, _kCGWindowBounds,
+      _kCGWindowLayer, _axWindows, _axFocusedWindow, _axFocusedApplication,
+      _axPosition, _axSize, _axTitle, _axMinimized, _axFullScreen, _axRaise,
+      _axSubrole, _axStandardWindow, _axCloseButton, _axPress, _axMinimize,
+      _axZoomAction,
+    ];
+    for (const k of keys) { if (k) CF.CFRelease(k); }
+    _macKeysInited = false;
+  });
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {
