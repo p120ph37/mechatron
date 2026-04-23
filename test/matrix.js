@@ -35,7 +35,7 @@ function parseMatrix(mdPath) {
 	for (var i = 0; i < lines.length; i++) {
 		var line = lines[i].trim();
 
-		var headerMatch = line.match(/^##\s+(Keyboard|Mouse|Window|Process|Screen|Clipboard|Memory)\s*$/);
+		var headerMatch = line.match(/^##\s+(\w+)\s*$/);
 		if (headerMatch) {
 			currentSubsystem = headerMatch[1].toLowerCase();
 			result[currentSubsystem] = {};

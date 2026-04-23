@@ -11,15 +11,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor) {
-
-	async function waitForAsync(condFn, timeoutMs) {
-		for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
-			if (await condFn()) return true;
-			await new Promise(r => setTimeout(r, 5));
-		}
-		return false;
-	}
+module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 	var Window = mechatron.Window;
 	var Bounds = mechatron.Bounds;

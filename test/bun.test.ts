@@ -50,6 +50,14 @@ const waitFor = (condFn: () => boolean, timeoutMs: number) => {
   return false;
 };
 
+const waitForAsync = async (condFn: () => Promise<boolean>, timeoutMs: number) => {
+  for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
+    if (await condFn()) return true;
+    await new Promise(r => setTimeout(r, 5));
+  }
+  return false;
+};
+
 const compatMatrix = require("./matrix").create(mechatron);
 
 type TestEntry = { name: string; functions: string[]; test: () => any };
@@ -57,16 +65,16 @@ type TestEntry = { name: string; functions: string[]; test: () => any };
 // Each entry declares the COMPATIBILITY.md functions it touches; matrix.js
 // derives the column per-function from platform + getBackend(subsystem).
 const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
-  { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
-  { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
-  { prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
-  { prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
-  { prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
-  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
-  { prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
-  { prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
-  { prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor) },
-  { prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor) },
+  { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor, waitForAsync) },
 ];
 
 log(`\nMECHATRON [${backend.toUpperCase()} backend] ${process.platform}-${process.arch}\n`);

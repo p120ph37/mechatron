@@ -10,15 +10,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor) {
-
-	async function waitForAsync(condFn, timeoutMs) {
-		for (var elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
-			if (await condFn()) return true;
-			await new Promise(function (r) { setTimeout(r, 5); });
-		}
-		return false;
-	}
+module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 	var Mouse = mechatron.Mouse;
 
