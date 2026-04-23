@@ -148,6 +148,7 @@ function computeDemotions() {
 	if (mechanism === "uinput") {
 		demoted["keyboard_getKeyState"] = "uinput mechanism";
 		demoted["mouse_getButtonState"] = "uinput mechanism";
+		demoted["mouse_getPos"] = "uinput mechanism";
 	}
 
 	// xproto mechanism: async bridge means getState reads arrive before

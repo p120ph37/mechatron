@@ -71,31 +71,40 @@ function waitFor(condFn, timeoutMs) {
 // Load compatibility matrix
 var compatMatrix = require("./matrix").create(mechatron);
 
-// Load test modules — each returns an array of { name, functions, test }
+// Load test modules — each returns an array of { name, functions, test }.
+// The `subsystem` field gates the entire module on backend availability:
+// when the backend for a subsystem didn't load (e.g. dlopen blocked),
+// every entry in that module is skipped regardless of the matrix cell.
 var allModules = [
-	{ prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
-	{ prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
-	{ prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
-	{ prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
-	{ prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
-	{ prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
-	{ prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
-	{ prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
-	{ prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor) },
-	{ prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor) },
+	{ prefix: "types",     subsystem: null,        entries: require("./types")(mechatron, log, assert, waitFor) },
+	{ prefix: "keyboard",  subsystem: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
+	{ prefix: "mouse",     subsystem: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
+	{ prefix: "clipboard", subsystem: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
+	{ prefix: "process",   subsystem: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
+	{ prefix: "window",    subsystem: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
+	{ prefix: "screen",    subsystem: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
+	{ prefix: "memory",    subsystem: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
+	{ prefix: "uinput",    subsystem: null,        entries: require("./uinput")(mechatron, log, assert, waitFor) },
+	{ prefix: "xproto",    subsystem: null,        entries: require("./xproto")(mechatron, log, assert, waitFor) },
 ];
 
 // Flatten into a single list of [displayName, testFn] pairs.
-// The matrix decides run/skip for each entry based on its declared functions.
+// Two gates per entry: (1) subsystem backend must be loaded, (2) matrix
+// must approve the declared functions for the current platform/column.
 var tests = [];
 for (var m = 0; m < allModules.length; m++) {
 	var mod = allModules[m];
 	var entries = mod.entries;
+	var subsystemAvailable = !mod.subsystem || mechatron.isAvailable(mod.subsystem);
 	for (var e = 0; e < entries.length; e++) {
 		var entry = entries[e];
 		var displayName = mod.prefix + ": " + entry.name;
-		tests.push([displayName, (function (ent, dname) {
+		tests.push([displayName, (function (ent, dname, subAvail) {
 			return function () {
+				if (!subAvail) {
+					log("  " + dname + " (skipped: backend unavailable)\n");
+					return true;
+				}
 				if (!compatMatrix.shouldRun(ent.functions)) {
 					var reason = compatMatrix.getDemotionReason(ent.functions) || "matrix skip";
 					log("  " + dname + " (skipped: " + reason + ")\n");
@@ -103,7 +112,7 @@ for (var m = 0; m < allModules.length; m++) {
 				}
 				return ent.test();
 			};
-		})(entry, displayName)]);
+		})(entry, displayName, subsystemAvailable)]);
 	}
 }
 
