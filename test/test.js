@@ -72,9 +72,8 @@ function waitFor(condFn, timeoutMs) {
 var compatMatrix = require("./matrix").create(mechatron);
 
 // Load test modules — each returns an array of { name, functions, test }.
-// Every subsystem entry declares its ctor as a touched function; matrix.js
-// demotes the ctor when the backend isn't loaded, so shouldRun() is the
-// single gate for both backend availability and function-level status.
+// Each entry declares the COMPATIBILITY.md functions it touches; matrix.js
+// derives the column per-function from platform + getBackend(subsystem).
 var allModules = [
 	{ prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
 	{ prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
@@ -89,8 +88,7 @@ var allModules = [
 ];
 
 // Flatten into a single list of [displayName, testFn] pairs.
-// shouldRun() checks the matrix cell + dynamic demotions (including ctor
-// availability) for the entry's declared functions.
+// shouldRun() checks each function's matrix cell for the current column.
 var tests = [];
 for (var m = 0; m < allModules.length; m++) {
 	var mod = allModules[m];
@@ -101,8 +99,7 @@ for (var m = 0; m < allModules.length; m++) {
 		tests.push([displayName, (function (ent, dname) {
 			return function () {
 				if (!compatMatrix.shouldRun(ent.functions)) {
-					var reason = compatMatrix.getDemotionReason(ent.functions) || "matrix skip";
-					log("  " + dname + " (skipped: " + reason + ")\n");
+					log("  " + dname + " (skipped: matrix)\n");
 					return true;
 				}
 				return ent.test();
@@ -121,7 +118,7 @@ async function main() {
 	log("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
 	log("Backend: " + _backendArg + "\n");
 	if (compatMatrix.available) {
-		log("Matrix columns: " + compatMatrix.columns.join(", ") + "\n");
+		log("Matrix: loaded\n");
 	} else {
 		log("Matrix: unavailable (all tests run)\n");
 	}

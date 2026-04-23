@@ -145,37 +145,39 @@ for be in "${BACKENDS[@]}"; do
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 done
 
-# ── Linux-only: FFI with MECHATRON_INPUT_MECHANISM=uinput ─────────
+# ── Linux-only: FFI + nolib[vt] input (uinput path) ──────────────
 if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-uinput.xml"
-  BE_COV_DIR="$COV_DIR/ffi-uinput"
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-input.xml"
+  BE_COV_DIR="$COV_DIR/nolib-vt-input"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
   MECHATRON_BACKEND=ffi \
-  MECHATRON_INPUT_MECHANISM=uinput \
-    run_bun "ffi-uinput" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+  MECHATRON_BACKEND_KEYBOARD='nolib[vt]' \
+  MECHATRON_BACKEND_MOUSE='nolib[vt]' \
+    run_bun "nolib-vt-input" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
     || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-uinput" \
-    "bun test for ffi-uinput exited ${BE_RC} without producing a JUnit report."
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-vt-input" \
+    "bun test for nolib-vt-input exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
-# ── Linux-only: FFI with MECHATRON_INPUT_MECHANISM=xproto ─────────
+# ── Linux-only: FFI + nolib[x11] input (xproto path) ────────────
 if [ "$RUNNER_OS" = "Linux" ]; then
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-xproto.xml"
-  BE_COV_DIR="$COV_DIR/ffi-xproto"
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-x11-input.xml"
+  BE_COV_DIR="$COV_DIR/nolib-x11-input"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
   MECHATRON_BACKEND=ffi \
-  MECHATRON_INPUT_MECHANISM=xproto \
-    run_bun "ffi-xproto" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+  MECHATRON_BACKEND_KEYBOARD='nolib[x11]' \
+  MECHATRON_BACKEND_MOUSE='nolib[x11]' \
+    run_bun "nolib-x11-input" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
     || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-xproto" \
-    "bun test for ffi-xproto exited ${BE_RC} without producing a JUnit report."
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-x11-input" \
+    "bun test for nolib-x11-input exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 

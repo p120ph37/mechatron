@@ -199,7 +199,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getState returns object",
-			functions: ["keyboard_ctor", "keyboard_getKeyState"],
+			functions: ["keyboard_getKeyState"],
 			test: async function () {
 				var state = await Keyboard.getState();
 				assert(typeof state === "object", "getState returns object");
@@ -208,7 +208,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getState without keycode returns object",
-			functions: ["keyboard_ctor", "keyboard_getKeyState"],
+			functions: ["keyboard_getKeyState"],
 			test: async function () {
 				var kState = await Keyboard.getState();
 				assert(typeof kState === "object", "getState() returns object");
@@ -219,7 +219,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press + getState",
-			functions: ["keyboard_ctor", "keyboard_press", "keyboard_getKeyState"],
+			functions: ["keyboard_press", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				try {
@@ -237,7 +237,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "release + getState",
-			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.press(KEYS.KEY_SHIFT);
@@ -255,7 +255,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click + getState",
-			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.click(KEYS.KEY_SHIFT);
@@ -269,7 +269,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press then release pair",
-			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				try {
@@ -293,7 +293,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click string SPACE",
-			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.click("{SPACE}");
@@ -305,7 +305,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click string 'a'",
-			functions: ["keyboard_ctor", "keyboard_press", "keyboard_release", "keyboard_getKeyState"],
+			functions: ["keyboard_press", "keyboard_release", "keyboard_getKeyState"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.click("a");

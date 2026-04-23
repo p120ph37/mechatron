@@ -13,6 +13,10 @@
 //    - functions: ["keyboard_press", "keyboard_getKeyState"]                 //
 //      → run only if ALL listed functions are "ok"                           //
 //                                                                            //
+//  Column selection is per-function: the subsystem is extracted from the     //
+//  function name (e.g. "keyboard" from "keyboard_press"), then the column    //
+//  is derived as process.platform + "-" + getBackend(subsystem).            //
+//                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -31,7 +35,7 @@ function parseMatrix(mdPath) {
 	for (var i = 0; i < lines.length; i++) {
 		var line = lines[i].trim();
 
-		var headerMatch = line.match(/^##\s+(Keyboard|Mouse|Window|Process|Screen|Clipboard)\s*$/);
+		var headerMatch = line.match(/^##\s+(Keyboard|Mouse|Window|Process|Screen|Clipboard|Memory)\s*$/);
 		if (headerMatch) {
 			currentSubsystem = headerMatch[1].toLowerCase();
 			result[currentSubsystem] = {};
@@ -73,162 +77,55 @@ function parseMatrix(mdPath) {
 	return result;
 }
 
-function detectColumns(mechatron) {
-	var subsystems = ["keyboard", "mouse", "window", "process", "screen", "clipboard"];
-	var backendStr = null;
-	for (var i = 0; i < subsystems.length; i++) {
-		var b = mechatron.getBackend(subsystems[i]);
-		if (b) { backendStr = b; break; }
-	}
-	if (!backendStr) return null;
-
-	var base = backendStr.replace(/\[.*$/, "");
-	var variant = "";
-	var varMatch = backendStr.match(/\[(\w+)\]/);
-	if (varMatch) variant = varMatch[1];
-
-	if (base === "napi") return ["napi"];
-
-	if (base === "ffi") {
-		switch (process.platform) {
-			case "linux": return ["ffi/linux"];
-			case "win32": return ["ffi/win32"];
-			case "darwin": return ["ffi/mac"];
-			default: return null;
-		}
-	}
-
-	if (base === "nolib") {
-		var cols = [];
-		if (variant === "x11") cols.push("nolib/x11");
-		else if (variant === "portal") cols.push("nolib/portal");
-		else if (variant === "vt") cols.push("nolib/vt");
-		else if (process.platform === "darwin") cols.push("nolib/mac");
-		else if (process.platform === "linux") cols.push("nolib/x11");
-
-		if (process.platform === "linux" && cols[0] !== "nolib/linux") {
-			cols.push("nolib/linux");
-		}
-		if (process.platform === "darwin" && cols[0] !== "nolib/mac") {
-			cols.push("nolib/mac");
-		}
-		return cols.length > 0 ? cols : null;
-	}
-
-	return null;
+function columnForSubsystem(mechatron, subsystem) {
+	var backend = mechatron.getBackend(subsystem);
+	if (!backend) return null;
+	return process.platform + "-" + backend;
 }
 
-function lookupStatus(fnStatusMap, columns) {
-	for (var i = 0; i < columns.length; i++) {
-		var s = fnStatusMap[columns[i]];
-		if (s) return s;
-	}
-	return null;
-}
-
-// Dynamic demotions: CI cells that deliberately cripple functionality
-// (blocked dlopen, forced input mechanism) demote specific functions
-// from "ok" to "skip" so tests that depend on observing those functions
-// are correctly skipped.
-function computeDemotions() {
-	var demoted = {};
-	var blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
-	var mechanism = (process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase();
-	var backend = (process.env.MECHATRON_BACKEND || "").toLowerCase();
-
-	// libXtst blocked: ffi[x11] keyboard/mouse backends fail to load
-	// entirely, and XTest-dependent observation functions are unavailable
-	if (blocked.includes("libxtst")) {
-		demoted["keyboard_ctor"] = "libXtst blocked";
-		demoted["keyboard_getKeyState"] = "libXtst blocked";
-		demoted["mouse_ctor"] = "libXtst blocked";
-		demoted["mouse_getButtonState"] = "libXtst blocked";
-		demoted["mouse_getPos"] = "libXtst blocked";
-	}
-
-	// uinput mechanism: input goes through evdev, but Xvfb reads its own
-	// IPC — getState/getPos can't observe the synthetic events
-	if (mechanism === "uinput") {
-		demoted["keyboard_getKeyState"] = "uinput mechanism";
-		demoted["mouse_getButtonState"] = "uinput mechanism";
-		demoted["mouse_getPos"] = "uinput mechanism";
-	}
-
-	// xproto mechanism: async bridge means getState reads arrive before
-	// FakeInput flushes
-	if (mechanism === "xproto") {
-		demoted["keyboard_getKeyState"] = "xproto mechanism";
-		demoted["mouse_getButtonState"] = "xproto mechanism";
-		demoted["mouse_getPos"] = "xproto mechanism";
-	}
-
-	// Portal backend: no state query API
-	if (backend.includes("portal")) {
-		demoted["keyboard_getKeyState"] = "portal backend";
-		demoted["mouse_getButtonState"] = "portal backend";
-		demoted["mouse_getPos"] = "portal backend";
-	}
-
-	return demoted;
+function subsystemFromFn(fnName) {
+	var idx = fnName.indexOf("_");
+	return idx > 0 ? fnName.substring(0, idx) : null;
 }
 
 module.exports = {
 	create: function (mechatron) {
 		var mdPath = path.resolve(__dirname, "..", "COMPATIBILITY.md");
 		var matrix = null;
-		var columns = null;
-		var demoted = computeDemotions();
 
 		if (fs.existsSync(mdPath)) {
 			matrix = parseMatrix(mdPath);
-			columns = detectColumns(mechatron);
 		}
 
 		return {
-			available: !!(matrix && columns),
-			columns: columns,
+			available: !!matrix,
 
 			getStatus: function (fnName) {
-				if (!matrix || !columns) return null;
-				if (demoted[fnName]) return "skip";
-				var subsystems = Object.keys(matrix);
-				for (var s = 0; s < subsystems.length; s++) {
-					var fns = matrix[subsystems[s]];
-					if (fns[fnName]) {
-						return lookupStatus(fns[fnName], columns) || null;
-					}
-				}
-				return null;
+				if (!matrix) return null;
+				var subsystem = subsystemFromFn(fnName);
+				if (!subsystem) return null;
+				var column = columnForSubsystem(mechatron, subsystem);
+				if (!column) return null;
+				var fns = matrix[subsystem];
+				if (!fns || !fns[fnName]) return null;
+				return fns[fnName][column] || null;
 			},
 
 			shouldRun: function (functions) {
 				if (!functions || functions.length === 0) return true;
-				if (!matrix || !columns) return true;
+				if (!matrix) return true;
 				for (var i = 0; i < functions.length; i++) {
 					var fn = functions[i];
-					if (demoted[fn]) return false;
-					var found = false;
-					var subsystems = Object.keys(matrix);
-					for (var s = 0; s < subsystems.length; s++) {
-						var fns = matrix[subsystems[s]];
-						if (fns[fn]) {
-							var status = lookupStatus(fns[fn], columns);
-							if (status !== "ok") return false;
-							found = true;
-							break;
-						}
-					}
-					if (!found) return false;
+					var subsystem = subsystemFromFn(fn);
+					if (!subsystem) return false;
+					var column = columnForSubsystem(mechatron, subsystem);
+					if (!column) return false;
+					var fns = matrix[subsystem];
+					if (!fns || !fns[fn]) return false;
+					var status = fns[fn][column];
+					if (status !== "ok") return false;
 				}
 				return true;
-			},
-
-			getDemotionReason: function (functions) {
-				if (!functions || functions.length === 0) return null;
-				for (var i = 0; i < functions.length; i++) {
-					if (demoted[functions[i]]) return demoted[functions[i]];
-				}
-				return null;
 			},
 		};
 	},

@@ -29,7 +29,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── Invalid window: core invalid-handle path ──
 		{
 			name: "invalid window basics",
-			functions: ["window_ctor", "window_isValid"],
+			functions: ["window_isValid"],
 			test: async function () {
 				var w1 = new Window();
 				assert(!await w1.isValid(), "empty invalid");
@@ -40,7 +40,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window isTopMost",
-			functions: ["window_ctor", "window_isTopMost"],
+			functions: ["window_isTopMost"],
 			test: async function () {
 				var w = new Window();
 				assert(!await w.isTopMost(), "empty !topmost");
@@ -48,7 +48,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window isBorderless",
-			functions: ["window_ctor", "window_isBorderless"],
+			functions: ["window_isBorderless"],
 			test: async function () {
 				var w = new Window();
 				assert(!await w.isBorderless(), "empty !borderless");
@@ -56,7 +56,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window isMinimized",
-			functions: ["window_ctor", "window_isMinimized"],
+			functions: ["window_isMinimized"],
 			test: async function () {
 				var w = new Window();
 				assert(!await w.isMinimized(), "empty !minimized");
@@ -64,7 +64,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window isMaximized",
-			functions: ["window_ctor", "window_isMaximized"],
+			functions: ["window_isMaximized"],
 			test: async function () {
 				var w = new Window();
 				assert(!await w.isMaximized(), "empty !maximized");
@@ -73,7 +73,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── Setters on invalid window (no-crash) ──
 		{
 			name: "invalid window setTopMost",
-			functions: ["window_ctor", "window_setTopMost"],
+			functions: ["window_setTopMost"],
 			test: async function () {
 				var w = new Window();
 				await w.setTopMost(false);
@@ -81,7 +81,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window setBorderless",
-			functions: ["window_ctor", "window_setBorderless"],
+			functions: ["window_setBorderless"],
 			test: async function () {
 				var w = new Window();
 				await w.setBorderless(false);
@@ -89,7 +89,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window setMinimized",
-			functions: ["window_ctor", "window_setMinimized"],
+			functions: ["window_setMinimized"],
 			test: async function () {
 				var w = new Window();
 				await w.setMinimized(false);
@@ -97,7 +97,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window setMaximized",
-			functions: ["window_ctor", "window_setMaximized"],
+			functions: ["window_setMaximized"],
 			test: async function () {
 				var w = new Window();
 				await w.setMaximized(false);
@@ -105,7 +105,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window setTitle",
-			functions: ["window_ctor", "window_setTitle"],
+			functions: ["window_setTitle"],
 			test: async function () {
 				var w = new Window();
 				await w.setTitle("");
@@ -113,7 +113,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window close",
-			functions: ["window_ctor", "window_close"],
+			functions: ["window_close"],
 			test: async function () {
 				var w = new Window();
 				await w.close();
@@ -122,7 +122,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── getBounds / getClient on invalid window ──
 		{
 			name: "invalid window getBounds",
-			functions: ["window_ctor", "window_getBounds"],
+			functions: ["window_getBounds"],
 			test: async function () {
 				var w = new Window();
 				var b = await w.getBounds();
@@ -132,7 +132,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window getClient",
-			functions: ["window_ctor", "window_getClient"],
+			functions: ["window_getClient"],
 			test: async function () {
 				var w = new Window();
 				var c = await w.getClient();
@@ -142,7 +142,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── mapToClient / mapToScreen ──
 		{
 			name: "invalid window mapToClient",
-			functions: ["window_ctor", "window_mapToClient"],
+			functions: ["window_mapToClient"],
 			test: async function () {
 				var w = new Window();
 				var mp = await w.mapToClient(20, 20);
@@ -151,7 +151,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "invalid window mapToScreen",
-			functions: ["window_ctor", "window_mapToScreen"],
+			functions: ["window_mapToScreen"],
 			test: async function () {
 				var w = new Window();
 				var ms = await w.mapToScreen(20, 20);
@@ -192,7 +192,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── setHandle ──
 		{
 			name: "setHandle",
-			functions: ["window_ctor", "window_setHandle"],
+			functions: ["window_setHandle"],
 			test: async function () {
 				var w = new Window();
 				assert(await w.setHandle(0), "setHandle 0");
@@ -202,7 +202,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── getProcess on invalid ──
 		{
 			name: "invalid window getProcess",
-			functions: ["window_ctor", "window_getProcess"],
+			functions: ["window_getProcess"],
 			test: async function () {
 				var w = new Window();
 				var wp = await w.getProcess();
@@ -212,7 +212,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── getList ──
 		{
 			name: "Window.getList",
-			functions: ["window_ctor", "window_getList"],
+			functions: ["window_getList"],
 			test: async function () {
 				var list = await Window.getList();
 				assert(list instanceof Array, "getList is array");
@@ -223,7 +223,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── getActive ──
 		{
 			name: "Window.getActive",
-			functions: ["window_ctor", "window_getActive"],
+			functions: ["window_getActive"],
 			test: async function () {
 				var active = await Window.getActive();
 				assert(active instanceof Window, "getActive returns Window");
@@ -232,7 +232,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── mapToClient overloads ──
 		{
 			name: "mapToClient overloads",
-			functions: ["window_ctor", "window_mapToClient"],
+			functions: ["window_mapToClient"],
 			test: async function () {
 				var w = new Window();
 				var mp0 = await w.mapToClient();
@@ -246,7 +246,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── mapToScreen overloads ──
 		{
 			name: "mapToScreen overloads",
-			functions: ["window_ctor", "window_mapToScreen"],
+			functions: ["window_mapToScreen"],
 			test: async function () {
 				var w = new Window();
 				var ms0 = await w.mapToScreen();
@@ -260,7 +260,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── setBounds overloads on invalid window ──
 		{
 			name: "setBounds overloads on invalid window",
-			functions: ["window_ctor", "window_setBounds"],
+			functions: ["window_setBounds"],
 			test: async function () {
 				var w = new Window();
 				await w.setBounds();
@@ -271,7 +271,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── setClient overloads on invalid window ──
 		{
 			name: "setClient overloads on invalid window",
-			functions: ["window_ctor", "window_setClient"],
+			functions: ["window_setClient"],
 			test: async function () {
 				var w = new Window();
 				await w.setClient();
@@ -282,7 +282,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── Valid window tests (require getList to find a window) ──
 		{
 			name: "valid window getters",
-			functions: ["window_ctor", "window_getList", "window_isValid", "window_getBounds", "window_isTopMost", "window_isBorderless", "window_isMinimized", "window_isMaximized", "window_getPID", "window_getHandle", "window_getProcess", "window_getClient"],
+			functions: ["window_getList", "window_isValid", "window_getBounds", "window_isTopMost", "window_isBorderless", "window_isMinimized", "window_isMaximized", "window_getPID", "window_getHandle", "window_getProcess", "window_getClient"],
 			test: async function () {
 				var list = await Window.getList();
 				if (list.length === 0) return;
@@ -304,7 +304,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "valid window setters",
-			functions: ["window_ctor", "window_getList", "window_isValid", "window_setTopMost", "window_setBorderless", "window_setMinimized", "window_setMaximized", "window_setTitle"],
+			functions: ["window_getList", "window_isValid", "window_setTopMost", "window_setBorderless", "window_setMinimized", "window_setMaximized", "window_setTitle"],
 			test: async function () {
 				var list = await Window.getList();
 				if (list.length === 0) return;
@@ -321,7 +321,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "valid window clone",
-			functions: ["window_ctor", "window_getList", "window_isValid"],
+			functions: ["window_getList", "window_isValid"],
 			test: async function () {
 				var list = await Window.getList();
 				if (list.length === 0) return;
@@ -333,7 +333,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── setActive ──
 		{
 			name: "Window.setActive",
-			functions: ["window_ctor", "window_setActive"],
+			functions: ["window_setActive"],
 			test: async function () {
 				var w = new Window();
 				await Window.setActive(w);
@@ -346,7 +346,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── Stale-handle probe (Linux FFI only) ──
 		{
 			name: "stale-handle probe (Linux FFI)",
-			functions: ["window_ctor", "window_getList", "window_isValid", "window_close", "window_setHandle"],
+			functions: ["window_getList", "window_isValid", "window_close", "window_setHandle"],
 			test: async function () {
 				if (process.platform !== "linux" ||
 					mechatron.getBackend("window") !== "ffi") {
@@ -391,7 +391,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ── isAxEnabled ──
 		{
 			name: "Window.isAxEnabled",
-			functions: ["window_ctor", "window_isAxEnabled"],
+			functions: ["window_isAxEnabled"],
 			test: async function () {
 				assert(typeof await Window.isAxEnabled() === "boolean", "isAxEnabled bool");
 			}

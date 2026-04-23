@@ -20,7 +20,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- Invalid process defaults -----
 		{
 			name: "Process empty/invalid defaults",
-			functions: ["process_ctor", "process_isValid"],
+			functions: ["process_isValid"],
 			test: async function () {
 				var p = new Process();
 				assert(!await p.isValid(), "empty invalid");
@@ -42,7 +42,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- hasExited on invalid process -----
 		{
 			name: "Process hasExited (invalid)",
-			functions: ["process_ctor", "process_hasExited"],
+			functions: ["process_hasExited"],
 			test: async function () {
 				var p = new Process();
 				assert(await p.hasExited(), "empty hasExited");
@@ -52,7 +52,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getCurrent -----
 		{
 			name: "Process getCurrent",
-			functions: ["process_ctor", "process_getCurrent"],
+			functions: ["process_getCurrent"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				assert(await curr.isValid(), "current valid");
@@ -66,7 +66,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- is64Bit -----
 		{
 			name: "Process is64Bit",
-			functions: ["process_ctor", "process_getCurrent", "process_is64Bit"],
+			functions: ["process_getCurrent", "process_is64Bit"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				assert(typeof await curr.is64Bit() === "boolean", "is64Bit bool");
@@ -76,7 +76,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- isDebugged -----
 		{
 			name: "Process isDebugged",
-			functions: ["process_ctor", "process_getCurrent", "process_isDebugged"],
+			functions: ["process_getCurrent", "process_isDebugged"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				assert(typeof await curr.isDebugged() === "boolean", "isDebugged bool");
@@ -86,7 +86,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getName / getPath -----
 		{
 			name: "Process getName / getPath",
-			functions: ["process_ctor", "process_getCurrent", "process_getName", "process_getPath"],
+			functions: ["process_getCurrent", "process_getName", "process_getPath"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				assert((await curr.getName()).length > 0, "current has name");
@@ -97,7 +97,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getHandle -----
 		{
 			name: "Process getHandle",
-			functions: ["process_ctor", "process_getCurrent", "process_getHandle"],
+			functions: ["process_getCurrent", "process_getHandle"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				assert(typeof await curr.getHandle() === "number", "getHandle number");
@@ -107,7 +107,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- open / close -----
 		{
 			name: "Process open / close",
-			functions: ["process_ctor", "process_open", "process_close"],
+			functions: ["process_open", "process_close"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 
@@ -128,7 +128,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getList -----
 		{
 			name: "Process getList",
-			functions: ["process_ctor", "process_getList"],
+			functions: ["process_getList"],
 			test: async function () {
 				var list = await Process.getList();
 				assert(list.length > 0, "getList non-empty");
@@ -153,7 +153,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- isSys64Bit -----
 		{
 			name: "Process isSys64Bit",
-			functions: ["process_ctor", "process_isSys64Bit"],
+			functions: ["process_isSys64Bit"],
 			test: async function () {
 				assert(typeof await Process.isSys64Bit() === "boolean", "isSys64Bit bool");
 			}
@@ -162,7 +162,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getWindows -----
 		{
 			name: "Process getWindows",
-			functions: ["process_ctor", "process_getCurrent", "process_getWindows"],
+			functions: ["process_getCurrent", "process_getWindows"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				var wins = await curr.getWindows();
@@ -173,7 +173,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getModules (includes Module class tests and getSegments) -----
 		{
 			name: "Process getModules / Module class / getSegments",
-			functions: ["process_ctor", "process_getModules"],
+			functions: ["process_getModules"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				var mods = await curr.getModules();
@@ -260,7 +260,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- exit on invalid process (no-crash) -----
 		{
 			name: "Process exit (invalid, no-crash)",
-			functions: ["process_ctor", "process_exit"],
+			functions: ["process_exit"],
 			test: async function () {
 				var pBogus = new Process();
 				await pBogus.exit();
@@ -270,7 +270,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- kill on invalid process (no-crash) -----
 		{
 			name: "Process kill (invalid, no-crash)",
-			functions: ["process_ctor", "process_kill"],
+			functions: ["process_kill"],
 			test: async function () {
 				var pBogus = new Process();
 				await pBogus.kill();

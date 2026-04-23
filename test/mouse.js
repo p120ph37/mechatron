@@ -58,7 +58,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getPos returns point",
-			functions: ["mouse_ctor", "mouse_getPos"],
+			functions: ["mouse_getPos"],
 			test: async function () {
 				var pos = await Mouse.getPos();
 				assert(typeof pos.x === "number" && typeof pos.y === "number",
@@ -70,7 +70,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "setPos + getPos round-trip",
-			functions: ["mouse_ctor", "mouse_setPos", "mouse_getPos"],
+			functions: ["mouse_setPos", "mouse_getPos"],
 			test: async function () {
 				var old = await Mouse.getPos();
 				await Mouse.setPos(100, 200);
@@ -90,7 +90,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press left shows pressed state",
-			functions: ["mouse_ctor", "mouse_press", "mouse_getButtonState"],
+			functions: ["mouse_press", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.press(mechatron.BUTTON_LEFT);
@@ -105,7 +105,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "release left shows released state",
-			functions: ["mouse_ctor", "mouse_release", "mouse_getButtonState"],
+			functions: ["mouse_release", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.press(mechatron.BUTTON_LEFT);
@@ -123,7 +123,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click right leaves released state",
-			functions: ["mouse_ctor", "mouse_press", "mouse_release", "mouse_getButtonState"],
+			functions: ["mouse_press", "mouse_release", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.click(mechatron.BUTTON_RIGHT);
@@ -135,7 +135,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press mid + getState object + release",
-			functions: ["mouse_ctor", "mouse_press", "mouse_release", "mouse_getButtonState"],
+			functions: ["mouse_press", "mouse_release", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.press(mechatron.BUTTON_MID);
@@ -151,7 +151,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "click left leaves released state",
-			functions: ["mouse_ctor", "mouse_press", "mouse_release", "mouse_getButtonState"],
+			functions: ["mouse_press", "mouse_release", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.click(mechatron.BUTTON_LEFT);
@@ -165,7 +165,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "scrollV up and down",
-			functions: ["mouse_ctor", "mouse_scrollV"],
+			functions: ["mouse_scrollV"],
 			test: async function () {
 				var m = new Mouse();
 				await m.scrollV(1);
@@ -179,7 +179,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "scrollH left and right",
-			functions: ["mouse_ctor", "mouse_scrollH"],
+			functions: ["mouse_scrollH"],
 			test: async function () {
 				var m = new Mouse();
 				await m.scrollH(1);
@@ -193,7 +193,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press and release X1 button",
-			functions: ["mouse_ctor", "mouse_press", "mouse_release", "mouse_getButtonState"],
+			functions: ["mouse_press", "mouse_release", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.press(mechatron.BUTTON_X1);
@@ -205,7 +205,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press and release X2 button",
-			functions: ["mouse_ctor", "mouse_press", "mouse_release", "mouse_getButtonState"],
+			functions: ["mouse_press", "mouse_release", "mouse_getButtonState"],
 			test: async function () {
 				var m = new Mouse();
 				await m.press(mechatron.BUTTON_X2);
@@ -219,7 +219,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "press and release unknown button 99",
-			functions: ["mouse_ctor", "mouse_press", "mouse_release"],
+			functions: ["mouse_press", "mouse_release"],
 			test: async function () {
 				var m = new Mouse();
 				await m.press(99);
@@ -233,7 +233,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		{
 			name: "getState() returns all-buttons object",
-			functions: ["mouse_ctor", "mouse_getButtonState"],
+			functions: ["mouse_getButtonState"],
 			test: async function () {
 				var mState = await Mouse.getState();
 				assert(typeof mState === "object", "getState() returns all buttons");

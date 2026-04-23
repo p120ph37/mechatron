@@ -41,8 +41,8 @@ const _active: Partial<Record<PlatformCapability, string>> = {};
 const _pinnedList: Partial<Record<PlatformCapability, string[]>> = {};
 
 function envForCapability(capability: PlatformCapability): string[] {
+  if (capability === "input") return [];
   const envName =
-    capability === "input"     ? "MECHATRON_INPUT_MECHANISM" :
     capability === "screen"    ? "MECHATRON_SCREEN_MECHANISM" :
                                  "MECHATRON_CLIPBOARD_MECHANISM";
   const v = process.env[envName];

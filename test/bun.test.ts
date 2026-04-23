@@ -54,9 +54,8 @@ const compatMatrix = require("./matrix").create(mechatron);
 
 type TestEntry = { name: string; functions: string[]; test: () => any };
 
-// Every subsystem entry declares its ctor as a touched function; matrix.js
-// demotes the ctor when the backend isn't loaded, so shouldRun() is the
-// single gate for both backend availability and function-level status.
+// Each entry declares the COMPATIBILITY.md functions it touches; matrix.js
+// derives the column per-function from platform + getBackend(subsystem).
 const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
   { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
   { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
@@ -72,7 +71,7 @@ const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
 
 log(`\nMECHATRON [${backend.toUpperCase()} backend] ${process.platform}-${process.arch}\n`);
 if (compatMatrix.available) {
-  log(`Matrix columns: ${compatMatrix.columns.join(", ")}\n`);
+  log(`Matrix: loaded\n`);
 }
 
 // ── Suite ────────────────────────────────────────────────────────────────────
@@ -90,8 +89,7 @@ describe(`mechatron [${backend}]`, () => {
       const timeout = mod.prefix === "window" ? 15000 : undefined;
       test(displayName, () => {
         if (!compatMatrix.shouldRun(entry.functions)) {
-          const reason = compatMatrix.getDemotionReason(entry.functions) || "matrix skip";
-          log(`  ${displayName} (skipped: ${reason})\n`);
+          log(`  ${displayName} (skipped: matrix)\n`);
           return;
         }
         return entry.test();

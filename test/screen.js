@@ -47,7 +47,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- synchronize + post-sync property tests ---
 		{
 			name: "Screen.synchronize and properties",
-			functions: ["screen_ctor", "screen_synchronize"],
+			functions: ["screen_synchronize"],
 			test: async function () {
 				var synced = await Screen.synchronize();
 				assert(synced === true, "synchronize returns true");
@@ -112,7 +112,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- grabScreen tests ---
 		{
 			name: "Screen.grabScreen",
-			functions: ["screen_ctor", "screen_synchronize", "screen_grabScreen"],
+			functions: ["screen_synchronize", "screen_grabScreen"],
 			test: async function () {
 				await Screen.synchronize();
 
@@ -159,7 +159,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Oversize grab (handle-allocation failure path) ---
 		{
 			name: "Screen.grabScreen oversize allocation",
-			functions: ["screen_ctor", "screen_grabScreen"],
+			functions: ["screen_grabScreen"],
 			test: async function () {
 				if (mechatron.getBackend("screen") !== "ffi") {
 					log("(skipped: not ffi backend) ");
@@ -179,7 +179,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Promise-returning assertions ---
 		{
 			name: "Screen async methods return Promises",
-			functions: ["screen_ctor", "screen_synchronize", "screen_grabScreen"],
+			functions: ["screen_synchronize", "screen_grabScreen"],
 			test: async function () {
 				var pa1 = Screen.synchronize();
 				assert(pa1 instanceof Promise, "synchronize returns Promise");
