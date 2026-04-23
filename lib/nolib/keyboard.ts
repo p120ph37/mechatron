@@ -51,12 +51,14 @@ async function linux_keyboard_getKeyState(keycode: number): Promise<boolean> {
   return (keymap.keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
 }
 
-export const keyboard_press = IS_LINUX ? linux_keyboard_press : null;
-export const keyboard_release = IS_LINUX ? linux_keyboard_release : null;
-export const keyboard_getKeyState = IS_LINUX ? linux_keyboard_getKeyState : null;
+const SUPPORTED = IS_LINUX || HAS_DISPLAY;
 
-if (!IS_LINUX) {
-  throw new Error("nolib/keyboard: requires Linux");
+export const keyboard_press = SUPPORTED ? linux_keyboard_press : null;
+export const keyboard_release = SUPPORTED ? linux_keyboard_release : null;
+export const keyboard_getKeyState = SUPPORTED ? linux_keyboard_getKeyState : null;
+
+if (!SUPPORTED) {
+  throw new Error("nolib/keyboard: requires Linux or $DISPLAY");
 }
 if (VARIANT === "portal" && !remoteDesktopAvailable()) {
   throw new Error("nolib/keyboard[portal]: requires Wayland session + D-Bus session bus");

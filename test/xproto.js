@@ -719,9 +719,8 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(qkParsed.keys[31] === 0xFF, "qk key byte 31");
 
 		// ── Mechanism registry: xproto present and probed correctly ──
-		// xproto is in the registry only on Linux (CAPABILITY_MECHANISMS.input
-		// lists it for the Linux row); other platforms don't surface it.
-		if (process.platform === "linux" && mechatron.isAvailable("keyboard")) {
+		// xproto is in the registry on all platforms (probed via $DISPLAY).
+		if (mechatron.isAvailable("keyboard")) {
 			var inputMechs = mechatron.listMechanisms("input");
 			var xpMech = inputMechs.find(function (m) { return m.name === "xproto"; });
 			assert(xpMech, "xproto registered as input mechanism");
@@ -739,7 +738,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// X.Org 1.0), and on a known-bad extension name.  Falls
 		// through silently when there's no X server.
 		var liveDone = false;
-		if (process.platform === "linux" && process.env.DISPLAY) {
+		if (process.env.DISPLAY) {
 			var ep = wire.parseDisplay(process.env.DISPLAY);
 			var fs = require("fs");
 			if (ep && ep.kind === "unix" && fs.existsSync(ep.path)) {

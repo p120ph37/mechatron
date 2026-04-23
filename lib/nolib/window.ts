@@ -430,8 +430,8 @@ export function window_isAxEnabled(_prompt?: boolean): boolean {
 import { getNolibVariant } from "../backend";
 const VARIANT = getNolibVariant();
 
-if (!IS_LINUX || !process.env.DISPLAY) {
-  throw new Error("nolib/window: requires Linux with $DISPLAY");
+if (!process.env.DISPLAY) {
+  throw new Error("nolib/window: requires $DISPLAY");
 }
 if (VARIANT === "portal" || VARIANT === "vt") {
   throw new Error(`nolib/window[${VARIANT}]: window management requires X11`);

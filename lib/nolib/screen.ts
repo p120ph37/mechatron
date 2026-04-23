@@ -238,8 +238,8 @@ export async function screen_grabScreen(
   return null;
 }
 
-if (!IS_LINUX) {
-  throw new Error("nolib/screen: requires Linux");
+if (!IS_LINUX && !HAS_DISPLAY) {
+  throw new Error("nolib/screen: requires Linux or $DISPLAY");
 }
 if (VARIANT === "portal" && !remoteDesktopAvailable()) {
   throw new Error("nolib/screen[portal]: requires Wayland session + D-Bus session bus");

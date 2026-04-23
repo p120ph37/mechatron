@@ -140,16 +140,18 @@ async function linux_mouse_getButtonState(button: number): Promise<boolean> {
   }
 }
 
-export const mouse_press = IS_LINUX ? linux_mouse_press : null;
-export const mouse_release = IS_LINUX ? linux_mouse_release : null;
-export const mouse_scrollH = IS_LINUX ? linux_mouse_scrollH : null;
-export const mouse_scrollV = IS_LINUX ? linux_mouse_scrollV : null;
-export const mouse_getPos = IS_LINUX ? linux_mouse_getPos : null;
-export const mouse_setPos = IS_LINUX ? linux_mouse_setPos : null;
-export const mouse_getButtonState = IS_LINUX ? linux_mouse_getButtonState : null;
+const SUPPORTED = IS_LINUX || HAS_DISPLAY;
 
-if (!IS_LINUX) {
-  throw new Error("nolib/mouse: requires Linux");
+export const mouse_press = SUPPORTED ? linux_mouse_press : null;
+export const mouse_release = SUPPORTED ? linux_mouse_release : null;
+export const mouse_scrollH = SUPPORTED ? linux_mouse_scrollH : null;
+export const mouse_scrollV = SUPPORTED ? linux_mouse_scrollV : null;
+export const mouse_getPos = SUPPORTED ? linux_mouse_getPos : null;
+export const mouse_setPos = SUPPORTED ? linux_mouse_setPos : null;
+export const mouse_getButtonState = SUPPORTED ? linux_mouse_getButtonState : null;
+
+if (!SUPPORTED) {
+  throw new Error("nolib/mouse: requires Linux or $DISPLAY");
 }
 if (VARIANT === "portal" && !remoteDesktopAvailable()) {
   throw new Error("nolib/mouse[portal]: requires Wayland session + D-Bus session bus");

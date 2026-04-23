@@ -20,7 +20,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 |--------|---------|----------|-------|
 | linux-napi[x11] | Pre-built Rust .node binary | Linux (X11) | Gold-standard reference |
 | linux-ffi[x11] | bun:ffi | Linux (X11/EWMH) | Requires libX11; XTest for input |
-| linux-nolib[x11] | Pure TS (xproto wire) | Linux with $DISPLAY | No native libraries at all |
+| linux-nolib[x11] | Pure TS (xproto wire) | Any OS with $DISPLAY | No native libraries at all |
 | linux-nolib[portal] | Pure TS (D-Bus) | Linux/Wayland | RemoteDesktop + ScreenCast portals |
 | linux-nolib[vt] | Pure TS (uinput + fb) | Linux VT / headless | /dev/uinput + /dev/fb0 |
 | win32-napi | Pre-built Rust .node binary | Windows | |

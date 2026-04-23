@@ -135,14 +135,6 @@ function probeXproto(): MechanismInfo {
   // endpoints can't be cheaply probed without opening a connection, so
   // we accept them at face value when $DISPLAY is set — the connect
   // attempt fails loudly later if the server isn't actually listening.
-  if (!IS_LINUX) {
-    return {
-      name: "xproto", description: "Direct X11 wire protocol (no libX11)",
-      available: false, requiresElevatedPrivileges: false,
-      requiresUserApproval: false, supportsOffScreen: true,
-      reason: "not Linux",
-    };
-  }
   if (!hasDisplay()) {
     return {
       name: "xproto",
@@ -468,8 +460,8 @@ function probeNSPasteboard(): MechanismInfo {
 export const CAPABILITY_MECHANISMS: Record<PlatformCapability, Array<() => MechanismInfo>> = {
   input: IS_LINUX
     ? [probeXtest, probeUinput, probeXproto, probeLibei]
-    : IS_WIN ? [probeSendInput]
-    : IS_MAC ? [probeCGEvent]
+    : IS_WIN ? [probeSendInput, probeXproto]
+    : IS_MAC ? [probeCGEvent, probeXproto]
     : [probeXtest, probeUinput, probeXproto, probeLibei, probeSendInput, probeCGEvent],
   screen: IS_LINUX
     ? [probeXrandr, probePortalPipewire, probeDrm, probeFramebuffer]

@@ -7,7 +7,7 @@ let _openReason: string | null = null;
 export async function getXConnection(): Promise<XConnection | null> {
   if (_conn) return _conn;
   if (_openPromise) return _openPromise;
-  if (process.platform !== "linux") return null;
+  if (!process.env.DISPLAY) return null;
   _openPromise = (async () => {
     try {
       const c = await XConnection.connect();
@@ -36,7 +36,7 @@ export function _resetXConnForTests(): void {
   _openReason = null;
 }
 
-if (process.platform === "linux" && typeof process.on === "function") {
+if (process.env.DISPLAY && typeof process.on === "function") {
   process.on("exit", () => {
     if (_conn) { try { _conn.close(); } catch {} }
   });

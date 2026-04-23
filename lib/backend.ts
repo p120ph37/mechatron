@@ -87,6 +87,8 @@ function parseEntries(raw: string): BackendEntry[] {
       }
     } else if (IS_LINUX) {
       for (const v of variantsFor(backend)) entries.push({ backend, variant: v });
+    } else if (process.env.DISPLAY && backend === "nolib") {
+      entries.push({ backend, variant: "x11" });
     } else {
       entries.push({ backend });
     }
