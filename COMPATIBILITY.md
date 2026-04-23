@@ -47,8 +47,8 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollH | ok | ok | ok | ok | skip | ok | ok | ok | ok |
+| mouse_scrollV | ok | ok | ok | ok | skip | ok | ok | ok | ok |
 | mouse_getPos | ok | ok | ok | skip | skip | ok | ok | ok | ok |
 | mouse_setPos | ok | ok | ok | skip | ok | ok | ok | ok | ok |
 | mouse_getButtonState | ok | ok | ok | skip | skip | ok | ok | ok | ok |
