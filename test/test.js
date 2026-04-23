@@ -46,23 +46,6 @@ var mechatron = require("..");
 
 ////////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-
-// Platform capability expectations
-var gExpected = {
-	"linux-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-	"linux-arm64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-	"darwin-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-	"darwin-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-	"win32-x64":     { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-	"win32-ia32":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-};
-
-var gPlatformKey = process.platform + "-" + process.arch;
-var gExpect = gExpected[gPlatformKey] || {};
-
-////////////////////////////////////////////////////////////////////////////////
-
 function log(msg) {
 	process.stdout.write(msg);
 }
@@ -70,19 +53,6 @@ function log(msg) {
 function assert(cond, msg) {
 	if (!cond) {
 		throw new Error("Assertion Failed" + (msg ? ": " + msg : "") + "\x07\n");
-	}
-}
-
-function assertThrows(fn, thisArg, args) {
-	try {
-		fn.apply(thisArg, args);
-		assert(false, "Expected " + fn.name + " to throw");
-	} catch (e) { }
-}
-
-function expectOrSkip(capability, label) {
-	if (gExpect[capability]) {
-		assert(false, label + " — expected to work on " + gPlatformKey + " but probe failed (regression!)");
 	}
 }
 
@@ -98,17 +68,44 @@ function waitFor(condFn, timeoutMs) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Load test modules
-var typesModule     = require("./types")(mechatron, log, assert);
-var keyboardModule  = require("./keyboard")(mechatron, log, assert, waitFor, expectOrSkip);
-var mouseModule     = require("./mouse")(mechatron, log, assert, waitFor, expectOrSkip);
-var clipboardModule = require("./clipboard")(mechatron, log, assert, waitFor, expectOrSkip);
-var processModule   = require("./process")(mechatron, log, assert, waitFor, expectOrSkip);
-var windowModule    = require("./window")(mechatron, log, assert, waitFor, expectOrSkip);
-var screenModule    = require("./screen")(mechatron, log, assert, waitFor, expectOrSkip);
-var memoryModule    = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
-var uinputModule    = require("./uinput")(mechatron, log, assert, waitFor, expectOrSkip);
-var compatModule    = require("./compatibility")(mechatron, log, assert);
+// Load compatibility matrix
+var compatMatrix = require("./matrix").create(mechatron);
+
+// Load test modules — each returns an array of { name, functions, test }
+var allModules = [
+	{ prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
+	{ prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
+	{ prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
+	{ prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
+	{ prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
+	{ prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
+	{ prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
+	{ prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
+	{ prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor) },
+	{ prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor) },
+];
+
+// Flatten into a single list of [displayName, testFn] pairs.
+// The matrix decides run/skip for each entry based on its declared functions.
+var tests = [];
+for (var m = 0; m < allModules.length; m++) {
+	var mod = allModules[m];
+	var entries = mod.entries;
+	for (var e = 0; e < entries.length; e++) {
+		var entry = entries[e];
+		var displayName = mod.prefix + ": " + entry.name;
+		tests.push([displayName, (function (ent, dname) {
+			return function () {
+				if (!compatMatrix.shouldRun(ent.functions)) {
+					var reason = compatMatrix.getDemotionReason(ent.functions) || "matrix skip";
+					log("  " + dname + " (skipped: " + reason + ")\n");
+					return true;
+				}
+				return ent.test();
+			};
+		})(entry, displayName)]);
+	}
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -119,12 +116,10 @@ async function main() {
 	log("Node: " + process.version + "\n");
 	log("UID: " + (process.getuid ? process.getuid() : "N/A") + "\n");
 	log("Backend: " + _backendArg + "\n");
-	var expectKeys = Object.keys(gExpect);
-	if (expectKeys.length > 0) {
-		var required = expectKeys.filter(function (k) { return gExpect[k]; });
-		log("Expected: " + (required.length > 0 ? required.join(", ") : "(none)") + "\n");
+	if (compatMatrix.available) {
+		log("Matrix columns: " + compatMatrix.columns.join(", ") + "\n");
 	} else {
-		log("Expected: (no expectations defined for " + gPlatformKey + ")\n");
+		log("Matrix: unavailable (all tests run)\n");
 	}
 	log("------------------------------\n\n");
 
@@ -138,43 +133,34 @@ async function main() {
 	assert(mechatron.isAvailable("keyboard"), "keyboard available");
 	log("OK\n\n");
 
-	var tests = [
-		["types",     typesModule.testTypes],
-		["timer",     typesModule.testTimer],
-		["keyboard",  keyboardModule.testKeyboard],
-		["mouse",     mouseModule.testMouse],
-		["clipboard", clipboardModule.testClipboard],
-		["process",   processModule.testProcess],
-		["window",    windowModule.testWindow],
-		["screen",    screenModule.testScreen],
-		["memory",    memoryModule.testMemory],
-		["uinput",    uinputModule.testUinput],
-		["compatibility", compatModule.testCompatibility],
-	];
-
 	// Parse command line for specific tests
 	var requested = _testArgs;
+	var filteredTests = tests;
 	if (requested.length > 0 && requested[0] !== "all") {
-		tests = tests.filter(function (t) {
-			return requested.indexOf(t[0]) >= 0;
+		filteredTests = tests.filter(function (t) {
+			for (var r = 0; r < requested.length; r++) {
+				if (t[0] === requested[r]) return true;
+				if (t[0].indexOf(requested[r] + ":") === 0) return true;
+			}
+			return false;
 		});
 	}
 
 	var failed = false;
 	var results = [];
-	for (var i = 0; i < tests.length; ++i) {
+	for (var i = 0; i < filteredTests.length; ++i) {
 		var t0 = performance.now();
 		var err = null;
 		try {
-			await tests[i][1]();
+			await filteredTests[i][1]();
 		} catch (e) {
-			log("  FAILED: " + tests[i][0] + " - " + e.message + "\n");
+			log("  FAILED: " + filteredTests[i][0] + " - " + e.message + "\n");
 			if (e.stack) log("  " + e.stack.split("\n").slice(0, 3).join("\n  ") + "\n");
 			failed = true;
 			err = e;
 		}
 		results.push({
-			name: tests[i][0],
+			name: filteredTests[i][0],
 			time: ((performance.now() - t0) / 1000).toFixed(3),
 			error: err,
 		});

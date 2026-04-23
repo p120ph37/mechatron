@@ -10,7 +10,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
+module.exports = function (mechatron, log, assert, waitFor) {
 
 	async function testMemory() {
 		log("  Memory... ");
@@ -593,7 +593,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		return true;
 	}
 
-	return {
-		testMemory: testMemory,
-	};
+	return [
+		{ name: "memory", functions: [], test: testMemory },
+	];
 };

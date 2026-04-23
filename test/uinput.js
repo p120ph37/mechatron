@@ -13,7 +13,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
+module.exports = function (mechatron, log, assert, waitFor) {
 
 	function testUinput() {
 		log("  uinput... ");
@@ -378,7 +378,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		return true;
 	}
 
-	return {
-		testUinput: testUinput,
-	};
+	return [
+		{ name: "uinput", functions: [], test: testUinput },
+	];
 };

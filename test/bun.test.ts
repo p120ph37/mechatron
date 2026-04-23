@@ -31,154 +31,69 @@ const backend: string =
     : "ffi";
 process.env.MECHATRON_BACKEND = backend;
 
-const SKIP_PLATFORM = false;
-const describeMaybe = describe;
-
 // ── Test helpers (mirrors test/test.js) ──────────────────────────────────────
-
-const gExpected: Record<string, Record<string, boolean>> = {
-  "linux-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "linux-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "darwin-arm64": { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "darwin-x64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "win32-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "win32-ia32":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-};
-const gPlatformKey = process.platform + "-" + process.arch;
-const gExpect: Record<string, boolean> = gExpected[gPlatformKey] || {};
-
-// Honour the LD_PRELOAD `dlopen-block` shim's block list (see
-// test/dlopen-block.c + .github/workflows/build-reusable.yml).  When a
-// library is deliberately denied via MECHATRON_BLOCK_DLOPEN, the
-// capabilities it provides can't be probed, so demote them from
-// "expected to work" to "may skip" on this run.  This lets the FFI
-// backend's dlopen-catch arms get deterministic coverage without
-// spuriously failing keyboardSim / mouseSim / grabScreen assertions.
-const _blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
-if (_blocked.includes("libxtst")) {
-  gExpect.keyboardSim = false;
-  gExpect.mouseSim = false;
-  // linux_mouse_setPos short-circuits on !isXTestAvailable() even though
-  // XWarpPointer itself lives in libX11 (lib/ffi/mouse.ts:131), so the
-  // getPos/setPos round-trip observes no movement when libXtst is blocked.
-  gExpect.mousePos = false;
-}
-// When MECHATRON_INPUT_MECHANISM=uinput is pinned, Keyboard.press /
-// Mouse.press route through /dev/uinput → kernel evdev.  In CI the X
-// server is Xvfb, which reads from its own IPC rather than /dev/input,
-// so synthetic input events never reach it and Keyboard.getState() /
-// Mouse.getState() can't observe the press.  Demote keyboardSim /
-// mouseSim from "expected to work" to "may skip" for this cell —
-// coverage of the uinput code path still happens; we just can't do
-// an end-to-end verify against Xvfb.  Mouse.setPos stays on the
-// XTest path (lib/ffi/mouse.ts:linux_mouse_setPos has no uinput
-// routing — uinput is EV_REL-only), so mousePos is unaffected.
-if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "uinput") {
-  gExpect.keyboardSim = false;
-  gExpect.mouseSim = false;
-}
-// xproto dispatch is a sync→async bridge: Keyboard.press / Mouse.press
-// enqueue work on a promise chain, so by the time the generic bun.test
-// harness calls Keyboard.getState() the FakeInput may not have been
-// flushed to Xvfb yet (and getState reads go via the XTest sync path
-// regardless).  Demote the three sim flags to "may skip" — the xproto
-// code path is covered end-to-end in test/xproto.js via xprotoFlush().
-if ((process.env.MECHATRON_INPUT_MECHANISM || "").toLowerCase() === "xproto") {
-  gExpect.keyboardSim = false;
-  gExpect.mouseSim = false;
-  gExpect.mousePos = false;
-}
-// Portal backend: RemoteDesktop D-Bus has no state query API, so
-// getState/getPos can't verify input; grabScreen uses Screenshot portal
-// which creates a temp file per capture — works but slower.  Demote
-// sim/pos expectations since we can't round-trip verify through the
-// compositor's portal interface.
-if (_envBackend.includes("portal")) {
-  gExpect.keyboardSim = false;
-  gExpect.mouseSim = false;
-  gExpect.mousePos = false;
-}
 
 const log = (msg: string) => process.stdout.write(msg);
 const assert = (cond: unknown, msg?: string) => {
   if (!cond) throw new Error("Assertion Failed" + (msg ? ": " + msg : ""));
 };
-const expectOrSkip = (capability: string, label: string) => {
-  if (gExpect[capability]) {
-    assert(false, `${label} — expected to work on ${gPlatformKey} but probe failed (regression!)`);
-  }
-};
 
 // ── Load mechatron + per-subsystem test modules ──────────────────────────────
 
-// `require("..")` resolves to lib/index.ts under the "bun" exports condition,
-// so coverage attribution is against the TypeScript source files directly.
-// Skip when SKIP_PLATFORM is true so that requiring an unsupported subsystem
-// doesn't blow up at file load time.
-
-let typesM: any, kbM: any, mouseM: any, clipM: any, procM: any, winM: any, scrM: any, memM: any, uinputM: any, xprotoM: any, compatM: any;
-let waitFor: (cond: () => boolean, timeoutMs: number) => boolean;
-
-if (!SKIP_PLATFORM) {
-  // Import the TypeScript source directly (not dist/index.js).  Bun
-  // executes .ts natively, so coverage is attributed to lib/**/*.ts
-  // — making FFI files visible to the lcov report.  Path-based
-  // `require("..")` would resolve via package.json's `main` to
-  // `dist/index.js` (the `exports` field's `"bun"` condition isn't
-  // consulted for path requires).
-  const mechatron: any = require("../lib");
-  waitFor = (condFn, timeoutMs) => {
+const mechatron: any = require("../lib");
+const waitFor = (condFn: () => boolean, timeoutMs: number) => {
+  if (condFn()) return true;
+  for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
+    mechatron.Timer.sleep(5);
     if (condFn()) return true;
-    for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
-      mechatron.Timer.sleep(5);
-      if (condFn()) return true;
-    }
-    return false;
-  };
-  typesM = require("./types")(mechatron, log, assert);
-  kbM    = require("./keyboard")(mechatron, log, assert, waitFor, expectOrSkip);
-  mouseM = require("./mouse")(mechatron, log, assert, waitFor, expectOrSkip);
-  clipM  = require("./clipboard")(mechatron, log, assert, waitFor, expectOrSkip);
-  procM  = require("./process")(mechatron, log, assert, waitFor, expectOrSkip);
-  winM   = require("./window")(mechatron, log, assert, waitFor, expectOrSkip);
-  scrM   = require("./screen")(mechatron, log, assert, waitFor, expectOrSkip);
-  memM   = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
-  uinputM = require("./uinput")(mechatron, log, assert, waitFor, expectOrSkip);
-  xprotoM = require("./xproto")(mechatron, log, assert, waitFor, expectOrSkip);
-  compatM = require("./compatibility")(mechatron, log, assert);
+  }
+  return false;
+};
 
-  log(`\nMECHATRON [${backend.toUpperCase()} backend] ${gPlatformKey}\n`);
-  const expected = Object.keys(gExpect).filter((k) => gExpect[k]).join(", ");
-  if (expected) log(`Expected: ${expected}\n`);
+const compatMatrix = require("./matrix").create(mechatron);
+
+type TestEntry = { name: string; functions: string[]; test: () => any };
+
+const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
+  { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor) },
+  { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor) },
+  { prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor) },
+  { prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor) },
+  { prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor) },
+  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor) },
+  { prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor) },
+  { prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor) },
+  { prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor) },
+  { prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor) },
+];
+
+log(`\nMECHATRON [${backend.toUpperCase()} backend] ${process.platform}-${process.arch}\n`);
+if (compatMatrix.available) {
+  log(`Matrix columns: ${compatMatrix.columns.join(", ")}\n`);
 }
 
 // ── Suite ────────────────────────────────────────────────────────────────────
 
-describeMaybe(`mechatron [${backend}]`, () => {
+describe(`mechatron [${backend}]`, () => {
   test("availability", () => {
-    const mechatron: any = require("../lib");
     for (const sub of ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"]) {
       assert(typeof mechatron.isAvailable(sub) === "boolean", `isAvailable(${sub})`);
     }
-    if (!mechatron.isAvailable("keyboard")) {
-      expectOrSkip("keyboardSim", "keyboard backend available");
-    }
   });
-  test("types",     () => typesM.testTypes());
-  test("timer",     () => typesM.testTimer());
-  test("keyboard",  () => kbM.testKeyboard());
-  test("mouse",     () => mouseM.testMouse());
-  test("clipboard", () => clipM.testClipboard());
-  test("process",   () => procM.testProcess());
-  // Per-test timeout bumped above bun's 5s default: the Linux FFI
-  // stale-handle probe spawns xmessage, waits for the window to be
-  // mapped (≤1.5s), destroys it, then waits for the X server to
-  // drop the handle (≤1.5s).  Combined with the normal window-
-  // enumeration work this can exceed 5s on slow CI runners.
-  test("window",    () => winM.testWindow(), 15000);
-  test("screen",    () => scrM.testScreen());
-  test("memory",    () => memM.testMemory());
-  test("uinput",    () => uinputM.testUinput());
-  test("xproto",    () => xprotoM.testXproto());
-  test("compatibility", () => compatM.testCompatibility());
+
+  for (const mod of allModules) {
+    for (const entry of mod.entries) {
+      const displayName = `${mod.prefix}: ${entry.name}`;
+      // Window tests need extra timeout for stale-handle probe on slow CI
+      const timeout = mod.prefix === "window" ? 15000 : undefined;
+      test(displayName, () => {
+        if (!compatMatrix.shouldRun(entry.functions)) {
+          const reason = compatMatrix.getDemotionReason(entry.functions) || "matrix skip";
+          log(`  ${displayName} (skipped: ${reason})\n`);
+          return;
+        }
+        return entry.test();
+      }, timeout);
+    }
+  }
 });

@@ -14,7 +14,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
+module.exports = function (mechatron, log, assert, waitFor) {
 
 	function testXproto() {
 		log("  xproto... ");
@@ -915,7 +915,7 @@ module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
 		return true;
 	}
 
-	return {
-		testXproto: testXproto,
-	};
+	return [
+		{ name: "xproto", functions: [], test: testXproto },
+	];
 };
