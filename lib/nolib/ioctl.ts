@@ -38,7 +38,7 @@ export function ioctlBridgeAvailable(): boolean {
 // ─── Interpreter scripts ────────────────────────────────────────────
 
 const PERL_SCRIPT =
-  'open$f,"+<",shift or die$!;while(@ARGV){ioctl$f,shift,$_=pack"H*",shift or die$!;print unpack("H*",$_),"\n"}syswrite$f,$_ or die$! while sysread STDIN,$_,1024';
+  'open$f,"+<",shift or die$!;while(@ARGV){ioctl$f,shift,$_=pack"H*",shift or die$!;syswrite STDOUT,unpack("H*",$_)."\n" or die$!}syswrite$f,$_ or die$! while sysread STDIN,$_,1024';
 
 const PYTHON_SCRIPT = [
   "import sys,os,fcntl",
