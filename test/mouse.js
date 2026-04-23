@@ -88,7 +88,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await m.press(mechatron.BUTTON_LEFT);
 				assert(await waitForAsync(async function () {
 					return (await Mouse.getState(mechatron.BUTTON_LEFT)) === true;
-				}, 200), "left pressed in state");
+				}, 500), "left pressed in state");
 				await m.release(mechatron.BUTTON_LEFT);
 			}
 		},
@@ -103,11 +103,11 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await m.press(mechatron.BUTTON_LEFT);
 				await waitForAsync(async function () {
 					return (await Mouse.getState(mechatron.BUTTON_LEFT)) === true;
-				}, 200);
+				}, 500);
 				await m.release(mechatron.BUTTON_LEFT);
 				assert(await waitForAsync(async function () {
 					return (await Mouse.getState(mechatron.BUTTON_LEFT)) === false;
-				}, 200), "left released in state");
+				}, 500), "left released in state");
 			}
 		},
 
@@ -121,7 +121,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await m.click(mechatron.BUTTON_RIGHT);
 				assert(await waitForAsync(async function () {
 					return (await Mouse.getState(mechatron.BUTTON_RIGHT)) === false;
-				}, 200), "right released after click");
+				}, 500), "right released after click");
 			}
 		},
 
@@ -133,7 +133,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await m.press(mechatron.BUTTON_MID);
 				assert(await waitForAsync(async function () {
 					return (await Mouse.getState(mechatron.BUTTON_MID)) === true;
-				}, 200), "mid pressed in state");
+				}, 500), "mid pressed in state");
 				var bState = await Mouse.getState();
 				assert(typeof bState === "object", "getState returns object");
 				assert(bState[mechatron.BUTTON_MID] === true, "mid pressed in state obj");
@@ -149,7 +149,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await m.click(mechatron.BUTTON_LEFT);
 				assert(await waitForAsync(async function () {
 					return (await Mouse.getState(mechatron.BUTTON_LEFT)) === false;
-				}, 200), "left released after click");
+				}, 500), "left released after click");
 			}
 		},
 

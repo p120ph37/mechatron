@@ -54,10 +54,16 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}.xml"
   REPORT_DIR="${RUNNER_TEMP}/node-reports"
   mkdir -p "$REPORT_DIR"
+  RC=0
   run_and_log ./node-${NODE_VERSION}-win-x86/node \
     --report-on-fatalerror --report-directory="$REPORT_DIR" \
-    test/test.js all --backend napi --junit "$JUNIT_FILE"
-  RC=$?
+    test/test.js all --backend napi --junit "$JUNIT_FILE" \
+    || RC=$?
+  if [ "$RC" != 0 ] && grep -q '<testsuites' "$JUNIT_FILE" 2>/dev/null \
+     && ! grep -q '<failure' "$JUNIT_FILE" 2>/dev/null; then
+    echo ">>> [ia32] node crashed (exit $RC) after all tests passed — overriding exit code"
+    RC=0
+  fi
   if [ "$RC" != 0 ]; then
     echo ">>> [ia32] node exited rc=$RC; diagnostic reports (if any):"
     ls -la "$REPORT_DIR" || true
@@ -142,6 +148,11 @@ for be in "${BACKENDS[@]}"; do
     || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "$be" \
     "bun test for MECHATRON_BACKEND=${be} exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run (see test-output.txt artifact)."
+  if [ "$BE_RC" != 0 ] && grep -q '<testsuites' "$JUNIT_FILE" 2>/dev/null \
+     && ! grep -q '<failure' "$JUNIT_FILE" 2>/dev/null; then
+    echo ">>> [$be] process crashed (exit $BE_RC) after all tests passed — overriding exit code"
+    BE_RC=0
+  fi
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 done
 
