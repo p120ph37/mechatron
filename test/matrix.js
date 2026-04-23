@@ -93,8 +93,10 @@ module.exports = {
 		var mdPath = path.resolve(__dirname, "..", "COMPATIBILITY.md");
 		var matrix = null;
 
-		if (fs.existsSync(mdPath)) {
+		try {
 			matrix = parseMatrix(mdPath);
+		} catch (e) {
+			if (e.code !== "ENOENT") throw e;
 		}
 
 		return {
@@ -114,16 +116,19 @@ module.exports = {
 			shouldRun: function (functions) {
 				if (!functions || functions.length === 0) return true;
 				if (!matrix) return true;
+				var columnCache = {};
 				for (var i = 0; i < functions.length; i++) {
 					var fn = functions[i];
 					var subsystem = subsystemFromFn(fn);
 					if (!subsystem) return false;
-					var column = columnForSubsystem(mechatron, subsystem);
+					if (!(subsystem in columnCache)) {
+						columnCache[subsystem] = columnForSubsystem(mechatron, subsystem);
+					}
+					var column = columnCache[subsystem];
 					if (!column) return false;
 					var fns = matrix[subsystem];
 					if (!fns || !fns[fn]) return false;
-					var status = fns[fn][column];
-					if (status !== "ok") return false;
+					if (fns[fn][column] !== "ok") return false;
 				}
 				return true;
 			},
