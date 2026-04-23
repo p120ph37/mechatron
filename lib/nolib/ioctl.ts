@@ -37,6 +37,10 @@ export function ioctlBridgeAvailable(): boolean {
 
 // ─── Interpreter scripts ────────────────────────────────────────────
 
+// Run setup ioctls, emit post-ioctl buffer as a hex line per call
+// (`syswrite` bypasses PerlIO so data hits the pipe immediately), then
+// tail stdin to the device fd.  `ioctlSync` closes stdin so the tail
+// loop exits; `ioctlStream` keeps it open and discards stdout.
 const PERL_SCRIPT =
   'open$f,"+<",shift or die$!;while(@ARGV){ioctl$f,shift,$_=pack"H*",shift or die$!;syswrite STDOUT,unpack("H*",$_)."\n" or die$!}syswrite$f,$_ or die$! while sysread STDIN,$_,1024';
 
@@ -97,17 +101,14 @@ export function ioctlSync(device: string, ioctls: IoctlCall[]): IoctlResult | nu
 }
 
 /**
- * Open an ioctl-enabled writable stream.  Runs the setup ioctls, then
- * returns a handle that pipes writes to the device fd.
- *
- * The returned object exposes:
- *   - `outputs`: the post-ioctl buffer contents from setup
- *   - `write(data)`: send raw bytes to the device fd (via child stdin)
- *   - `close()`: tear down the child process (closes the device fd)
- *   - `alive`: whether the child is still running
+ * Open an ioctl-enabled writable stream.  The child process runs setup
+ * ioctls asynchronously, then enters a stdin read loop.  Any bytes
+ * written to the returned stream before setup completes are held in the
+ * kernel pipe buffer and processed in order once the child reaches its
+ * read loop.  If setup fails, the child exits, `alive` flips to false,
+ * and subsequent writes become no-ops.
  */
 export interface IoctlStream {
-  outputs: Buffer[];
   write(data: Buffer | Uint8Array): boolean;
   close(): void;
   alive: boolean;
@@ -119,51 +120,25 @@ export function ioctlStream(device: string, ioctls: IoctlCall[]): IoctlStream | 
   const args = buildArgs(interp, device, ioctls);
   let child: ChildProcess;
   try {
-    child = spawn(interp, args, { stdio: ["pipe", "pipe", "ignore"] });
+    child = spawn(interp, args, { stdio: ["pipe", "ignore", "ignore"] });
   } catch {
     return null;
   }
 
   let alive = true;
   child.on("exit", () => { alive = false; });
-
-  // Read setup ioctl results from stdout synchronously.
-  // The child writes one hex line per ioctl, then blocks on stdin.
-  const outputBufs: Buffer[] = [];
-  const expected = ioctls.length;
-  let stdoutBuf = "";
-
-  const stdout = child.stdout!;
-  stdout.setEncoding("utf8");
-
-  // Collect initial ioctl output lines.  Since the child flushes after
-  // each line and then blocks on sysread(STDIN), all lines arrive before
-  // we write anything.  Use a synchronous spin for simplicity (the setup
-  // phase is <1ms on real hardware).
-  const deadline = Date.now() + 5000;
-  while (outputBufs.length < expected && alive && Date.now() < deadline) {
-    const chunk = stdout.read();
-    if (chunk) {
-      stdoutBuf += chunk;
-      let nl: number;
-      while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
-        outputBufs.push(Buffer.from(stdoutBuf.slice(0, nl), "hex"));
-        stdoutBuf = stdoutBuf.slice(nl + 1);
-      }
-    }
-  }
-
-  if (!alive || outputBufs.length < expected) {
-    try { child.kill(); } catch {}
-    return null;
-  }
+  child.stdin!.on("error", () => { alive = false; });
 
   return {
-    outputs: outputBufs,
     get alive() { return alive; },
     write(data: Buffer | Uint8Array): boolean {
       if (!alive) return false;
-      return child.stdin!.write(data);
+      try {
+        return child.stdin!.write(data);
+      } catch {
+        alive = false;
+        return false;
+      }
     },
     close() {
       if (!alive) return;
