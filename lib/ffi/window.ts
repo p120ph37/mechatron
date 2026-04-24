@@ -1267,13 +1267,21 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   return false;
 }
 
-// Eagerly initialise cached CFString keys so the work is done at module-load
-// time rather than being deferred into the first real window-query call.
-// This avoids creating 20 CF objects in the middle of the first
-// CGWindowListCopyWindowInfo call chain, which triggers a Bun/JSC segfault
-// during microtask drain on macOS (arm64 & x64, Bun ≤ 1.3.13).
+// Eagerly initialise cached CFString keys and prime the CoreGraphics
+// window-list query at module-load time (synchronous, outside any async
+// function).  Bun ≤ 1.3.13 segfaults in JSC's MicrotaskQueue::drain /
+// jsc_llint_commonCallOp when CGWindowListCopyWindowInfo is first called
+// from within an async function's continuation on macOS.  Running the
+// first CG query here — outside the async call chain — avoids the crash.
 if (IS_MAC) {
   mac_initKeys();
+  const _warmCG = cg();
+  const _warmCF = cf();
+  if (_warmCG && _warmCF) {
+    const _info = _warmCG.CGWindowListCopyWindowInfo(
+      kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
+    if (_info) _warmCF.CFRelease(_info);
+  }
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {
