@@ -328,7 +328,7 @@ function mac_mouse_getButtonState(button: number): boolean {
   const C = cg();
   const spec = mac_cgButton(button);
   if (!C || !spec) return false;
-  return C.CGEventSourceButtonState(kCGEventSourceStateHIDSystemState, spec.cg_btn);
+  return C.CGEventSourceButtonState(kCGEventSourceStateHIDSystemState, spec.cg_btn) !== 0;
 }
 
 // ==================== Dispatch ====================

@@ -360,7 +360,7 @@ function mac_cfDictGetInt32(dict: Pointer, key: Pointer): number {
   const val = CF.CFDictionaryGetValue(dict, key);
   if (!val) return 0;
   _scratchI32[0] = 0;
-  if (!CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32))) return 0;
+  if (CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32)) === 0) return 0;
   return _scratchI32[0];
 }
 
@@ -441,7 +441,7 @@ function mac_getAXBool(element: Pointer, attr: Pointer): boolean {
   const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return false;
   const val = readPtr();
-  const result = CF.CFBooleanGetValue(val);
+  const result = CF.CFBooleanGetValue(val) !== 0;
   CF.CFRelease(val);
   return result;
 }
@@ -457,7 +457,7 @@ function mac_getAXPosition(element: Pointer): { x: number; y: number } | null {
   const val = readPtr();
   const ok = AX.AXValueGetValue(val, kAXValueCGPointType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
-  if (!ok) return null;
+  if (ok === 0) return null;
   return { x: _scratchF64x2[0], y: _scratchF64x2[1] };
 }
 
@@ -472,7 +472,7 @@ function mac_getAXSize(element: Pointer): { w: number; h: number } | null {
   const val = readPtr();
   const ok = AX.AXValueGetValue(val, kAXValueCGSizeType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
-  if (!ok) return null;
+  if (ok === 0) return null;
   return { w: _scratchF64x2[0], h: _scratchF64x2[1] };
 }
 
@@ -723,12 +723,9 @@ function mac_isAxEnabled(prompt?: boolean): boolean {
   const AX = ax();
   if (!AX) return false;
   if (prompt) {
-    // Build options dict with kAXTrustedCheckOptionPrompt = true
-    // For simplicity, just check without prompting — the prompt variant
-    // requires building a CFDictionary which is complex with current bindings.
-    return AX.AXIsProcessTrusted();
+    return AX.AXIsProcessTrusted() !== 0;
   }
-  return AX.AXIsProcessTrusted();
+  return AX.AXIsProcessTrusted() !== 0;
 }
 
 // ── Win32 constants ─────────────────────────────────────────────────

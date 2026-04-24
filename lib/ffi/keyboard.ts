@@ -81,7 +81,7 @@ function mac_keyboard_press(keycode: number): void {
   const F = cf();
   if (!C || !F) return;
   const src = macSource();
-  const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, true);
+  const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, 1);
   if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
@@ -92,7 +92,7 @@ function mac_keyboard_release(keycode: number): void {
   const F = cf();
   if (!C || !F) return;
   const src = macSource();
-  const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, false);
+  const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, 0);
   if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
@@ -101,7 +101,7 @@ function mac_keyboard_release(keycode: number): void {
 function mac_keyboard_getKeyState(keycode: number): boolean {
   const C = cg();
   if (!C) return false;
-  return C.CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, keycode & 0xFFFF);
+  return C.CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, keycode & 0xFFFF) !== 0;
 }
 
 // ==================== Dispatch ====================
