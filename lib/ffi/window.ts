@@ -360,7 +360,7 @@ function mac_cfDictGetInt32(dict: Pointer, key: Pointer): number {
   const val = CF.CFDictionaryGetValue(dict, key);
   if (!val) return 0;
   _scratchI32[0] = 0;
-  if (CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32)) === 0) return 0;
+  if (!CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32))) return 0;
   return _scratchI32[0];
 }
 
@@ -441,7 +441,7 @@ function mac_getAXBool(element: Pointer, attr: Pointer): boolean {
   const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return false;
   const val = readPtr();
-  const result = CF.CFBooleanGetValue(val) !== 0;
+  const result = CF.CFBooleanGetValue(val);
   CF.CFRelease(val);
   return result;
 }
@@ -457,7 +457,7 @@ function mac_getAXPosition(element: Pointer): { x: number; y: number } | null {
   const val = readPtr();
   const ok = AX.AXValueGetValue(val, kAXValueCGPointType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
-  if (ok === 0) return null;
+  if (!ok) return null;
   return { x: _scratchF64x2[0], y: _scratchF64x2[1] };
 }
 
@@ -472,7 +472,7 @@ function mac_getAXSize(element: Pointer): { w: number; h: number } | null {
   const val = readPtr();
   const ok = AX.AXValueGetValue(val, kAXValueCGSizeType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
-  if (ok === 0) return null;
+  if (!ok) return null;
   return { w: _scratchF64x2[0], h: _scratchF64x2[1] };
 }
 
@@ -726,9 +726,9 @@ function mac_isAxEnabled(prompt?: boolean): boolean {
     // Build options dict with kAXTrustedCheckOptionPrompt = true
     // For simplicity, just check without prompting — the prompt variant
     // requires building a CFDictionary which is complex with current bindings.
-    return AX.AXIsProcessTrusted() !== 0;
+    return AX.AXIsProcessTrusted();
   }
-  return AX.AXIsProcessTrusted() !== 0;
+  return AX.AXIsProcessTrusted();
 }
 
 // ── Win32 constants ─────────────────────────────────────────────────
@@ -1273,15 +1273,6 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   if (IS_LINUX || IS_WIN) return true;
   if (IS_MAC) return mac_isAxEnabled(prompt);
   return false;
-}
-
-// Bun ≤ 1.3.13 segfaults when macOS FFI calls first happen inside an
-// async function's continuation.  Callers must prime the path by calling
-// window_warmup() synchronously before any async Window usage.
-export function window_warmup(): void {
-  if (!IS_MAC) return;
-  mac_initKeys();
-  mac_withWindowDict(0xFFFFFFFF, false, () => true);
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {

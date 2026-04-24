@@ -41,12 +41,12 @@ interface CoreGraphics {
   // Event sources + keyboard/mouse events
   CGEventSourceCreate: (stateID: number) => Pointer;
   CGEventCreate: (source: Pointer) => Pointer;
-  CGEventCreateKeyboardEvent: (source: Pointer, vk: number, keyDown: number) => Pointer;
+  CGEventCreateKeyboardEvent: (source: Pointer, vk: number, keyDown: boolean) => Pointer;
   CGEventCreateMouseEvent: (source: Pointer, type: number, x: number, y: number, button: number) => Pointer;
   CGEventCreateScrollWheelEvent2: (source: Pointer, units: number, wheelCount: number, w1: number, w2: number, w3: number) => Pointer;
   CGEventPost: (tap: number, event: Pointer) => void;
-  CGEventSourceKeyState: (stateID: number, key: number) => number;
-  CGEventSourceButtonState: (stateID: number, button: number) => number;
+  CGEventSourceKeyState: (stateID: number, key: number) => boolean;
+  CGEventSourceButtonState: (stateID: number, button: number) => boolean;
   CGEventSetType: (event: Pointer, type: number) => void;
   CGEventSetIntegerValueField: (event: Pointer, field: number, value: bigint) => void;
   // Cursor
@@ -83,7 +83,7 @@ interface CoreFoundation {
   CFRelease: (cf: Pointer) => void;
   CFStringCreateMutable: (alloc: Pointer, maxLength: bigint) => Pointer;
   CFStringAppendCString: (s: Pointer, cstr: Pointer, encoding: number) => void;
-  CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => number;
+  CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => boolean;
   CFStringGetLength: (s: Pointer) => bigint;
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
   // CFArray
@@ -92,9 +92,9 @@ interface CoreFoundation {
   // CFDictionary
   CFDictionaryGetValue: (dict: Pointer, key: Pointer) => Pointer;
   // CFNumber
-  CFNumberGetValue: (number: Pointer, theType: number, valuePtr: Pointer) => number;
+  CFNumberGetValue: (number: Pointer, theType: number, valuePtr: Pointer) => boolean;
   // CFBoolean
-  CFBooleanGetValue: (boolean: Pointer) => number;
+  CFBooleanGetValue: (boolean: Pointer) => boolean;
   // CF type identification
   CFGetTypeID: (cf: Pointer) => bigint;
   CFStringGetTypeID: () => bigint;
@@ -112,15 +112,15 @@ interface Objc {
 }
 
 interface Accessibility {
-  AXIsProcessTrusted: () => number;
-  AXIsProcessTrustedWithOptions: (options: Pointer) => number;
+  AXIsProcessTrusted: () => boolean;
+  AXIsProcessTrustedWithOptions: (options: Pointer) => boolean;
   AXUIElementCreateApplication: (pid: number) => Pointer;
   AXUIElementCreateSystemWide: () => Pointer;
   AXUIElementCopyAttributeValue: (element: Pointer, attribute: Pointer, value: Pointer) => number;
   AXUIElementSetAttributeValue: (element: Pointer, attribute: Pointer, value: Pointer) => number;
   AXUIElementCopyAttributeNames: (element: Pointer, names: Pointer) => number;
   AXUIElementPerformAction: (element: Pointer, action: Pointer) => number;
-  AXValueGetValue: (value: Pointer, type: number, valuePtr: Pointer) => number;
+  AXValueGetValue: (value: Pointer, type: number, valuePtr: Pointer) => boolean;
   AXValueCreate: (type: number, valuePtr: Pointer) => Pointer;
   _AXUIElementGetWindow: (element: Pointer, windowId: Pointer) => number;
 }
@@ -192,14 +192,14 @@ function tryDlopen(): void {
     const lib = _ffi.dlopen<CoreGraphics>(CG_PATH, {
       CGEventSourceCreate:                  { args: [T.u32], returns: T.ptr },
       CGEventCreate:                        { args: [T.ptr], returns: T.ptr },
-      CGEventCreateKeyboardEvent:           { args: [T.ptr, T.u16, T.i32], returns: T.ptr },
+      CGEventCreateKeyboardEvent:           { args: [T.ptr, T.u16, T.bool], returns: T.ptr },
       // CGPoint passed as two f64s (SysV/AAPCS HFA or separate args — same ABI).
       CGEventCreateMouseEvent:              { args: [T.ptr, T.u32, T.f64, T.f64, T.u32], returns: T.ptr },
       // Non-variadic scroll helper — bun:ffi can't dispatch to variadics.
       CGEventCreateScrollWheelEvent2:       { args: [T.ptr, T.u32, T.u32, T.i32, T.i32, T.i32], returns: T.ptr },
       CGEventPost:                          { args: [T.u32, T.ptr], returns: T.void },
-      CGEventSourceKeyState:                { args: [T.u32, T.u16], returns: T.i32 },
-      CGEventSourceButtonState:             { args: [T.u32, T.u32], returns: T.i32 },
+      CGEventSourceKeyState:                { args: [T.u32, T.u16], returns: T.bool },
+      CGEventSourceButtonState:             { args: [T.u32, T.u32], returns: T.bool },
       CGEventSetType:                       { args: [T.ptr, T.u32], returns: T.void },
       CGEventSetIntegerValueField:          { args: [T.ptr, T.u32, T.i64], returns: T.void },
       CGWarpMouseCursorPosition:            { args: [T.f64, T.f64], returns: T.i32 },
@@ -232,14 +232,14 @@ function tryDlopen(): void {
       CFRelease:                          { args: [T.ptr], returns: T.void },
       CFStringCreateMutable:              { args: [T.ptr, T.i64], returns: T.ptr },
       CFStringAppendCString:              { args: [T.ptr, T.ptr, T.u32], returns: T.void },
-      CFStringGetCString:                 { args: [T.ptr, T.ptr, T.u64, T.u32], returns: T.i32 },
+      CFStringGetCString:                 { args: [T.ptr, T.ptr, T.i64, T.u32], returns: T.bool },
       CFStringGetLength:                  { args: [T.ptr], returns: T.i64 },
       CFStringGetMaximumSizeForEncoding:  { args: [T.i64, T.u32], returns: T.i64 },
       CFArrayGetCount:                    { args: [T.ptr], returns: T.i64 },
       CFArrayGetValueAtIndex:             { args: [T.ptr, T.i64], returns: T.ptr },
       CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.ptr },
-      CFNumberGetValue:                   { args: [T.ptr, T.i32, T.ptr], returns: T.i32 },
-      CFBooleanGetValue:                  { args: [T.ptr], returns: T.i32 },
+      CFNumberGetValue:                   { args: [T.ptr, T.i32, T.ptr], returns: T.bool },
+      CFBooleanGetValue:                  { args: [T.ptr], returns: T.bool },
       CFGetTypeID:                        { args: [T.ptr], returns: T.u64 },
       CFStringGetTypeID:                  { args: [], returns: T.u64 },
       CFNumberGetTypeID:                  { args: [], returns: T.u64 },
@@ -276,15 +276,15 @@ function tryDlopen(): void {
   const AX_PATH = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
   try {
     const lib = _ffi.dlopen<Accessibility>(AX_PATH, {
-      AXIsProcessTrusted:                 { args: [], returns: T.i32 },
-      AXIsProcessTrustedWithOptions:      { args: [T.ptr], returns: T.i32 },
+      AXIsProcessTrusted:                 { args: [], returns: T.bool },
+      AXIsProcessTrustedWithOptions:      { args: [T.ptr], returns: T.bool },
       AXUIElementCreateApplication:       { args: [T.i32], returns: T.ptr },
       AXUIElementCreateSystemWide:        { args: [], returns: T.ptr },
       AXUIElementCopyAttributeValue:      { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
       AXUIElementSetAttributeValue:       { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
       AXUIElementCopyAttributeNames:      { args: [T.ptr, T.ptr], returns: T.i32 },
       AXUIElementPerformAction:           { args: [T.ptr, T.ptr], returns: T.i32 },
-      AXValueGetValue:                    { args: [T.ptr, T.i32, T.ptr], returns: T.i32 },
+      AXValueGetValue:                    { args: [T.ptr, T.i32, T.ptr], returns: T.bool },
       AXValueCreate:                      { args: [T.i32, T.ptr], returns: T.ptr },
       _AXUIElementGetWindow:              { args: [T.ptr, T.ptr], returns: T.i32 },
     });
@@ -513,7 +513,7 @@ export function cfStringToJS(cfstr: Pointer): string {
   const len = C.CFStringGetLength(cfstr);
   const need = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8)) + 1;
   if (need > _cfStrBuf.length) _cfStrBuf = new Uint8Array(need);
-  if (C.CFStringGetCString(cfstr, F.ptr(_cfStrBuf), BigInt(_cfStrBuf.byteLength), kCFStringEncodingUTF8) === 0) return "";
+  if (!C.CFStringGetCString(cfstr, F.ptr(_cfStrBuf), BigInt(_cfStrBuf.byteLength), kCFStringEncodingUTF8)) return "";
   let end = 0;
   while (end < _cfStrBuf.length && _cfStrBuf[end] !== 0) end++;
   return _utf8Dec.decode(_cfStrBuf.subarray(0, end));

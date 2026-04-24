@@ -18,7 +18,7 @@
  * (Bun has no 32-bit Windows build) and for any direct `node` invocations.
  */
 
-import { describe, test, beforeAll, afterAll } from "bun:test";
+import { describe, test, afterAll } from "bun:test";
 
 // Default backend when none specified: ffi on every supported platform.
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
@@ -85,15 +85,6 @@ if (compatMatrix.available) {
 // ── Suite ────────────────────────────────────────────────────────────────────
 
 describe(`mechatron [${backend}]`, () => {
-  // Bun ≤ 1.3.13 segfaults when macOS FFI calls first happen inside an
-  // async continuation.  Prime the path synchronously in beforeAll (which
-  // runs after bun:test has finished its own initialisation).
-  if (process.platform === "darwin" && _baseBackend === "ffi") {
-    beforeAll(() => {
-      try { require("../lib/ffi/window").window_warmup(); } catch {}
-    });
-  }
-
   test("availability", () => {
     for (const sub of ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"]) {
       assert(typeof mechatron.isAvailable(sub) === "boolean", `isAvailable(${sub})`);
