@@ -316,6 +316,14 @@ const _scratchU32   = new Uint32Array(1);
 const _scratchU64   = new BigUint64Array(1);
 const _scratchF64x2 = new Float64Array(2);
 
+// bun:ffi ≤ 1.3.13 rejects bigint values from BigUint64Array for T.ptr args
+// ("Unable to convert <n> to a pointer").  Convert to Number — safe on macOS
+// where virtual addresses use ≤ 48 bits (well within Number.MAX_SAFE_INTEGER).
+function readPtr(): Pointer {
+  const v = _scratchU64[0];
+  return v === 0n ? null : Number(v);
+}
+
 // ── macOS helpers ──────────────────────────────────────────────────
 
 /**
@@ -394,7 +402,7 @@ function mac_getAXElement(windowId: number): Pointer {
     CF.CFRelease(app);
     return null;
   }
-  const winArray = _scratchU64[0] as unknown as Pointer;
+  const winArray = readPtr();
   const count = Number(CF.CFArrayGetCount(winArray));
   let found: Pointer = null;
   for (let i = 0; i < count; i++) {
@@ -419,7 +427,7 @@ function mac_getAXString(element: Pointer, attr: Pointer): string {
   _scratchU64[0] = 0n;
   const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return "";
-  const val = _scratchU64[0] as unknown as Pointer;
+  const val = readPtr();
   const s = cfStringToJS(val);
   CF.CFRelease(val);
   return s;
@@ -432,7 +440,7 @@ function mac_getAXBool(element: Pointer, attr: Pointer): boolean {
   _scratchU64[0] = 0n;
   const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return false;
-  const val = _scratchU64[0] as unknown as Pointer;
+  const val = readPtr();
   const result = CF.CFBooleanGetValue(val) !== 0;
   CF.CFRelease(val);
   return result;
@@ -446,7 +454,7 @@ function mac_getAXPosition(element: Pointer): { x: number; y: number } | null {
   _scratchU64[0] = 0n;
   const err = AX.AXUIElementCopyAttributeValue(element, _axPosition, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return null;
-  const val = _scratchU64[0] as unknown as Pointer;
+  const val = readPtr();
   const ok = AX.AXValueGetValue(val, kAXValueCGPointType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
   if (ok === 0) return null;
@@ -461,7 +469,7 @@ function mac_getAXSize(element: Pointer): { w: number; h: number } | null {
   _scratchU64[0] = 0n;
   const err = AX.AXUIElementCopyAttributeValue(element, _axSize, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return null;
-  const val = _scratchU64[0] as unknown as Pointer;
+  const val = readPtr();
   const ok = AX.AXValueGetValue(val, kAXValueCGSizeType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
   if (ok === 0) return null;
@@ -508,7 +516,7 @@ function mac_close(handle: number): void {
   _scratchU64[0] = 0n;
   const err = AX.AXUIElementCopyAttributeValue(elem, _axCloseButton, F.ptr(_scratchU64));
   if (err === 0 && _scratchU64[0] !== 0n) {
-    const closeBtn = _scratchU64[0] as unknown as Pointer;
+    const closeBtn = readPtr();
     AX.AXUIElementPerformAction(closeBtn, _axPress!);
     CF.CFRelease(closeBtn);
   }
@@ -686,13 +694,13 @@ function mac_getActive(): number {
   let err = AX.AXUIElementCopyAttributeValue(systemWide, _axFocusedApplication, F.ptr(_scratchU64));
   CF.CFRelease(systemWide);
   if (err !== 0 || _scratchU64[0] === 0n) return 0;
-  const app = _scratchU64[0] as unknown as Pointer;
+  const app = readPtr();
 
   _scratchU64[0] = 0n;
   err = AX.AXUIElementCopyAttributeValue(app, _axFocusedWindow, F.ptr(_scratchU64));
   CF.CFRelease(app);
   if (err !== 0 || _scratchU64[0] === 0n) return 0;
-  const win = _scratchU64[0] as unknown as Pointer;
+  const win = readPtr();
 
   _scratchU32[0] = 0;
   err = AX._AXUIElementGetWindow(win, F.ptr(_scratchU32));
