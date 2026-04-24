@@ -320,7 +320,7 @@ function mac_mouse_setPos(x: number, y: number): void {
   const C = cg();
   if (!C) return;
   C.CGWarpMouseCursorPosition(x, y);
-  C.CGAssociateMouseAndMouseCursorPosition(1);
+  C.CGAssociateMouseAndMouseCursorPosition(true);
   _macLastPos = { x, y };
 }
 
@@ -328,7 +328,7 @@ function mac_mouse_getButtonState(button: number): boolean {
   const C = cg();
   const spec = mac_cgButton(button);
   if (!C || !spec) return false;
-  return C.CGEventSourceButtonState(kCGEventSourceStateHIDSystemState, spec.cg_btn) !== 0;
+  return C.CGEventSourceButtonState(kCGEventSourceStateHIDSystemState, spec.cg_btn);
 }
 
 // ==================== Dispatch ====================

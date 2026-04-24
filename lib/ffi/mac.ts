@@ -41,23 +41,23 @@ interface CoreGraphics {
   // Event sources + keyboard/mouse events
   CGEventSourceCreate: (stateID: number) => Pointer;
   CGEventCreate: (source: Pointer) => Pointer;
-  CGEventCreateKeyboardEvent: (source: Pointer, vk: number, keyDown: number) => Pointer;
+  CGEventCreateKeyboardEvent: (source: Pointer, vk: number, keyDown: boolean) => Pointer;
   CGEventCreateMouseEvent: (source: Pointer, type: number, x: number, y: number, button: number) => Pointer;
   CGEventCreateScrollWheelEvent2: (source: Pointer, units: number, wheelCount: number, w1: number, w2: number, w3: number) => Pointer;
   CGEventPost: (tap: number, event: Pointer) => void;
-  CGEventSourceKeyState: (stateID: number, key: number) => number;
-  CGEventSourceButtonState: (stateID: number, button: number) => number;
+  CGEventSourceKeyState: (stateID: number, key: number) => boolean;
+  CGEventSourceButtonState: (stateID: number, button: number) => boolean;
   CGEventSetType: (event: Pointer, type: number) => void;
   CGEventSetIntegerValueField: (event: Pointer, field: number, value: bigint) => void;
   // Cursor
   CGWarpMouseCursorPosition: (x: number, y: number) => number;
-  CGAssociateMouseAndMouseCursorPosition: (connected: number) => number;
+  CGAssociateMouseAndMouseCursorPosition: (connected: boolean) => number;
   // Displays
   CGMainDisplayID: () => number;
   CGGetActiveDisplayList: (max: number, displays: Pointer, count: Pointer) => number;
   CGDisplayPixelsWide: (id: number) => bigint;
   CGDisplayPixelsHigh: (id: number) => bigint;
-  CGDisplayIsActive: (id: number) => number;
+  CGDisplayIsActive: (id: number) => boolean;
   CGDisplayCreateImage: (id: number) => Pointer;
   // Bitmap / image
   CGBitmapContextCreate: (
