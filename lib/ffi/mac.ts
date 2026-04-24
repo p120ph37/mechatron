@@ -88,8 +88,9 @@ interface CoreFoundation {
   // Array / dictionary access (window list parsing)
   CFArrayGetCount: (theArray: Pointer) => bigint;
   CFArrayGetValueAtIndex: (theArray: Pointer, idx: bigint) => Pointer;
-  CFDictionaryGetValue: (theDict: Pointer, key: Pointer) => Pointer;
-  CFNumberGetValue: (cfNum: Pointer, theType: bigint, valuePtr: Pointer) => number;
+  // Returns u64 (bigint) — CF values can be tagged pointers above 2^53.
+  CFDictionaryGetValue: (theDict: Pointer, key: Pointer) => bigint;
+  CFNumberGetValue: (cfNum: bigint, theType: bigint, valuePtr: Pointer) => number;
 }
 
 interface Objc {
@@ -220,7 +221,8 @@ function tryDlopen(): void {
       // const void * CFArrayGetValueAtIndex(CFArrayRef, CFIndex)
       CFArrayGetValueAtIndex:             { args: [T.ptr, T.i64], returns: T.ptr },
       // const void * CFDictionaryGetValue(CFDictionaryRef, const void *key)
-      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.ptr },
+      // Returns T.u64 (bigint) — CF values can be tagged pointers above 2^53.
+      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.u64 },
       // Boolean CFNumberGetValue(CFNumberRef, CFNumberType, void *) — Boolean is unsigned char (u8)
       CFNumberGetValue:                   { args: [T.ptr, T.i64, T.ptr], returns: T.u8 },
     });
