@@ -341,7 +341,7 @@ function macGetText(): string {
     const lenRaw = getLen(nsData, sel("length"));
     const len = typeof lenRaw === "bigint" ? Number(lenRaw) : (lenRaw as number);
     if (!bytesPtr || len <= 0) return "";
-    const ab = F.toArrayBuffer(bytesPtr as Pointer, 0, len);
+    const ab = F.toArrayBuffer(Number(bytesPtr), 0, len);
     return new TextDecoder("utf-8").decode(new Uint8Array(ab));
   } finally {
     O.objc_autoreleasePoolPop(pool);
