@@ -95,12 +95,19 @@ describe(`mechatron [${backend}]`, () => {
     for (const entry of mod.entries) {
       const displayName = `${mod.prefix}: ${entry.name}`;
       const timeout = mod.prefix === "window" ? 15000 : undefined;
-      test(displayName, () => {
+      test(displayName, async () => {
         if (!compatMatrix.shouldRun(entry.functions)) {
           log(`  ${displayName} (skipped: matrix)\n`);
           return;
         }
-        return entry.test();
+        process.stderr.write(`>>> start: ${displayName}\n`);
+        try {
+          await entry.test();
+          process.stderr.write(`>>> end:   ${displayName}\n`);
+        } catch (e) {
+          process.stderr.write(`>>> error: ${displayName}: ${(e as Error).message}\n`);
+          throw e;
+        }
       }, timeout);
     }
   }
