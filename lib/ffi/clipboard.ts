@@ -21,7 +21,7 @@ import {
   cls, sel, msgSendTyped, cfStringFromJS,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
-import { bp, type Pointer } from "./bun";
+import { bp } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -334,15 +334,16 @@ function macGetText(): string {
     if (!send) return "";
     const nsData = send(board, sel("dataForType:"), typeStr);
     if (!nsData) return "";
-    const getBytes = msgSendTyped([T.i64, T.i64], T.i64);
     const getLen = msgSendTyped([T.i64, T.i64], T.u64);
-    if (!getBytes || !getLen) return "";
-    const bytesPtr = getBytes(nsData, sel("bytes"));
+    if (!getLen) return "";
     const lenRaw = getLen(nsData, sel("length"));
     const len = typeof lenRaw === "bigint" ? Number(lenRaw) : (lenRaw as number);
-    if (!bytesPtr || len <= 0) return "";
-    const ab = F.toArrayBuffer(Number(bytesPtr), 0, len);
-    return new TextDecoder("utf-8").decode(new Uint8Array(ab));
+    if (len <= 0) return "";
+    const buf = new Uint8Array(len);
+    const copyBytes = msgSendTyped([T.i64, T.i64, T.i64, T.u64], T.void);
+    if (!copyBytes) return "";
+    copyBytes(nsData, sel("getBytes:length:"), bp(buf), BigInt(len));
+    return new TextDecoder("utf-8").decode(buf);
   } finally {
     O.objc_autoreleasePoolPop(pool);
   }
