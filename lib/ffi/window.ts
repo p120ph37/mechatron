@@ -5,8 +5,6 @@
  * extents, title, enumeration, activation).
  * Windows: Win32 window management via user32.dll (state, bounds, title,
  * enumeration, activation).
- * macOS: CoreGraphics window enumeration + Accessibility framework for
- * window manipulation (title, bounds, minimize, etc.).
  */
 
 import {
@@ -16,11 +14,9 @@ import {
 } from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
 import { getBunFFI, cstr, type Pointer } from "./bun";
-import { cg, cf, wcf, wcg, ax, macFFI, cfStringFromJS, cfStringToJS, kCFNumberSInt32Type } from "./mac";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
-const IS_MAC = process.platform === "darwin";
 
 // ── Atom helpers (lazy/cached) ───────────────────────────────────────
 
@@ -248,483 +244,6 @@ function enumWindows(win: bigint, re: RegExp | null, pidFilter: number, out: num
       X.XFree(ptr);
     }
   }
-}
-
-// ── macOS constants ─────────────────────────────────────────────────
-
-const kCGWindowListOptionOnScreenOnly = 0x1;
-const kCGWindowListExcludeDesktopElements = 0x10;
-const kAXValueCGPointType = 1;
-const kAXValueCGSizeType = 2;
-
-// ── macOS cached CFString keys ─────────────────────────────────────
-
-let _macKeysInited = false;
-let _kCGWindowNumber: Pointer = null;
-let _kCGWindowOwnerPID: Pointer = null;
-let _kCGWindowName: Pointer = null;
-let _kCGWindowBounds: Pointer = null;
-let _kCGWindowLayer: Pointer = null;
-let _axWindows: Pointer = null;
-let _axFocusedWindow: Pointer = null;
-let _axFocusedApplication: Pointer = null;
-let _axPosition: Pointer = null;
-let _axSize: Pointer = null;
-let _axTitle: Pointer = null;
-let _axMinimized: Pointer = null;
-let _axFullScreen: Pointer = null;
-let _axRaise: Pointer = null;
-let _axSubrole: Pointer = null;
-let _axStandardWindow: Pointer = null;
-let _axCloseButton: Pointer = null;
-let _axPress: Pointer = null;
-let _axMinimize: Pointer = null;
-let _axZoomAction: Pointer = null;
-
-function mac_initKeys(): void {
-  if (_macKeysInited) return;
-  _macKeysInited = true;
-  _kCGWindowNumber = cfStringFromJS("kCGWindowNumber");
-  _kCGWindowOwnerPID = cfStringFromJS("kCGWindowOwnerPID");
-  _kCGWindowName = cfStringFromJS("kCGWindowName");
-  _kCGWindowBounds = cfStringFromJS("kCGWindowBounds");
-  _kCGWindowLayer = cfStringFromJS("kCGWindowLayer");
-  _axWindows = cfStringFromJS("AXWindows");
-  _axFocusedWindow = cfStringFromJS("AXFocusedWindow");
-  _axFocusedApplication = cfStringFromJS("AXFocusedApplication");
-  _axPosition = cfStringFromJS("AXPosition");
-  _axSize = cfStringFromJS("AXSize");
-  _axTitle = cfStringFromJS("AXTitle");
-  _axMinimized = cfStringFromJS("AXMinimized");
-  _axFullScreen = cfStringFromJS("AXFullScreen");
-  _axRaise = cfStringFromJS("AXRaise");
-  _axSubrole = cfStringFromJS("AXSubrole");
-  _axStandardWindow = cfStringFromJS("AXStandardWindow");
-  _axCloseButton = cfStringFromJS("AXCloseButton");
-  _axPress = cfStringFromJS("AXPress");
-  _axMinimize = cfStringFromJS("AXMinimize");
-  _axZoomAction = cfStringFromJS("AXZoomAction");
-}
-
-// ── macOS scratch buffers ─────────────────────────────────────────
-// Pre-allocated typed arrays reused across FFI calls to avoid creating
-// hundreds of short-lived TypedArray objects that pressure JSC's GC.
-// Safe because all JS execution is single-threaded.
-
-const _scratchI32   = new Int32Array(1);
-const _scratchU32   = new Uint32Array(1);
-const _scratchU64   = new BigUint64Array(1);
-const _scratchF64x2 = new Float64Array(2);
-
-// bun:ffi ≤ 1.3.13 rejects bigint values from BigUint64Array for T.ptr args
-// ("Unable to convert <n> to a pointer").  Convert to Number — safe on macOS
-// where virtual addresses use ≤ 48 bits (well within Number.MAX_SAFE_INTEGER).
-function readPtr(): Pointer {
-  const v = _scratchU64[0];
-  return v === 0n ? null : Number(v);
-}
-
-// ── macOS helpers ──────────────────────────────────────────────────
-
-/**
- * Scan CGWindowListCopyWindowInfo for the dict matching windowId,
- * call `visitor` with it, then release the list.  Returns visitor's
- * return value, or `fallback` if not found.
- */
-function mac_withWindowDict<T>(windowId: number, fallback: T, visitor: (dict: Pointer) => T): T {
-  const WCG = wcg(); const WCF = wcf(); const CF = cf();
-  if (!WCG || !WCF || !CF) return fallback;
-  mac_initKeys();
-  const info = WCG.CGWindowListCopyWindowInfo(
-    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-  if (!info) return fallback;
-  const count = Number(WCF.CFArrayGetCount(info));
-  let result = fallback;
-  for (let i = 0; i < count; i++) {
-    const dict = WCF.CFArrayGetValueAtIndex(info, BigInt(i));
-    if (!dict) continue;
-    if (mac_cfDictGetInt32(dict, _kCGWindowNumber) === windowId) {
-      result = visitor(dict);
-      break;
-    }
-  }
-  CF.CFRelease(info);
-  return result;
-}
-
-/** Read a CFNumber (SInt32) from a CFDictionary value. */
-function mac_cfDictGetInt32(dict: Pointer, key: Pointer): number {
-  const WCF = wcf();
-  const F = macFFI();
-  if (!WCF || !F || !dict || !key) return 0;
-  const val = WCF.CFDictionaryGetValue(dict, key);
-  if (!val) return 0;
-  _scratchI32[0] = 0;
-  if (WCF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32)) === 0) return 0;
-  return _scratchI32[0];
-}
-
-/** Read a CFString from a CFDictionary value. */
-function mac_cfDictGetString(dict: Pointer, key: Pointer): string {
-  const WCF = wcf();
-  if (!WCF || !dict || !key) return "";
-  const val = WCF.CFDictionaryGetValue(dict, key);
-  if (!val) return "";
-  return cfStringToJS(val);
-}
-
-/**
- * Get the PID that owns the given CGWindowID by scanning
- * CGWindowListCopyWindowInfo.
- */
-function mac_getPidForWindow(windowId: number): number {
-  return mac_withWindowDict(windowId, 0, (dict) => mac_cfDictGetInt32(dict, _kCGWindowOwnerPID));
-}
-
-/**
- * Find the AXUIElement for a CGWindowID.
- *
- * Strategy: look up the PID, create an AX app element, enumerate
- * AXWindows, and match by _AXUIElementGetWindow.
- * Caller must CFRelease the returned element.
- */
-function mac_getAXElement(windowId: number): Pointer {
-  const AX = ax(); const CF = cf(); const WCF = wcf(); const F = macFFI();
-  if (!AX || !CF || !WCF || !F) return null;
-  mac_initKeys();
-  const pid = mac_getPidForWindow(windowId);
-  if (pid === 0) return null;
-  const app = AX.AXUIElementCreateApplication(pid);
-  if (!app) return null;
-  _scratchU64[0] = 0n;
-  const err = AX.AXUIElementCopyAttributeValue(app, _axWindows, F.ptr(_scratchU64));
-  if (err !== 0 || _scratchU64[0] === 0n) {
-    CF.CFRelease(app);
-    return null;
-  }
-  const winArray = readPtr();
-  const count = Number(WCF.CFArrayGetCount(winArray));
-  let found: Pointer = null;
-  for (let i = 0; i < count; i++) {
-    const elem = WCF.CFArrayGetValueAtIndex(winArray, BigInt(i));
-    if (!elem) continue;
-    _scratchU32[0] = 0;
-    if (AX._AXUIElementGetWindow(elem, F.ptr(_scratchU32)) === 0 && _scratchU32[0] === windowId) {
-      WCF.CFRetain(elem);
-      found = elem;
-      break;
-    }
-  }
-  CF.CFRelease(winArray as any);
-  CF.CFRelease(app);
-  return found;
-}
-
-/** Get an AX attribute as a CFString and return JS string. */
-function mac_getAXString(element: Pointer, attr: Pointer): string {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F || !element || !attr) return "";
-  _scratchU64[0] = 0n;
-  const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
-  if (err !== 0 || _scratchU64[0] === 0n) return "";
-  const val = readPtr();
-  const s = cfStringToJS(val);
-  CF.CFRelease(val);
-  return s;
-}
-
-/** Get an AX attribute as a boolean. */
-function mac_getAXBool(element: Pointer, attr: Pointer): boolean {
-  const AX = ax(); const CF = cf(); const WCF = wcf(); const F = macFFI();
-  if (!AX || !CF || !WCF || !F || !element || !attr) return false;
-  _scratchU64[0] = 0n;
-  const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
-  if (err !== 0 || _scratchU64[0] === 0n) return false;
-  const val = readPtr();
-  const result = WCF.CFBooleanGetValue(val) !== 0;
-  CF.CFRelease(val);
-  return result;
-}
-
-/** Get AXPosition as {x, y}. */
-function mac_getAXPosition(element: Pointer): { x: number; y: number } | null {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F || !element) return null;
-  mac_initKeys();
-  _scratchU64[0] = 0n;
-  const err = AX.AXUIElementCopyAttributeValue(element, _axPosition, F.ptr(_scratchU64));
-  if (err !== 0 || _scratchU64[0] === 0n) return null;
-  const val = readPtr();
-  const ok = AX.AXValueGetValue(val, kAXValueCGPointType, F.ptr(_scratchF64x2));
-  CF.CFRelease(val);
-  if (ok === 0) return null;
-  return { x: _scratchF64x2[0], y: _scratchF64x2[1] };
-}
-
-/** Get AXSize as {w, h}. */
-function mac_getAXSize(element: Pointer): { w: number; h: number } | null {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F || !element) return null;
-  mac_initKeys();
-  _scratchU64[0] = 0n;
-  const err = AX.AXUIElementCopyAttributeValue(element, _axSize, F.ptr(_scratchU64));
-  if (err !== 0 || _scratchU64[0] === 0n) return null;
-  const val = readPtr();
-  const ok = AX.AXValueGetValue(val, kAXValueCGSizeType, F.ptr(_scratchF64x2));
-  CF.CFRelease(val);
-  if (ok === 0) return null;
-  return { w: _scratchF64x2[0], h: _scratchF64x2[1] };
-}
-
-/** Set AXPosition. */
-function mac_setAXPosition(element: Pointer, x: number, y: number): void {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F || !element) return;
-  mac_initKeys();
-  _scratchF64x2[0] = x; _scratchF64x2[1] = y;
-  const val = AX.AXValueCreate(kAXValueCGPointType, F.ptr(_scratchF64x2));
-  if (!val) return;
-  AX.AXUIElementSetAttributeValue(element, _axPosition, val);
-  CF.CFRelease(val);
-}
-
-/** Set AXSize. */
-function mac_setAXSize(element: Pointer, w: number, h: number): void {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F || !element) return;
-  mac_initKeys();
-  _scratchF64x2[0] = Math.max(1, w); _scratchF64x2[1] = Math.max(1, h);
-  const val = AX.AXValueCreate(kAXValueCGSizeType, F.ptr(_scratchF64x2));
-  if (!val) return;
-  AX.AXUIElementSetAttributeValue(element, _axSize, val);
-  CF.CFRelease(val);
-}
-
-// ── macOS exported-function helpers ────────────────────────────────
-
-function mac_isValid(handle: number): boolean {
-  if (handle === 0) return false;
-  return mac_withWindowDict(handle, false, () => true);
-}
-
-function mac_close(handle: number): void {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return;
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F) { CF?.CFRelease(elem); return; }
-  mac_initKeys();
-  _scratchU64[0] = 0n;
-  const err = AX.AXUIElementCopyAttributeValue(elem, _axCloseButton, F.ptr(_scratchU64));
-  if (err === 0 && _scratchU64[0] !== 0n) {
-    const closeBtn = readPtr();
-    AX.AXUIElementPerformAction(closeBtn, _axPress!);
-    CF.CFRelease(closeBtn);
-  }
-  CF.CFRelease(elem);
-}
-
-function mac_isTopMost(handle: number): boolean {
-  return mac_withWindowDict(handle, false, (dict) => mac_cfDictGetInt32(dict, _kCGWindowLayer) > 0);
-}
-
-function mac_isBorderless(handle: number): boolean {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return false;
-  mac_initKeys();
-  const subrole = mac_getAXString(elem, _axSubrole);
-  cf()!.CFRelease(elem);
-  // AXStandardWindow means it has a standard window frame (not borderless).
-  // If the subrole is something else (e.g. AXDialog, AXFloatingWindow),
-  // it may or may not have a border, but for our purposes only
-  // AXStandardWindow has a definite border.
-  return subrole !== "" && subrole !== "AXStandardWindow";
-}
-
-function mac_isMinimized(handle: number): boolean {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return false;
-  mac_initKeys();
-  const result = mac_getAXBool(elem, _axMinimized);
-  cf()!.CFRelease(elem);
-  return result;
-}
-
-function mac_isMaximized(handle: number): boolean {
-  // On macOS, "maximized" is approximated by checking if the window fills
-  // the screen.  There's also AXFullScreen.
-  const elem = mac_getAXElement(handle);
-  if (!elem) return false;
-  mac_initKeys();
-  const isFullScreen = mac_getAXBool(elem, _axFullScreen);
-  const pos = isFullScreen ? null : mac_getAXPosition(elem);
-  const size = isFullScreen ? null : mac_getAXSize(elem);
-  cf()!.CFRelease(elem);
-  if (isFullScreen) return true;
-  // Compare window bounds to main display size
-  const C = cg();
-  if (!C || !pos || !size) return false;
-  const screenW = Number(C.CGDisplayPixelsWide(C.CGMainDisplayID()));
-  const screenH = Number(C.CGDisplayPixelsHigh(C.CGMainDisplayID()));
-  // Consider maximized if window occupies nearly all of the screen
-  return pos.x <= 0 && pos.y <= 25 && size.w >= screenW - 1 && size.h >= screenH - 26;
-}
-
-function mac_setTopMost(_handle: number, _topMost: boolean): void {
-  // macOS does not provide a public API for setting window level from
-  // another process.  This is a no-op.
-}
-
-function mac_setBorderless(_handle: number, _borderless: boolean): void {
-  // macOS does not provide a public API for adding/removing window
-  // decorations from another process.  This is a no-op.
-}
-
-function mac_setMinimized(handle: number, minimized: boolean): void {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return;
-  const AX = ax();
-  if (!AX) { cf()!.CFRelease(elem); return; }
-  mac_initKeys();
-  if (minimized) {
-    AX.AXUIElementPerformAction(elem, _axMinimize!);
-  } else {
-    AX.AXUIElementPerformAction(elem, _axRaise!);
-  }
-  cf()!.CFRelease(elem);
-}
-
-function mac_setMaximized(handle: number, maximized: boolean): void {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return;
-  const AX = ax();
-  if (!AX) { cf()!.CFRelease(elem); return; }
-  mac_initKeys();
-  if (maximized) {
-    AX.AXUIElementPerformAction(elem, _axZoomAction!);
-  } else if (mac_getAXBool(elem, _axFullScreen)) {
-    AX.AXUIElementPerformAction(elem, _axZoomAction!);
-  }
-  cf()!.CFRelease(elem);
-}
-
-function mac_getPid(handle: number): number {
-  mac_initKeys();
-  return mac_getPidForWindow(handle);
-}
-
-function mac_getTitle(handle: number): string {
-  let title = mac_withWindowDict(handle, "", (dict) => mac_cfDictGetString(dict, _kCGWindowName));
-  if (title === "") {
-    const elem = mac_getAXElement(handle);
-    if (elem) {
-      title = mac_getAXString(elem, _axTitle);
-      cf()!.CFRelease(elem);
-    }
-  }
-  return title;
-}
-
-function mac_setTitle(handle: number, title: string): void {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return;
-  const AX = ax(); const CF = cf();
-  if (!AX || !CF) { CF?.CFRelease(elem); return; }
-  mac_initKeys();
-  const val = cfStringFromJS(title);
-  if (!val) { CF.CFRelease(elem); return; }
-  AX.AXUIElementSetAttributeValue(elem, _axTitle, val);
-  CF.CFRelease(val);
-  CF.CFRelease(elem);
-}
-
-function mac_getBounds(handle: number): { x: number; y: number; w: number; h: number } {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return { x: 0, y: 0, w: 0, h: 0 };
-  const pos = mac_getAXPosition(elem);
-  const size = mac_getAXSize(elem);
-  cf()!.CFRelease(elem);
-  if (!pos || !size) return { x: 0, y: 0, w: 0, h: 0 };
-  return { x: Math.round(pos.x), y: Math.round(pos.y), w: Math.round(size.w), h: Math.round(size.h) };
-}
-
-function mac_setBounds(handle: number, x: number, y: number, w: number, h: number): void {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return;
-  mac_setAXPosition(elem, x, y);
-  mac_setAXSize(elem, w, h);
-  cf()!.CFRelease(elem);
-}
-
-function mac_getList(regexStr?: string): number[] {
-  const WCG = wcg(); const WCF = wcf(); const CF = cf();
-  if (!WCG || !WCF || !CF) return [];
-  mac_initKeys();
-  const info = WCG.CGWindowListCopyWindowInfo(
-    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-  if (!info) return [];
-  const count = Number(WCF.CFArrayGetCount(info));
-  const results: number[] = [];
-  const re = makeRegex(regexStr);
-  for (let i = 0; i < count; i++) {
-    const dict = WCF.CFArrayGetValueAtIndex(info, BigInt(i));
-    if (!dict) continue;
-    const wid = mac_cfDictGetInt32(dict, _kCGWindowNumber);
-    if (wid === 0) continue;
-    const layer = mac_cfDictGetInt32(dict, _kCGWindowLayer);
-    if (layer < 0) continue;
-    if (re) {
-      const name = mac_cfDictGetString(dict, _kCGWindowName);
-      if (!re.test(name)) continue;
-    }
-    results.push(wid);
-  }
-  CF.CFRelease(info);
-  return results;
-}
-
-function mac_getActive(): number {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F) return 0;
-  mac_initKeys();
-  const systemWide = AX.AXUIElementCreateSystemWide();
-  if (!systemWide) return 0;
-
-  _scratchU64[0] = 0n;
-  let err = AX.AXUIElementCopyAttributeValue(systemWide, _axFocusedApplication, F.ptr(_scratchU64));
-  CF.CFRelease(systemWide);
-  if (err !== 0 || _scratchU64[0] === 0n) return 0;
-  const app = readPtr();
-
-  _scratchU64[0] = 0n;
-  err = AX.AXUIElementCopyAttributeValue(app, _axFocusedWindow, F.ptr(_scratchU64));
-  CF.CFRelease(app);
-  if (err !== 0 || _scratchU64[0] === 0n) return 0;
-  const win = readPtr();
-
-  _scratchU32[0] = 0;
-  err = AX._AXUIElementGetWindow(win, F.ptr(_scratchU32));
-  CF.CFRelease(win);
-  if (err !== 0) return 0;
-  return _scratchU32[0];
-}
-
-function mac_setActive(handle: number): void {
-  const elem = mac_getAXElement(handle);
-  if (!elem) return;
-  const AX = ax();
-  if (!AX) { cf()!.CFRelease(elem); return; }
-  mac_initKeys();
-  AX.AXUIElementPerformAction(elem, _axRaise!);
-  cf()!.CFRelease(elem);
-}
-
-function mac_isAxEnabled(prompt?: boolean): boolean {
-  const AX = ax();
-  if (!AX) return false;
-  if (prompt) {
-    return AX.AXIsProcessTrusted() !== 0;
-  }
-  return AX.AXIsProcessTrusted() !== 0;
 }
 
 // ── Win32 constants ─────────────────────────────────────────────────
@@ -959,7 +478,6 @@ function win_setActive(handle: number): void {
 export function window_isValid(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle);
   if (IS_WIN) return win_isValid(handle);
-  if (IS_MAC) return mac_isValid(handle);
   return false;
 }
 
@@ -973,16 +491,12 @@ export function window_close(handle: number): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_close(handle);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_close(handle);
   }
 }
 
 export function window_isTopMost(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_TOPMOST);
   if (IS_WIN) return win_isValid(handle) && win_isTopMost(handle);
-  if (IS_MAC) return mac_isValid(handle) && mac_isTopMost(handle);
   return false;
 }
 
@@ -1002,21 +516,18 @@ export function window_isBorderless(handle: number): boolean {
     return decorations === 0n;
   }
   if (IS_WIN) return win_isValid(handle) && win_isBorderless(handle);
-  if (IS_MAC) return mac_isValid(handle) && mac_isBorderless(handle);
   return false;
 }
 
 export function window_isMinimized(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MINIMIZE);
   if (IS_WIN) return win_isValid(handle) && win_isMinimized(handle);
-  if (IS_MAC) return mac_isValid(handle) && mac_isMinimized(handle);
   return false;
 }
 
 export function window_isMaximized(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MAXIMIZE);
   if (IS_WIN) return win_isValid(handle) && win_isMaximized(handle);
-  if (IS_MAC) return mac_isValid(handle) && mac_isMaximized(handle);
   return false;
 }
 
@@ -1027,9 +538,6 @@ export function window_setTopMost(handle: number, topMost: boolean): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setTopMost(handle, topMost);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_setTopMost(handle, topMost);
   }
 }
 
@@ -1054,9 +562,6 @@ export function window_setBorderless(handle: number, borderless: boolean): void 
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setBorderless(handle, borderless);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_setBorderless(handle, borderless);
   }
 }
 
@@ -1067,9 +572,6 @@ export function window_setMinimized(handle: number, minimized: boolean): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setMinimized(handle, minimized);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_setMinimized(handle, minimized);
   }
 }
 
@@ -1081,16 +583,12 @@ export function window_setMaximized(handle: number, maximized: boolean): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setMaximized(handle, maximized);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_setMaximized(handle, maximized);
   }
 }
 
 export function window_getProcess(handle: number): number {
   if (IS_LINUX) return winIsValid(handle) ? getPid(BigInt(handle)) : 0;
   if (IS_WIN) return win_isValid(handle) ? win_getPid(handle) : 0;
-  if (IS_MAC) return mac_isValid(handle) ? mac_getPid(handle) : 0;
   return 0;
 }
 
@@ -1104,14 +602,12 @@ export function window_setHandle(_handle: number, newHandle: number): boolean {
   if (newHandle === 0) return true;
   if (IS_LINUX) return winIsValid(newHandle);
   if (IS_WIN) return win_isValid(newHandle);
-  if (IS_MAC) return mac_isValid(newHandle);
   return false;
 }
 
 export function window_getTitle(handle: number): string {
   if (IS_LINUX) return winIsValid(handle) ? getTitle(BigInt(handle)) : "";
   if (IS_WIN) return win_isValid(handle) ? win_getTitle(handle) : "";
-  if (IS_MAC) return mac_isValid(handle) ? mac_getTitle(handle) : "";
   return "";
 }
 
@@ -1126,9 +622,6 @@ export function window_setTitle(handle: number, title: string): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setTitle(handle, title);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_setTitle(handle, title);
   }
 }
 
@@ -1140,7 +633,6 @@ export function window_getBounds(handle: number): { x: number; y: number; w: num
     return { x: c.x - f.left, y: c.y - f.top, w: c.w + f.right, h: c.h + f.bottom };
   }
   if (IS_WIN) return win_isValid(handle) ? win_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
-  if (IS_MAC) return mac_isValid(handle) ? mac_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -1157,17 +649,12 @@ export function window_setBounds(handle: number, x: number, y: number, w: number
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setBounds(handle, x, y, w, h);
-  } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
-    mac_setBounds(handle, x, y, w, h);
   }
 }
 
 export function window_getClient(handle: number): { x: number; y: number; w: number; h: number } {
   if (IS_LINUX) return winIsValid(handle) ? getClient(BigInt(handle)) : { x: 0, y: 0, w: 0, h: 0 };
   if (IS_WIN) return win_isValid(handle) ? win_getClient(handle) : { x: 0, y: 0, w: 0, h: 0 };
-  // macOS has no frame extents concept — client == bounds
-  if (IS_MAC) return mac_isValid(handle) ? mac_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -1181,10 +668,6 @@ export function window_setClient(handle: number, x: number, y: number, w: number
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setClient(handle, x, y, w, h);
-  } else if (IS_MAC) {
-    // macOS has no frame extents concept — client == bounds
-    if (!mac_isValid(handle)) return;
-    mac_setBounds(handle, x, y, w, h);
   }
 }
 
@@ -1195,11 +678,6 @@ export function window_mapToClient(handle: number, x: number, y: number): { x: n
     return { x: x - c.x, y: y - c.y };
   }
   if (IS_WIN) return win_isValid(handle) ? win_mapToClient(handle, x, y) : { x, y };
-  if (IS_MAC) {
-    if (!mac_isValid(handle)) return { x, y };
-    const b = mac_getBounds(handle);
-    return { x: x - b.x, y: y - b.y };
-  }
   return { x, y };
 }
 
@@ -1210,11 +688,6 @@ export function window_mapToScreen(handle: number, x: number, y: number): { x: n
     return { x: x + c.x, y: y + c.y };
   }
   if (IS_WIN) return win_isValid(handle) ? win_mapToScreen(handle, x, y) : { x, y };
-  if (IS_MAC) {
-    if (!mac_isValid(handle)) return { x, y };
-    const b = mac_getBounds(handle);
-    return { x: x + b.x, y: y + b.y };
-  }
   return { x, y };
 }
 
@@ -1230,7 +703,6 @@ export function window_getList(regexStr?: string): number[] {
     return out;
   }
   if (IS_WIN) return win_getList(regexStr);
-  if (IS_MAC) return mac_getList(regexStr);
   return [];
 }
 
@@ -1250,7 +722,6 @@ export function window_getActive(): number {
     return Number(win);
   }
   if (IS_WIN) return win_getActive();
-  if (IS_MAC) return mac_getActive();
   return 0;
 }
 
@@ -1260,19 +731,16 @@ export function window_setActive(handle: number): void {
     windowSetActiveInternal(BigInt(handle));
   } else if (IS_WIN) {
     win_setActive(handle);
-  } else if (IS_MAC) {
-    mac_setActive(handle);
   }
 }
 
 export function window_isAxEnabled(prompt?: boolean): boolean {
   if (IS_LINUX || IS_WIN) return true;
-  if (IS_MAC) return mac_isAxEnabled(prompt);
   return false;
 }
 
-if (!IS_LINUX && !IS_WIN && !IS_MAC) {
-  throw new Error("ffi/window: requires Linux with libX11, Windows with user32.dll, or macOS");
+if (!IS_LINUX && !IS_WIN) {
+  throw new Error("ffi/window: requires Linux with libX11 or Windows with user32.dll");
 }
 if (IS_LINUX && !getDisplay()) {
   throw new Error("ffi/window: requires Linux with libX11 (no display available)");

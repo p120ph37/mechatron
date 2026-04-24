@@ -18,7 +18,7 @@
  * (Bun has no 32-bit Windows build) and for any direct `node` invocations.
  */
 
-import { describe, test, afterAll } from "bun:test";
+import { describe, test } from "bun:test";
 
 // Default backend when none specified: ffi on every supported platform.
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
@@ -30,16 +30,6 @@ const backend: string =
     ? _envBackend
     : "ffi";
 process.env.MECHATRON_BACKEND = backend;
-
-// Bun 1.3.13 crashes on macOS when the FFI window module's dlopen symbols
-// (Accessibility framework, extra CF/CG symbols) are loaded — the crash is
-// in Bun's internal C++ JIT thunk cleanup, not in our code.  Force the
-// window subsystem to NAPI on macOS when the primary backend is FFI so the
-// problematic symbols are never loaded.  NAPI window support is complete on
-// macOS, so this loses no coverage.
-if (process.platform === "darwin" && _baseBackend === "ffi" && !process.env.MECHATRON_BACKEND_WINDOW) {
-  process.env.MECHATRON_BACKEND_WINDOW = "napi";
-}
 
 // ── Test helpers (mirrors test/test.js) ──────────────────────────────────────
 
@@ -109,9 +99,7 @@ describe(`mechatron [${backend}]`, () => {
       const needsGC = mod.prefix !== _prevPrefix;
       _prevPrefix = mod.prefix;
       test(displayName, async () => {
-        // Bun ≤ 1.3.13 crashes in bun:ffi's JIT thunk GC on macOS when
-        // Bun.gc(true) runs after many dlopen'd symbols are active.
-        if (needsGC && process.platform !== "darwin" && typeof (globalThis as any).Bun?.gc === "function") {
+        if (needsGC && typeof (globalThis as any).Bun?.gc === "function") {
           (globalThis as any).Bun.gc(true);
         }
         if (!compatMatrix.shouldRun(entry.functions)) {
@@ -123,14 +111,4 @@ describe(`mechatron [${backend}]`, () => {
     }
   }
 
-  // Bun ≤ 1.3.13 segfaults in bun:ffi's dlclose cleanup during process
-  // shutdown on macOS.  Force a clean exit after all tests and reporter
-  // output have been flushed — afterAll runs after bun:test has written
-  // JUnit XML and coverage, so process.exit here bypasses the faulty
-  // native teardown.
-  if (process.platform === "darwin") {
-    afterAll(() => {
-      process.exit(process.exitCode ?? 0);
-    });
-  }
 });

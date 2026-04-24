@@ -85,23 +85,6 @@ interface CoreFoundation {
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
 }
 
-interface WindowCF {
-  CFRetain: (cf: Pointer) => Pointer;
-  CFArrayGetCount: (theArray: Pointer) => bigint;
-  CFArrayGetValueAtIndex: (theArray: Pointer, idx: bigint) => Pointer;
-  CFDictionaryGetValue: (dict: Pointer, key: Pointer) => Pointer;
-  CFNumberGetValue: (number: Pointer, theType: number, valuePtr: Pointer) => number;
-  CFBooleanGetValue: (boolean: Pointer) => number;
-  CFGetTypeID: (cf: Pointer) => bigint;
-  CFStringGetTypeID: () => bigint;
-  CFNumberGetTypeID: () => bigint;
-  CFBooleanGetTypeID: () => bigint;
-}
-
-interface WindowCG {
-  CGWindowListCopyWindowInfo: (option: number, relativeToWindow: number) => Pointer;
-}
-
 interface Objc {
   objc_getClass: (name: Pointer) => Pointer;
   sel_registerName: (name: Pointer) => Pointer;
@@ -109,20 +92,6 @@ interface Objc {
   objc_msgSend: (receiver: Pointer, selector: Pointer) => Pointer;
   objc_autoreleasePoolPush: () => Pointer;
   objc_autoreleasePoolPop: (pool: Pointer) => void;
-}
-
-interface Accessibility {
-  AXIsProcessTrusted: () => number;
-  AXIsProcessTrustedWithOptions: (options: Pointer) => number;
-  AXUIElementCreateApplication: (pid: number) => Pointer;
-  AXUIElementCreateSystemWide: () => Pointer;
-  AXUIElementCopyAttributeValue: (element: Pointer, attribute: Pointer, value: Pointer) => number;
-  AXUIElementSetAttributeValue: (element: Pointer, attribute: Pointer, value: Pointer) => number;
-  AXUIElementCopyAttributeNames: (element: Pointer, names: Pointer) => number;
-  AXUIElementPerformAction: (element: Pointer, action: Pointer) => number;
-  AXValueGetValue: (value: Pointer, type: number, valuePtr: Pointer) => number;
-  AXValueCreate: (type: number, valuePtr: Pointer) => Pointer;
-  _AXUIElementGetWindow: (element: Pointer, windowId: Pointer) => number;
 }
 
 interface Libc {
@@ -169,9 +138,6 @@ let _cg: CoreGraphics | null = null;
 let _cf: CoreFoundation | null = null;
 let _objc: Objc | null = null;
 let _libc: Libc | null = null;
-let _ax: Accessibility | null = null;
-let _wcf: WindowCF | null = null;
-let _wcg: WindowCG | null = null;
 let _appkitLoaded = false;
 
 // Prevent GC from collecting DlopenResult objects — Bun 1.3.13 frees
@@ -300,78 +266,12 @@ function tryDlopen(): void {
   } catch (_) { _libc = null; }
 }
 
-// ── Lazy window-support loader ──────────────────────────────────────
-// Window operations need extra CF/CG symbols plus the Accessibility
-// framework.  Loading them separately from the core frameworks keeps
-// tryDlopen() at the same symbol count as the known-good base, avoiding
-// a Bun 1.3.13 crash triggered by high JIT-thunk counts during GC.
-
-let _winLoaded = false;
-
-function tryDlopenWindowSupport(): void {
-  if (_winLoaded) return;
-  _winLoaded = true;
-  tryDlopen();
-  if (!_ffi || process.platform !== "darwin") return;
-  const T = _ffi.FFIType;
-
-  const CG_PATH = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
-  const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-  const AX_PATH = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
-
-  try {
-    const lib = _ffi.dlopen<WindowCG>(CG_PATH, {
-      CGWindowListCopyWindowInfo:           { args: [T.u32, T.u32], returns: T.ptr },
-    });
-    _wcg = lib.symbols;
-    _dlopenHandles.push(lib);
-  } catch (_) { _wcg = null; }
-
-  try {
-    const lib = _ffi.dlopen<WindowCF>(CF_PATH, {
-      CFRetain:                           { args: [T.ptr], returns: T.ptr },
-      CFArrayGetCount:                    { args: [T.ptr], returns: T.i64 },
-      CFArrayGetValueAtIndex:             { args: [T.ptr, T.i64], returns: T.ptr },
-      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.ptr },
-      CFNumberGetValue:                   { args: [T.ptr, T.i32, T.ptr], returns: T.i32 },
-      CFBooleanGetValue:                  { args: [T.ptr], returns: T.i32 },
-      CFGetTypeID:                        { args: [T.ptr], returns: T.u64 },
-      CFStringGetTypeID:                  { args: [], returns: T.u64 },
-      CFNumberGetTypeID:                  { args: [], returns: T.u64 },
-      CFBooleanGetTypeID:                 { args: [], returns: T.u64 },
-    });
-    _wcf = lib.symbols;
-    _dlopenHandles.push(lib);
-  } catch (_) { _wcf = null; }
-
-  try {
-    const lib = _ffi.dlopen<Accessibility>(AX_PATH, {
-      AXIsProcessTrusted:                 { args: [], returns: T.i32 },
-      AXIsProcessTrustedWithOptions:      { args: [T.ptr], returns: T.i32 },
-      AXUIElementCreateApplication:       { args: [T.i32], returns: T.ptr },
-      AXUIElementCreateSystemWide:        { args: [], returns: T.ptr },
-      AXUIElementCopyAttributeValue:      { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
-      AXUIElementSetAttributeValue:       { args: [T.ptr, T.ptr, T.ptr], returns: T.i32 },
-      AXUIElementCopyAttributeNames:      { args: [T.ptr, T.ptr], returns: T.i32 },
-      AXUIElementPerformAction:           { args: [T.ptr, T.ptr], returns: T.i32 },
-      AXValueGetValue:                    { args: [T.ptr, T.i32, T.ptr], returns: T.i32 },
-      AXValueCreate:                      { args: [T.i32, T.ptr], returns: T.ptr },
-      _AXUIElementGetWindow:              { args: [T.ptr, T.ptr], returns: T.i32 },
-    });
-    _ax = lib.symbols;
-    _dlopenHandles.push(lib);
-  } catch (_) { _ax = null; }
-}
-
 // ── Public accessors ──────────────────────────────────────────────────
 
 export function cg(): CoreGraphics | null { tryDlopen(); return _cg; }
 export function cf(): CoreFoundation | null { tryDlopen(); return _cf; }
 export function objc(): Objc | null { tryDlopen(); return _objc; }
 export function libc(): Libc | null { tryDlopen(); return _libc; }
-export function ax(): Accessibility | null { tryDlopenWindowSupport(); return _ax; }
-export function wcf(): WindowCF | null { tryDlopenWindowSupport(); return _wcf; }
-export function wcg(): WindowCG | null { tryDlopenWindowSupport(); return _wcg; }
 export function macFFI(): BunFFI | null { tryDlopen(); return _ffi; }
 export function hasAppKit(): boolean { tryDlopen(); return _appkitLoaded; }
 
