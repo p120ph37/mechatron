@@ -1275,21 +1275,17 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   return false;
 }
 
-// Eagerly initialise cached CFString keys and prime the CoreGraphics
-// window-list query at module-load time (synchronous, outside any async
-// function).  Bun ≤ 1.3.13 segfaults in JSC's MicrotaskQueue::drain /
-// jsc_llint_commonCallOp when CGWindowListCopyWindowInfo is first called
-// from within an async function's continuation on macOS.  Running the
-// first CG query here — outside the async call chain — avoids the crash.
+// Eagerly initialise cached CFString keys and prime the full
+// CGWindowListCopyWindowInfo → CFArray → CFDictionary → CFNumber path at
+// module-load time (synchronous, outside any async function).
+// Bun ≤ 1.3.13 segfaults in JSC's MicrotaskQueue::drain when these FFI
+// calls first happen inside an async function's continuation on macOS.
+// Running mac_withWindowDict once here — with a handle that won't match
+// any real window — exercises every FFI call in the chain and avoids
+// the crash on both arm64 and x64 (Rosetta).
 if (IS_MAC) {
   mac_initKeys();
-  const _warmCG = cg();
-  const _warmCF = cf();
-  if (_warmCG && _warmCF) {
-    const _info = _warmCG.CGWindowListCopyWindowInfo(
-      kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
-    if (_info) _warmCF.CFRelease(_info);
-  }
+  mac_withWindowDict(0xFFFFFFFF, false, () => true);
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {
