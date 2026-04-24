@@ -172,6 +172,10 @@ let _libc: Libc | null = null;
 let _ax: Accessibility | null = null;
 let _appkitLoaded = false;
 
+// Retain DlopenResult handles so the GC doesn't dlclose the libraries
+// while we still hold function-pointer references via the *_symbols above.
+const _dlopenHandles: any[] = [];
+
 // ── Load ──────────────────────────────────────────────────────────────
 
 function tryDlopen(): void {
@@ -224,6 +228,7 @@ function tryDlopen(): void {
       CGWindowListCopyWindowInfo:           { args: [T.u32, T.u32], returns: T.ptr },
     });
     _cg = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _cg = null; }
 
   try {
@@ -246,6 +251,7 @@ function tryDlopen(): void {
       CFBooleanGetTypeID:                 { args: [], returns: T.u64 },
     });
     _cf = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _cf = null; }
 
   try {
@@ -259,6 +265,7 @@ function tryDlopen(): void {
       objc_autoreleasePoolPop:    { args: [T.ptr], returns: T.void },
     });
     _objc = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _objc = null; }
 
   // We dlopen AppKit only so the Objective-C runtime loads its classes
@@ -267,9 +274,10 @@ function tryDlopen(): void {
   // so we ask for `NSBeep` — a stable plain-C function the framework has
   // always exported.  We never actually call it.
   try {
-    _ffi.dlopen<{ NSBeep: () => void }>(AK_PATH, {
+    const akLib = _ffi.dlopen<{ NSBeep: () => void }>(AK_PATH, {
       NSBeep: { args: [], returns: T.void },
     });
+    _dlopenHandles.push(akLib);
     _appkitLoaded = true;
   } catch (_) { _appkitLoaded = false; }
 
@@ -289,6 +297,7 @@ function tryDlopen(): void {
       _AXUIElementGetWindow:              { args: [T.ptr, T.ptr], returns: T.i32 },
     });
     _ax = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _ax = null; }
 
   try {
@@ -315,6 +324,7 @@ function tryDlopen(): void {
       dlsym:                        { args: [T.ptr, T.ptr], returns: T.ptr },
     });
     _libc = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _libc = null; }
 }
 
@@ -438,6 +448,7 @@ export function msgSendTyped(args: number[], returns: number): ((...a: any[]) =>
       "/usr/lib/libobjc.A.dylib",
       { objc_msgSend: { args, returns } },
     );
+    _dlopenHandles.push(lib);
     const fn = lib.symbols.objc_msgSend;
     _msgSendCache.set(key, fn);
     return fn;
