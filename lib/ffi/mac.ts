@@ -89,6 +89,20 @@ interface CoreFoundation {
   CFArrayGetValueAtIndex: (theArray: bigint, idx: bigint) => bigint;
   CFDictionaryGetValue: (theDict: bigint, key: bigint) => bigint;
   CFNumberGetValue: (cfNum: bigint, theType: bigint, valuePtr: bigint) => number;
+  CFBooleanGetValue: (boolean: bigint) => number;
+  CFNumberCreate: (alloc: bigint, theType: bigint, valuePtr: bigint) => bigint;
+}
+
+interface Accessibility {
+  AXIsProcessTrusted: () => number;
+  AXUIElementCreateApplication: (pid: number) => bigint;
+  AXUIElementCreateSystemWide: () => bigint;
+  AXUIElementCopyAttributeValue: (elem: bigint, attr: bigint, value: bigint) => number;
+  AXUIElementSetAttributeValue: (elem: bigint, attr: bigint, value: bigint) => number;
+  AXUIElementPerformAction: (elem: bigint, action: bigint) => number;
+  _AXUIElementGetWindow: (elem: bigint, wid: bigint) => number;
+  AXValueCreate: (type: number, value: bigint) => bigint;
+  AXValueGetValue: (value: bigint, type: number, out: bigint) => number;
 }
 
 interface Objc {
@@ -144,6 +158,7 @@ let _cg: CoreGraphics | null = null;
 let _cf: CoreFoundation | null = null;
 let _objc: Objc | null = null;
 let _libc: Libc | null = null;
+let _ax: Accessibility | null = null;
 let _appkitLoaded = false;
 
 // Prevent GC from collecting DlopenResult objects — Bun 1.3.13 frees
@@ -227,6 +242,8 @@ function tryDlopen(): void {
       // Boolean CFNumberGetValue(CFNumberRef, CFNumberType, void *) — Boolean is unsigned char (u8)
       // First arg is i64 (not ptr) so tagged CFNumber pointers pass through.
       CFNumberGetValue:                   { args: [T.i64, T.i64, T.i64], returns: T.u8 },
+      CFBooleanGetValue:                  { args: [T.i64], returns: T.u8 },
+      CFNumberCreate:                     { args: [T.i64, T.i64, T.i64], returns: T.i64 },
     });
     _cf = lib.symbols;
     _dlopenHandles.push(lib);
@@ -285,6 +302,23 @@ function tryDlopen(): void {
     _libc = lib.symbols;
     _dlopenHandles.push(lib);
   } catch (_) { _libc = null; }
+
+  const AX_PATH = "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices";
+  try {
+    const lib = _ffi.dlopen<Accessibility>(AX_PATH, {
+      AXIsProcessTrusted:              { args: [], returns: T.u8 },
+      AXUIElementCreateApplication:    { args: [T.i32], returns: T.i64 },
+      AXUIElementCreateSystemWide:     { args: [], returns: T.i64 },
+      AXUIElementCopyAttributeValue:   { args: [T.i64, T.i64, T.i64], returns: T.i32 },
+      AXUIElementSetAttributeValue:    { args: [T.i64, T.i64, T.i64], returns: T.i32 },
+      AXUIElementPerformAction:        { args: [T.i64, T.i64], returns: T.i32 },
+      _AXUIElementGetWindow:           { args: [T.i64, T.i64], returns: T.i32 },
+      AXValueCreate:                   { args: [T.u32, T.i64], returns: T.i64 },
+      AXValueGetValue:                 { args: [T.i64, T.u32, T.i64], returns: T.u8 },
+    });
+    _ax = lib.symbols;
+    _dlopenHandles.push(lib);
+  } catch (_) { _ax = null; }
 }
 
 // ── Public accessors ──────────────────────────────────────────────────
@@ -293,6 +327,7 @@ export function cg(): CoreGraphics | null { tryDlopen(); return _cg; }
 export function cf(): CoreFoundation | null { tryDlopen(); return _cf; }
 export function objc(): Objc | null { tryDlopen(); return _objc; }
 export function libc(): Libc | null { tryDlopen(); return _libc; }
+export function ax(): Accessibility | null { tryDlopen(); return _ax; }
 export function macFFI(): BunFFI | null { tryDlopen(); return _ffi; }
 export function hasAppKit(): boolean { tryDlopen(); return _appkitLoaded; }
 
@@ -333,6 +368,11 @@ export const kCFStringEncodingUTF8 = 0x08000100;
 
 // kCFNumberSInt32Type
 export const kCFNumberSInt32Type = 3;
+export const kCFNumberFloat64Type = 13;
+
+// AXValue types
+export const kAXValueCGPointType = 1;
+export const kAXValueCGSizeType = 2;
 
 // ── Constants (mach / process) ───────────────────────────────────────
 
@@ -497,4 +537,36 @@ export function bufToStr(buf: Uint8Array, len?: number): string {
   const max = len === undefined ? buf.length : Math.min(len, buf.length);
   while (end < max && buf[end] !== 0) end++;
   return new TextDecoder("utf-8").decode(buf.subarray(0, end));
+}
+
+let _cfBoolTrue = 0n;
+let _cfBoolFalse = 0n;
+let _cfBoolInit = false;
+
+/**
+ * Return the kCFBooleanTrue or kCFBooleanFalse singleton.
+ *
+ * Resolved via dlsym at first call.  The symbol address (a dlsym result)
+ * is a code/data-segment virtual address — Number() conversion is safe
+ * because bun:ffi's read.ptr requires a JS number and VA ranges on
+ * current macOS hardware are well within Number precision.
+ */
+export function cfBool(v: boolean): bigint {
+  if (!_cfBoolInit) {
+    _cfBoolInit = true;
+    const lc = libc();
+    const F = macFFI();
+    if (!lc || !F) return 0n;
+    const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+    const handle = lc.dlopen(bp(cstr(CF_PATH)), 1);
+    if (!handle) return 0n;
+    for (const [name, set] of [["kCFBooleanTrue", true], ["kCFBooleanFalse", false]] as const) {
+      const addr = lc.dlsym(handle, bp(cstr(name)));
+      if (!addr) continue;
+      const val = F.read.ptr(Number(addr));
+      const ptr = typeof val === "bigint" ? val : BigInt(val as number);
+      if (set) _cfBoolTrue = ptr; else _cfBoolFalse = ptr;
+    }
+  }
+  return v ? _cfBoolTrue : _cfBoolFalse;
 }

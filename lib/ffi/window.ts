@@ -17,8 +17,10 @@ import {
 import { user32, winFFI, w2js, js2w } from "./win";
 import { getBunFFI, bp, cstr, type Pointer } from "./bun";
 import {
-  cg, cf, macFFI, cfStringFromJS, cfStringToJS, kCFNumberSInt32Type,
+  cg, cf, ax, macFFI, cfStringFromJS, cfStringToJS, cfBool,
+  kCFNumberSInt32Type, kCFNumberFloat64Type,
   kCGWindowListOptionOnScreenOnly, kCGWindowListExcludeDesktopElements, kCGNullWindowID,
+  kAXValueCGPointType, kAXValueCGSizeType,
 } from "./mac";
 
 const IS_LINUX = process.platform === "linux";
@@ -557,11 +559,360 @@ function mac_getList(regexStr?: string): number[] {
   return out;
 }
 
+// ── macOS: CGWindowList per-window info lookup ─────────────────────
+//
+// Several read-only queries (isValid, getTitle, getBounds, getPid) just
+// need to look up a single window's metadata in the CGWindowList.  This
+// helper runs the query and passes the matching CFDictionary to a
+// callback, handling CFRelease of the underlying CFArray.
+
+let _cgExtraKeys: {
+  pid: bigint; bounds: bigint;
+  bx: bigint; by: bigint; bw: bigint; bh: bigint;
+} | null = null;
+let _cgExtraKeysInit = false;
+
+function getCGExtraKeys() {
+  if (_cgExtraKeysInit) return _cgExtraKeys;
+  _cgExtraKeysInit = true;
+  const pid = cfStringFromJS("kCGWindowOwnerPID");
+  const bounds = cfStringFromJS("kCGWindowBounds");
+  const bx = cfStringFromJS("X");
+  const by = cfStringFromJS("Y");
+  const bw = cfStringFromJS("Width");
+  const bh = cfStringFromJS("Height");
+  if (!pid || !bounds || !bx || !by || !bw || !bh) return null;
+  _cgExtraKeys = { pid, bounds, bx, by, bw, bh };
+  return _cgExtraKeys;
+}
+
+function mac_withWindowDict<T>(handle: number, fn: (dict: bigint) => T, fallback: T): T {
+  if (handle <= 0) return fallback;
+  const C = cg();
+  const CF = cf();
+  if (!C || !CF) return fallback;
+
+  const keys = getCGKeys();
+  if (!keys) return fallback;
+
+  const infoList = C.CGWindowListCopyWindowInfo(0, kCGNullWindowID);
+  if (!infoList) return fallback;
+
+  try {
+    const count = Number(CF.CFArrayGetCount(infoList));
+    for (let i = 0; i < count; i++) {
+      const dict = CF.CFArrayGetValueAtIndex(infoList, BigInt(i));
+      if (!dict) continue;
+      const numRef = CF.CFDictionaryGetValue(dict, keys.number);
+      if (!numRef) continue;
+      _numBuf[0] = 0;
+      CF.CFNumberGetValue(numRef, _sType, bp(_numBuf));
+      if (_numBuf[0] === handle) return fn(dict);
+    }
+  } finally {
+    CF.CFRelease(infoList);
+  }
+  return fallback;
+}
+
+function mac_isValid(handle: number): boolean {
+  return mac_withWindowDict(handle, () => true, false);
+}
+
+function mac_getTitle(handle: number): string {
+  const keys = getCGKeys();
+  if (!keys) return "";
+  return mac_withWindowDict(handle, (dict) => {
+    const CF = cf()!;
+    const nameRef = CF.CFDictionaryGetValue(dict, keys.name);
+    if (!nameRef) return "";
+    return cfStringToJS(nameRef);
+  }, "");
+}
+
+function mac_getPid(handle: number): number {
+  const extra = getCGExtraKeys();
+  if (!extra) return 0;
+  return mac_withWindowDict(handle, (dict) => {
+    const CF = cf()!;
+    const pidRef = CF.CFDictionaryGetValue(dict, extra.pid);
+    if (!pidRef) return 0;
+    _numBuf[0] = 0;
+    CF.CFNumberGetValue(pidRef, _sType, bp(_numBuf));
+    return _numBuf[0];
+  }, 0);
+}
+
+const _f64Buf = new Float64Array(2);
+
+function mac_getBoundsFromDict(dict: bigint): { x: number; y: number; w: number; h: number } {
+  const CF = cf()!;
+  const extra = getCGExtraKeys()!;
+  const boundsDict = CF.CFDictionaryGetValue(dict, extra.bounds);
+  if (!boundsDict) return { x: 0, y: 0, w: 0, h: 0 };
+  const f64Type = BigInt(kCFNumberFloat64Type);
+  let x = 0, y = 0, w = 0, h = 0;
+  const xRef = CF.CFDictionaryGetValue(boundsDict, extra.bx);
+  if (xRef) { CF.CFNumberGetValue(xRef, f64Type, bp(_f64Buf)); x = _f64Buf[0]; }
+  const yRef = CF.CFDictionaryGetValue(boundsDict, extra.by);
+  if (yRef) { CF.CFNumberGetValue(yRef, f64Type, bp(_f64Buf)); y = _f64Buf[0]; }
+  const wRef = CF.CFDictionaryGetValue(boundsDict, extra.bw);
+  if (wRef) { CF.CFNumberGetValue(wRef, f64Type, bp(_f64Buf)); w = _f64Buf[0]; }
+  const hRef = CF.CFDictionaryGetValue(boundsDict, extra.bh);
+  if (hRef) { CF.CFNumberGetValue(hRef, f64Type, bp(_f64Buf)); h = _f64Buf[0]; }
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
+
+function mac_getBounds(handle: number): { x: number; y: number; w: number; h: number } {
+  if (!getCGExtraKeys()) return { x: 0, y: 0, w: 0, h: 0 };
+  return mac_withWindowDict(handle, mac_getBoundsFromDict, { x: 0, y: 0, w: 0, h: 0 });
+}
+
+// ── macOS: AX-based window manipulation ────────────────────────────
+//
+// Mutation operations require the Accessibility API (AXUIElement).
+// To get the AXUIElement for a given CGWindowID we:
+//   1. Look up the owning PID from CGWindowList
+//   2. Create an AXUIElement for that application
+//   3. Read its kAXWindowsAttribute (CFArray of AXUIElements)
+//   4. Match each AX window's CGWindowID via _AXUIElementGetWindow
+//
+// Every AXUIElement and CFArray created here follows the Create Rule
+// and must be CFRelease'd.
+
+let _axAttrs: {
+  windows: bigint; focusedWindow: bigint; title: bigint;
+  minimized: bigint; fullscreen: bigint; position: bigint;
+  size: bigint; closeButton: bigint; focusedApp: bigint;
+  frontmost: bigint; raise: bigint; press: bigint;
+} | null = null;
+let _axAttrsInit = false;
+
+function getAXAttrs() {
+  if (_axAttrsInit) return _axAttrs;
+  _axAttrsInit = true;
+  const windows = cfStringFromJS("AXWindows");
+  const focusedWindow = cfStringFromJS("AXFocusedWindow");
+  const title = cfStringFromJS("AXTitle");
+  const minimized = cfStringFromJS("AXMinimized");
+  const fullscreen = cfStringFromJS("AXFullScreen");
+  const position = cfStringFromJS("AXPosition");
+  const size = cfStringFromJS("AXSize");
+  const closeButton = cfStringFromJS("AXCloseButton");
+  const focusedApp = cfStringFromJS("AXFocusedApplication");
+  const frontmost = cfStringFromJS("AXFrontmost");
+  const raise = cfStringFromJS("AXRaise");
+  const press = cfStringFromJS("AXPress");
+  if (!windows || !focusedWindow || !title || !minimized || !fullscreen ||
+      !position || !size || !closeButton || !focusedApp || !frontmost ||
+      !raise || !press) return null;
+  _axAttrs = {
+    windows, focusedWindow, title, minimized, fullscreen,
+    position, size, closeButton, focusedApp, frontmost, raise, press,
+  };
+  return _axAttrs;
+}
+
+const _axOutBuf = new BigInt64Array(1);
+const _widBuf = new Uint32Array(1);
+
+function mac_withAXWindow<T>(handle: number, fn: (axWin: bigint) => T, fallback: T): T {
+  const AX = ax();
+  const CF = cf();
+  if (!AX || !CF) return fallback;
+  const attrs = getAXAttrs();
+  if (!attrs) return fallback;
+
+  const pid = mac_getPid(handle);
+  if (pid <= 0) return fallback;
+
+  const appElem = AX.AXUIElementCreateApplication(pid);
+  if (!appElem) return fallback;
+
+  try {
+    _axOutBuf[0] = 0n;
+    if (AX.AXUIElementCopyAttributeValue(appElem, attrs.windows, bp(_axOutBuf)) !== 0) return fallback;
+    const windowsArray = _axOutBuf[0];
+    if (!windowsArray) return fallback;
+
+    try {
+      const count = Number(CF.CFArrayGetCount(windowsArray));
+      for (let i = 0; i < count; i++) {
+        const axWin = CF.CFArrayGetValueAtIndex(windowsArray, BigInt(i));
+        if (!axWin) continue;
+        _widBuf[0] = 0;
+        if (AX._AXUIElementGetWindow(axWin, bp(_widBuf)) === 0 && _widBuf[0] === handle) {
+          return fn(axWin);
+        }
+      }
+    } finally {
+      CF.CFRelease(windowsArray);
+    }
+  } finally {
+    CF.CFRelease(appElem);
+  }
+  return fallback;
+}
+
+function mac_axGetBool(axWin: bigint, attr: bigint): boolean {
+  const AX = ax();
+  const CF = cf();
+  if (!AX || !CF) return false;
+  _axOutBuf[0] = 0n;
+  if (AX.AXUIElementCopyAttributeValue(axWin, attr, bp(_axOutBuf)) !== 0) return false;
+  const val = _axOutBuf[0];
+  if (!val) return false;
+  return CF.CFBooleanGetValue(val) !== 0;
+}
+
+function mac_isMinimized(handle: number): boolean {
+  const attrs = getAXAttrs();
+  if (!attrs) return false;
+  return mac_withAXWindow(handle, (axWin) => mac_axGetBool(axWin, attrs.minimized), false);
+}
+
+function mac_isMaximized(handle: number): boolean {
+  const attrs = getAXAttrs();
+  if (!attrs) return false;
+  return mac_withAXWindow(handle, (axWin) => mac_axGetBool(axWin, attrs.fullscreen), false);
+}
+
+function mac_close(handle: number): void {
+  const attrs = getAXAttrs();
+  if (!attrs) return;
+  mac_withAXWindow(handle, (axWin) => {
+    const AX = ax()!;
+    const CF = cf()!;
+    _axOutBuf[0] = 0n;
+    if (AX.AXUIElementCopyAttributeValue(axWin, attrs.closeButton, bp(_axOutBuf)) !== 0) return;
+    const btn = _axOutBuf[0];
+    if (!btn) return;
+    AX.AXUIElementPerformAction(btn, attrs.press);
+    CF.CFRelease(btn);
+  }, undefined);
+}
+
+function mac_setTitle(handle: number, title: string): void {
+  const attrs = getAXAttrs();
+  if (!attrs) return;
+  mac_withAXWindow(handle, (axWin) => {
+    const AX = ax()!;
+    const CF = cf()!;
+    const cfTitle = cfStringFromJS(title);
+    if (!cfTitle) return;
+    AX.AXUIElementSetAttributeValue(axWin, attrs.title, cfTitle);
+    CF.CFRelease(cfTitle);
+  }, undefined);
+}
+
+function mac_setMinimized(handle: number, minimized: boolean): void {
+  const attrs = getAXAttrs();
+  if (!attrs) return;
+  mac_withAXWindow(handle, (axWin) => {
+    ax()!.AXUIElementSetAttributeValue(axWin, attrs.minimized, cfBool(minimized));
+  }, undefined);
+}
+
+function mac_setMaximized(handle: number, maximized: boolean): void {
+  const attrs = getAXAttrs();
+  if (!attrs) return;
+  mac_withAXWindow(handle, (axWin) => {
+    ax()!.AXUIElementSetAttributeValue(axWin, attrs.fullscreen, cfBool(maximized));
+  }, undefined);
+}
+
+function mac_setBounds(handle: number, x: number, y: number, w: number, h: number): void {
+  const attrs = getAXAttrs();
+  if (!attrs) return;
+  mac_withAXWindow(handle, (axWin) => {
+    const AX = ax()!;
+    const CF = cf()!;
+    const posBuf = new Float64Array([x, y]);
+    const posVal = AX.AXValueCreate(kAXValueCGPointType, bp(posBuf));
+    if (posVal) {
+      AX.AXUIElementSetAttributeValue(axWin, attrs.position, posVal);
+      CF.CFRelease(posVal);
+    }
+    const sizeBuf = new Float64Array([w, h]);
+    const sizeVal = AX.AXValueCreate(kAXValueCGSizeType, bp(sizeBuf));
+    if (sizeVal) {
+      AX.AXUIElementSetAttributeValue(axWin, attrs.size, sizeVal);
+      CF.CFRelease(sizeVal);
+    }
+  }, undefined);
+}
+
+function mac_getActive(): number {
+  const AX = ax();
+  const CF = cf();
+  if (!AX || !CF) return 0;
+  const attrs = getAXAttrs();
+  if (!attrs) return 0;
+
+  const sysWide = AX.AXUIElementCreateSystemWide();
+  if (!sysWide) return 0;
+
+  try {
+    _axOutBuf[0] = 0n;
+    if (AX.AXUIElementCopyAttributeValue(sysWide, attrs.focusedApp, bp(_axOutBuf)) !== 0) return 0;
+    const appElem = _axOutBuf[0];
+    if (!appElem) return 0;
+
+    try {
+      _axOutBuf[0] = 0n;
+      if (AX.AXUIElementCopyAttributeValue(appElem, attrs.focusedWindow, bp(_axOutBuf)) !== 0) return 0;
+      const focWin = _axOutBuf[0];
+      if (!focWin) return 0;
+
+      try {
+        _widBuf[0] = 0;
+        if (AX._AXUIElementGetWindow(focWin, bp(_widBuf)) !== 0) return 0;
+        return _widBuf[0];
+      } finally {
+        CF.CFRelease(focWin);
+      }
+    } finally {
+      CF.CFRelease(appElem);
+    }
+  } finally {
+    CF.CFRelease(sysWide);
+  }
+}
+
+function mac_setActive(handle: number): void {
+  const AX = ax();
+  const CF = cf();
+  if (!AX || !CF) return;
+  const attrs = getAXAttrs();
+  if (!attrs) return;
+
+  const pid = mac_getPid(handle);
+  if (pid <= 0) return;
+
+  const appElem = AX.AXUIElementCreateApplication(pid);
+  if (!appElem) return;
+  try {
+    AX.AXUIElementSetAttributeValue(appElem, attrs.frontmost, cfBool(true));
+  } finally {
+    CF.CFRelease(appElem);
+  }
+
+  mac_withAXWindow(handle, (axWin) => {
+    AX.AXUIElementPerformAction(axWin, attrs.raise);
+  }, undefined);
+}
+
+function mac_isAxEnabled(): boolean {
+  const AX = ax();
+  return !!AX && AX.AXIsProcessTrusted() !== 0;
+}
+
 // ── NAPI-compatible exports ─────────────────────────────────────────
 
 export function window_isValid(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle);
   if (IS_WIN) return win_isValid(handle);
+  if (IS_MAC) return mac_isValid(handle);
   return false;
 }
 
@@ -575,12 +926,28 @@ export function window_close(handle: number): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_close(handle);
+  } else if (IS_MAC) {
+    if (!mac_isValid(handle)) return;
+    mac_close(handle);
   }
 }
 
 export function window_isTopMost(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_TOPMOST);
   if (IS_WIN) return win_isValid(handle) && win_isTopMost(handle);
+  if (IS_MAC) {
+    if (!mac_isValid(handle)) return false;
+    const keys = getCGKeys();
+    if (!keys) return false;
+    return mac_withWindowDict(handle, (dict) => {
+      const CF = cf()!;
+      const layerRef = CF.CFDictionaryGetValue(dict, keys.layer);
+      if (!layerRef) return false;
+      _numBuf[0] = 0;
+      CF.CFNumberGetValue(layerRef, _sType, bp(_numBuf));
+      return _numBuf[0] > 0;
+    }, false);
+  }
   return false;
 }
 
@@ -606,12 +973,14 @@ export function window_isBorderless(handle: number): boolean {
 export function window_isMinimized(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MINIMIZE);
   if (IS_WIN) return win_isValid(handle) && win_isMinimized(handle);
+  if (IS_MAC) return mac_isValid(handle) && mac_isMinimized(handle);
   return false;
 }
 
 export function window_isMaximized(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MAXIMIZE);
   if (IS_WIN) return win_isValid(handle) && win_isMaximized(handle);
+  if (IS_MAC) return mac_isValid(handle) && mac_isMaximized(handle);
   return false;
 }
 
@@ -656,6 +1025,9 @@ export function window_setMinimized(handle: number, minimized: boolean): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setMinimized(handle, minimized);
+  } else if (IS_MAC) {
+    if (!mac_isValid(handle)) return;
+    mac_setMinimized(handle, minimized);
   }
 }
 
@@ -667,12 +1039,16 @@ export function window_setMaximized(handle: number, maximized: boolean): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setMaximized(handle, maximized);
+  } else if (IS_MAC) {
+    if (!mac_isValid(handle)) return;
+    mac_setMaximized(handle, maximized);
   }
 }
 
 export function window_getProcess(handle: number): number {
   if (IS_LINUX) return winIsValid(handle) ? getPid(BigInt(handle)) : 0;
   if (IS_WIN) return win_isValid(handle) ? win_getPid(handle) : 0;
+  if (IS_MAC) return mac_isValid(handle) ? mac_getPid(handle) : 0;
   return 0;
 }
 
@@ -686,12 +1062,14 @@ export function window_setHandle(_handle: number, newHandle: number): boolean {
   if (newHandle === 0) return true;
   if (IS_LINUX) return winIsValid(newHandle);
   if (IS_WIN) return win_isValid(newHandle);
+  if (IS_MAC) return mac_isValid(newHandle);
   return false;
 }
 
 export function window_getTitle(handle: number): string {
   if (IS_LINUX) return winIsValid(handle) ? getTitle(BigInt(handle)) : "";
   if (IS_WIN) return win_isValid(handle) ? win_getTitle(handle) : "";
+  if (IS_MAC) return mac_isValid(handle) ? mac_getTitle(handle) : "";
   return "";
 }
 
@@ -706,6 +1084,9 @@ export function window_setTitle(handle: number, title: string): void {
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setTitle(handle, title);
+  } else if (IS_MAC) {
+    if (!mac_isValid(handle)) return;
+    mac_setTitle(handle, title);
   }
 }
 
@@ -717,6 +1098,7 @@ export function window_getBounds(handle: number): { x: number; y: number; w: num
     return { x: c.x - f.left, y: c.y - f.top, w: c.w + f.right, h: c.h + f.bottom };
   }
   if (IS_WIN) return win_isValid(handle) ? win_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_MAC) return mac_isValid(handle) ? mac_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -733,12 +1115,16 @@ export function window_setBounds(handle: number, x: number, y: number, w: number
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setBounds(handle, x, y, w, h);
+  } else if (IS_MAC) {
+    if (!mac_isValid(handle)) return;
+    mac_setBounds(handle, x, y, w, h);
   }
 }
 
 export function window_getClient(handle: number): { x: number; y: number; w: number; h: number } {
   if (IS_LINUX) return winIsValid(handle) ? getClient(BigInt(handle)) : { x: 0, y: 0, w: 0, h: 0 };
   if (IS_WIN) return win_isValid(handle) ? win_getClient(handle) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_MAC) return mac_isValid(handle) ? mac_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -752,6 +1138,9 @@ export function window_setClient(handle: number, x: number, y: number, w: number
   } else if (IS_WIN) {
     if (!win_isValid(handle)) return;
     win_setClient(handle, x, y, w, h);
+  } else if (IS_MAC) {
+    if (!mac_isValid(handle)) return;
+    mac_setBounds(handle, x, y, w, h);
   }
 }
 
@@ -762,6 +1151,11 @@ export function window_mapToClient(handle: number, x: number, y: number): { x: n
     return { x: x - c.x, y: y - c.y };
   }
   if (IS_WIN) return win_isValid(handle) ? win_mapToClient(handle, x, y) : { x, y };
+  if (IS_MAC) {
+    if (!mac_isValid(handle)) return { x, y };
+    const b = mac_getBounds(handle);
+    return { x: x - b.x, y: y - b.y };
+  }
   return { x, y };
 }
 
@@ -772,6 +1166,11 @@ export function window_mapToScreen(handle: number, x: number, y: number): { x: n
     return { x: x + c.x, y: y + c.y };
   }
   if (IS_WIN) return win_isValid(handle) ? win_mapToScreen(handle, x, y) : { x, y };
+  if (IS_MAC) {
+    if (!mac_isValid(handle)) return { x, y };
+    const b = mac_getBounds(handle);
+    return { x: x + b.x, y: y + b.y };
+  }
   return { x, y };
 }
 
@@ -807,6 +1206,7 @@ export function window_getActive(): number {
     return Number(win);
   }
   if (IS_WIN) return win_getActive();
+  if (IS_MAC) return mac_getActive();
   return 0;
 }
 
@@ -816,11 +1216,14 @@ export function window_setActive(handle: number): void {
     windowSetActiveInternal(BigInt(handle));
   } else if (IS_WIN) {
     win_setActive(handle);
+  } else if (IS_MAC) {
+    mac_setActive(handle);
   }
 }
 
 export function window_isAxEnabled(prompt?: boolean): boolean {
   if (IS_LINUX || IS_WIN) return true;
+  if (IS_MAC) return mac_isAxEnabled();
   return false;
 }
 
