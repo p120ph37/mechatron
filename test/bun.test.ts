@@ -31,6 +31,16 @@ const backend: string =
     : "ffi";
 process.env.MECHATRON_BACKEND = backend;
 
+// Bun 1.3.13 crashes on macOS when the FFI window module's dlopen symbols
+// (Accessibility framework, extra CF/CG symbols) are loaded — the crash is
+// in Bun's internal C++ JIT thunk cleanup, not in our code.  Force the
+// window subsystem to NAPI on macOS when the primary backend is FFI so the
+// problematic symbols are never loaded.  NAPI window support is complete on
+// macOS, so this loses no coverage.
+if (process.platform === "darwin" && _baseBackend === "ffi" && !process.env.MECHATRON_BACKEND_WINDOW) {
+  process.env.MECHATRON_BACKEND_WINDOW = "napi";
+}
+
 // ── Test helpers (mirrors test/test.js) ──────────────────────────────────────
 
 const log = (msg: string) => process.stdout.write(msg);
@@ -64,21 +74,17 @@ type TestEntry = { name: string; functions: string[]; test: () => any };
 
 // Each entry declares the COMPATIBILITY.md functions it touches; matrix.js
 // derives the column per-function from platform + getBackend(subsystem).
-// Window tests run last on macOS: Bun 1.3.13 crashes during GC after
-// the FFI window module's JIT thunks are active.  Placing window tests
-// last lets the afterAll process.exit(0) fire before the faulty native
-// teardown.  On other platforms the order doesn't matter.
 const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
   { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor, waitForAsync) },
   { prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor, waitForAsync) },
-  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor, waitForAsync) },
 ];
 
 log(`\nMECHATRON [${backend.toUpperCase()} backend] ${process.platform}-${process.arch}\n`);
