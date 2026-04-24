@@ -347,7 +347,7 @@ function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle
 
   const id = CG.CGMainDisplayID();
   const cgImg = CG.CGDisplayCreateImage(id);
-  if (cgImg === 0n) return null;
+  if (!cgImg) return null;
   try {
     const fullH = Number(CG.CGImageGetHeight(cgImg));
     const fullW = Number(CG.CGImageGetWidth(cgImg));
@@ -364,13 +364,13 @@ function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle
       return null;
     }
     const cs = CG.CGColorSpaceCreateDeviceRGB();
-    if (cs === 0n) return null;
+    if (!cs) return null;
     const ctx = CG.CGBitmapContextCreate(
       bp(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
       cs, BITMAP_INFO_BGRA_PMA,
     );
     CG.CGColorSpaceRelease(cs);
-    if (ctx === 0n) return null;
+    if (!ctx) return null;
     try {
       // Draw the full display image at an offset so that display pixel
       // (x, y) ends up at context (0, 0) in memory order (top-left).

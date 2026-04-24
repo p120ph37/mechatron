@@ -443,12 +443,12 @@ export function resolveDataSymbol(name: string): bigint {
   const lc = libc();
   const F = macFFI();
   if (!lc || !F) return 0n;
-  if (_appkitHandle === 0n) {
+  if (!_appkitHandle) {
     _appkitHandle = lc.dlopen(bp(cstr(AK_PATH)), RTLD_LAZY);
-    if (_appkitHandle === 0n) { _dataSymCache.set(name, 0n); return 0n; }
+    if (!_appkitHandle) { _dataSymCache.set(name, 0n); return 0n; }
   }
   const addr = lc.dlsym(_appkitHandle, bp(cstr(name)));
-  if (addr === 0n) { _dataSymCache.set(name, 0n); return 0n; }
+  if (!addr) { _dataSymCache.set(name, 0n); return 0n; }
   const val = F.read.ptr(Number(addr));
   const ptr = typeof val === "bigint" ? val : BigInt(val as number);
   _dataSymCache.set(name, ptr);
@@ -466,7 +466,7 @@ export function cfStringFromJS(s: string): bigint {
   const C = cf();
   if (!C) return 0n;
   const m = C.CFStringCreateMutable(0n, 0n);
-  if (m === 0n) return 0n;
+  if (!m) return 0n;
   C.CFStringAppendCString(m, bp(cstrCached(s)), kCFStringEncodingUTF8);
   return m;
 }
@@ -481,7 +481,7 @@ const _utf8Dec = new TextDecoder("utf-8");
 export function cfStringToJS(cfstr: bigint): string {
   const C = cf();
   const F = macFFI();
-  if (!C || !F || cfstr === 0n) return "";
+  if (!C || !F || !cfstr) return "";
   const len = C.CFStringGetLength(cfstr);
   const need = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8)) + 1;
   if (need > _cfStrBuf.length) _cfStrBuf = new Uint8Array(need);

@@ -263,7 +263,7 @@ function macMouseSource(): bigint {
   if (_macMouseSource !== null) return _macMouseSource;
   const C = cg(); if (!C) { _macMouseSource = 0n; return 0n; }
   _macMouseSource = C.CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
-  if (_macMouseSource === 0n) return 0n;
+  if (!_macMouseSource) return 0n;
   return _macMouseSource;
 }
 
@@ -275,9 +275,9 @@ function mac_mouse_press(button: number): void {
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
   const src = macMouseSource();
-  if (src === 0n) return;
+  if (!src) return;
   const evt = C.CGEventCreateMouseEvent(src, spec.type_down, _macLastPos.x, _macLastPos.y, spec.cg_btn);
-  if (evt === 0n) return;
+  if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -288,9 +288,9 @@ function mac_mouse_release(button: number): void {
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
   const src = macMouseSource();
-  if (src === 0n) return;
+  if (!src) return;
   const evt = C.CGEventCreateMouseEvent(src, spec.type_up, _macLastPos.x, _macLastPos.y, spec.cg_btn);
-  if (evt === 0n) return;
+  if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -300,7 +300,7 @@ function mac_mouse_scrollV(amount: number): void {
   const F = cf();
   if (!C || !F) return;
   const evt = C.CGEventCreateScrollWheelEvent2(0n, kCGScrollEventUnitPixel, 1, amount | 0, 0, 0);
-  if (evt === 0n) return;
+  if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -310,7 +310,7 @@ function mac_mouse_scrollH(amount: number): void {
   const F = cf();
   if (!C || !F) return;
   const evt = C.CGEventCreateScrollWheelEvent2(0n, kCGScrollEventUnitPixel, 2, 0, amount | 0, 0);
-  if (evt === 0n) return;
+  if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }

@@ -497,7 +497,7 @@ function getCGKeys() {
   const n = cfStringFromJS("kCGWindowNumber");
   const l = cfStringFromJS("kCGWindowLayer");
   const nm = cfStringFromJS("kCGWindowName");
-  if (n === 0n || l === 0n || nm === 0n) return null;
+  if (!n || !l || !nm) return null;
   _cgKeys = { number: n, layer: l, name: nm };
   return _cgKeys;
 }
@@ -515,7 +515,7 @@ function mac_getList(regexStr?: string): number[] {
 
   const option = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
   const infoList = C.CGWindowListCopyWindowInfo(option, kCGNullWindowID);
-  if (infoList === 0n) return [];
+  if (!infoList) return [];
 
   const re = makeRegex(regexStr);
   const out: number[] = [];
@@ -525,17 +525,17 @@ function mac_getList(regexStr?: string): number[] {
 
     for (let i = 0; i < count; i++) {
       const dict = CF.CFArrayGetValueAtIndex(infoList, BigInt(i));
-      if (dict === 0n) continue;
+      if (!dict) continue;
 
       const layerRef = CF.CFDictionaryGetValue(dict, keys.layer);
-      if (layerRef !== 0n) {
+      if (layerRef) {
         _numBuf[0] = -1;
         CF.CFNumberGetValue(layerRef, _sType, bp(_numBuf));
         if (_numBuf[0] !== 0) continue;
       }
 
       const numRef = CF.CFDictionaryGetValue(dict, keys.number);
-      if (numRef === 0n) continue;
+      if (!numRef) continue;
       _numBuf[0] = 0;
       CF.CFNumberGetValue(numRef, _sType, bp(_numBuf));
       const winId = _numBuf[0];
@@ -543,7 +543,7 @@ function mac_getList(regexStr?: string): number[] {
 
       if (re) {
         const nameRef = CF.CFDictionaryGetValue(dict, keys.name);
-        if (nameRef === 0n) continue;
+        if (!nameRef) continue;
         const title = cfStringToJS(nameRef);
         if (!re.test(title)) continue;
       }
