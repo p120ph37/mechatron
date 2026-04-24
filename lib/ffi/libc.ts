@@ -48,6 +48,7 @@ let _opened = false;
 let _libc: LibC | null = null;
 let _ffi: BunFFI | null = null;
 let _reason: string | null = null;
+let _dlopenHandle: any = null;
 
 function openLibc(): void {
   if (_opened) return;
@@ -72,6 +73,7 @@ function openLibc(): void {
       munmap: { args: [T.u64, T.u64], returns: T.i32 },
     });
     _libc = h.symbols;
+    _dlopenHandle = h;
   } catch (e) {
     _reason = (e as Error).message || String(e);
   }

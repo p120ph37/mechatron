@@ -106,6 +106,8 @@ let _kernel32: Kernel32 | null = null;
 let _psapi: Psapi | null = null;
 let _gdi32: Gdi32 | null = null;
 
+const _dlopenHandles: any[] = [];
+
 function tryDlopen(): void {
   if (_opened) return;
   _opened = true;
@@ -157,6 +159,7 @@ function tryDlopen(): void {
       GetClipboardSequenceNumber:{ args: [], returns: T.u32 },
     });
     _user32 = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _user32 = null;
   }
@@ -191,6 +194,7 @@ function tryDlopen(): void {
       lstrlenW:                   { args: [T.ptr], returns: T.i32 },
     });
     _kernel32 = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _kernel32 = null;
   }
@@ -203,6 +207,7 @@ function tryDlopen(): void {
       GetModuleInformation: { args: [T.u64, T.u64, T.ptr, T.u32], returns: T.i32 },
     });
     _psapi = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _psapi = null;
   }
@@ -218,6 +223,7 @@ function tryDlopen(): void {
       GetDIBits:              { args: [T.u64, T.u64, T.u32, T.u32, T.ptr, T.ptr, T.u32], returns: T.i32 },
     });
     _gdi32 = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _gdi32 = null;
   }
