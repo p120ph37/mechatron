@@ -18,7 +18,7 @@
  * (Bun has no 32-bit Windows build) and for any direct `node` invocations.
  */
 
-import { describe, test } from "bun:test";
+import { describe, test, afterAll } from "bun:test";
 
 // Default backend when none specified: ffi on every supported platform.
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
@@ -84,6 +84,8 @@ if (compatMatrix.available) {
 
 // ── Suite ────────────────────────────────────────────────────────────────────
 
+const exercisedFunctions = new Set<string>();
+
 describe(`mechatron [${backend}]`, () => {
   test("availability", () => {
     for (const sub of ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"]) {
@@ -106,9 +108,34 @@ describe(`mechatron [${backend}]`, () => {
           log(`  ${displayName} (skipped: matrix)\n`);
           return;
         }
+        for (const fn of entry.functions) exercisedFunctions.add(fn);
         await entry.test();
       }, timeout);
     }
   }
+
+  afterAll(() => {
+    if (!compatMatrix.available) return;
+    const okCells: string[] = compatMatrix.getOkCells();
+    const unexercised = okCells.filter((fn: string) => !exercisedFunctions.has(fn));
+    log(`\nMatrix cross-check: ${exercisedFunctions.size}/${okCells.length} ok cells exercised.`);
+    if (unexercised.length > 0) log(` Missing: ${unexercised.join(", ")}`);
+    log("\n");
+
+    const outDir = process.env.RUNNER_TEMP;
+    if (outDir) {
+      const fs = require("fs");
+      const path = require("path");
+      const exDir = path.join(outDir, "exercised");
+      fs.mkdirSync(exDir, { recursive: true });
+      const safeBackend = backend.replace(/[\[\]]/g, "_");
+      const fname = `${process.platform}-${process.arch}-${safeBackend}.json`;
+      fs.writeFileSync(
+        path.join(exDir, fname),
+        JSON.stringify({ platform: process.platform, arch: process.arch,
+          backend, exercised: [...exercisedFunctions], okCells }) + "\n",
+      );
+    }
+  });
 
 });

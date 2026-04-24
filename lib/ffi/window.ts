@@ -17,8 +17,7 @@ import {
 import { user32, winFFI, w2js, js2w } from "./win";
 import { getBunFFI, cstr, type Pointer } from "./bun";
 import {
-  cg, cf, macFFI, cfStringFromJS, cfStringToJS,
-  kCFNumberSInt32Type,
+  cg, cf, macFFI, cfStringFromJS, sel, msgSendTyped,
   kCGWindowListOptionOnScreenOnly, kCGWindowListExcludeDesktopElements, kCGNullWindowID,
 } from "./mac";
 
@@ -482,6 +481,14 @@ function win_setActive(handle: number): void {
 }
 
 // ── macOS: CGWindowList-based enumeration ───────────────────────────
+//
+// CF dictionary values (CFNumber, CFString) can be tagged pointers with
+// the high bit set.  bun:ffi's T.ptr round-trips these as JS numbers
+// (truncated) or rejects the bigint form ("Unable to convert … to a
+// pointer").  We avoid this entirely by using ObjC messaging: the
+// NSDictionary/NSArray/NSNumber/NSString toll-free bridges let us call
+// intValue / UTF8String via objc_msgSend, passing tagged objects as raw
+// T.u64 values that the ObjC runtime decodes internally.
 
 let _cgKeys: { number: Pointer; layer: Pointer; name: Pointer } | null = null;
 let _cgKeysInit = false;
@@ -497,8 +504,41 @@ function getCGKeys() {
   return _cgKeys;
 }
 
-const _numBuf = new Int32Array(1);
-const _sType = BigInt(kCFNumberSInt32Type);
+let _macMsg: {
+  count: (...a: any[]) => any;
+  objAtIdx: (...a: any[]) => any;
+  objForKey: (...a: any[]) => any;
+  intVal: (...a: any[]) => any;
+  utf8Str: (...a: any[]) => any;
+  selCount: Pointer; selObjAtIdx: Pointer; selObjForKey: Pointer;
+  selIntVal: Pointer; selUTF8Str: Pointer;
+} | null = null;
+let _macMsgInit = false;
+
+function getMacMsg() {
+  if (_macMsgInit) return _macMsg;
+  _macMsgInit = true;
+  const F = macFFI();
+  if (!F) return null;
+  const T = F.FFIType;
+  const sc = sel("count");
+  const soa = sel("objectAtIndex:");
+  const sofk = sel("objectForKey:");
+  const siv = sel("intValue");
+  const su = sel("UTF8String");
+  if (!sc || !soa || !sofk || !siv || !su) return null;
+  const mc = msgSendTyped([T.ptr, T.ptr], T.u64);
+  const moa = msgSendTyped([T.ptr, T.ptr, T.u64], T.u64);
+  const mofk = msgSendTyped([T.u64, T.ptr, T.ptr], T.u64);
+  const miv = msgSendTyped([T.u64, T.ptr], T.i32);
+  const mu = msgSendTyped([T.u64, T.ptr], T.ptr);
+  if (!mc || !moa || !mofk || !miv || !mu) return null;
+  _macMsg = {
+    count: mc, objAtIdx: moa, objForKey: mofk, intVal: miv, utf8Str: mu,
+    selCount: sc, selObjAtIdx: soa, selObjForKey: sofk, selIntVal: siv, selUTF8Str: su,
+  };
+  return _macMsg;
+}
 
 function mac_getList(regexStr?: string): number[] {
   const C = cg();
@@ -507,7 +547,8 @@ function mac_getList(regexStr?: string): number[] {
   if (!C || !CF || !F) return [];
 
   const keys = getCGKeys();
-  if (!keys) return [];
+  const m = getMacMsg();
+  if (!keys || !m) return [];
 
   const option = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
   const infoList = C.CGWindowListCopyWindowInfo(option, kCGNullWindowID);
@@ -517,30 +558,28 @@ function mac_getList(regexStr?: string): number[] {
   const out: number[] = [];
 
   try {
-    const count = Number(CF.CFArrayGetCount(infoList));
+    const count = Number(m.count(infoList, m.selCount));
 
     for (let i = 0; i < count; i++) {
-      const dict = CF.CFArrayGetValueAtIndex(infoList, BigInt(i));
-      if (!dict) continue;
+      const dict = m.objAtIdx(infoList, m.selObjAtIdx, BigInt(i));
+      if (dict === 0n) continue;
 
-      const layerRef = CF.CFDictionaryGetValue(dict, keys.layer);
-      if (layerRef) {
-        _numBuf[0] = -1;
-        CF.CFNumberGetValue(layerRef, _sType, F.ptr(_numBuf));
-        if (_numBuf[0] !== 0) continue;
+      const layerVal = m.objForKey(dict, m.selObjForKey, keys.layer);
+      if (layerVal !== 0n) {
+        if (m.intVal(layerVal, m.selIntVal) !== 0) continue;
       }
 
-      const numRef = CF.CFDictionaryGetValue(dict, keys.number);
-      if (!numRef) continue;
-      _numBuf[0] = 0;
-      CF.CFNumberGetValue(numRef, _sType, F.ptr(_numBuf));
-      const winId = _numBuf[0];
+      const numVal = m.objForKey(dict, m.selObjForKey, keys.number);
+      if (numVal === 0n) continue;
+      const winId = m.intVal(numVal, m.selIntVal);
       if (winId <= 0) continue;
 
       if (re) {
-        const nameRef = CF.CFDictionaryGetValue(dict, keys.name);
-        if (!nameRef) continue;
-        const title = cfStringToJS(nameRef);
+        const nameVal = m.objForKey(dict, m.selObjForKey, keys.name);
+        if (nameVal === 0n) continue;
+        const cStr = m.utf8Str(nameVal, m.selUTF8Str);
+        if (!cStr) continue;
+        const title = new (F as any).CString(cStr) as string;
         if (!re.test(title)) continue;
       }
 

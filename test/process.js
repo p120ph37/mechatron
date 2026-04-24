@@ -173,7 +173,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// ----- getModules (includes Module class tests and getSegments) -----
 		{
 			name: "Process getModules / Module class / getSegments",
-			functions: ["process_getModules"],
+			functions: ["process_getModules", "process_getSegments"],
 			test: async function () {
 				var curr = await Process.getCurrent();
 				var mods = await curr.getModules();

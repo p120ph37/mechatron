@@ -111,6 +111,15 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await w.close();
 			}
 		},
+		// ── getTitle on invalid window ──
+		{
+			name: "invalid window getTitle",
+			functions: ["window_getTitle"],
+			test: async function () {
+				var w = new Window();
+				assert(await w.getTitle() === "", "empty title empty");
+			}
+		},
 		// ── getBounds / getClient on invalid window ──
 		{
 			name: "invalid window getBounds",

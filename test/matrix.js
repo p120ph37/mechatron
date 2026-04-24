@@ -132,6 +132,25 @@ module.exports = {
 				}
 				return true;
 			},
+
+			getOkCells: function () {
+				if (!matrix) return [];
+				var cells = [];
+				var subsystems = Object.keys(matrix);
+				for (var s = 0; s < subsystems.length; s++) {
+					var sub = subsystems[s];
+					var column = columnForSubsystem(mechatron, sub);
+					if (!column) continue;
+					var fns = Object.keys(matrix[sub]);
+					for (var f = 0; f < fns.length; f++) {
+						var fn = fns[f];
+						if (matrix[sub][fn][column] === "ok") {
+							cells.push(fn);
+						}
+					}
+				}
+				return cells;
+			},
 		};
 	},
 };

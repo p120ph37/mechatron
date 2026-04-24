@@ -177,6 +177,48 @@ jobs:
             comment += "_No test results found in artifacts._\n";
           }
 
+          // ── Matrix cross-check: every "ok" cell must be exercised ───
+          const exFiles = [];
+          for (const dir of dirs) {
+            const exDir = path.join(resultsDir, dir, "exercised");
+            try {
+              for (const f of fs.readdirSync(exDir).filter(f => f.endsWith(".json"))) {
+                try { exFiles.push(JSON.parse(fs.readFileSync(path.join(exDir, f), "utf8"))); }
+                catch (_) {}
+              }
+            } catch (_) {}
+          }
+          if (exFiles.length > 0) {
+            const allOk = {};  // column -> Set<fn>
+            const allEx = {};  // column -> Set<fn>
+            for (const ef of exFiles) {
+              const col = ef.platform + "-" + ef.backend;
+              if (!allOk[col]) allOk[col] = new Set();
+              if (!allEx[col]) allEx[col] = new Set();
+              for (const fn of ef.okCells || []) allOk[col].add(fn);
+              for (const fn of ef.exercised || []) allEx[col].add(fn);
+            }
+            const gaps = [];
+            for (const [col, okSet] of Object.entries(allOk)) {
+              const exSet = allEx[col] || new Set();
+              for (const fn of okSet) {
+                if (!exSet.has(fn)) gaps.push({ col, fn });
+              }
+            }
+            if (gaps.length > 0) {
+              allPassed = false;
+              comment += `<details>\n<summary>:warning: <b>Matrix cross-check</b> — ${gaps.length} ok cell(s) not exercised</summary>\n\n`;
+              comment += `| Function | Column |\n|----------|--------|\n`;
+              for (const g of gaps.sort((a, b) => a.fn.localeCompare(b.fn) || a.col.localeCompare(b.col))) {
+                comment += `| ${g.fn} | ${g.col} |\n`;
+              }
+              comment += `\n</details>\n\n`;
+            } else {
+              const totalOk = Object.values(allOk).reduce((s, v) => s + v.size, 0);
+              comment += `:white_check_mark: **Matrix cross-check**: all ${totalOk} ok cells exercised across ${exFiles.length} backend runs.\n\n`;
+            }
+          }
+
           const heading = allPassed && anyResults
             ? ":white_check_mark: All tests passed"
             : ":x: Some tests failed";

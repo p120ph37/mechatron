@@ -298,6 +298,7 @@ jobs:
             ${{ runner.temp }}/test-output.txt
             ${{ runner.temp }}/junit/
             ${{ runner.temp }}/coverage/
+            ${{ runner.temp }}/exercised/
             ${{ runner.temp }}/node-reports/
           if-no-files-found: ignore
 
