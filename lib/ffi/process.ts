@@ -587,7 +587,7 @@ export function process_exit(pid: number): void {
             }
             return 1;
           },
-          { args: [T.u64, T.u64], returns: T.i32 },
+          { args: [T.u64, T.i64], returns: T.i32 },
         )
       : null;
     if (cb) {

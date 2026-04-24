@@ -454,7 +454,7 @@ function win_getList(regexStr?: string): number[] {
       }
       return 1; // continue enumeration
     },
-    { args: [T.u64, T.u64], returns: T.i32 },
+    { args: [T.u64, T.i64], returns: T.i32 },
   );
   u.EnumWindows(cb.ptr, 0n);
   cb.close();

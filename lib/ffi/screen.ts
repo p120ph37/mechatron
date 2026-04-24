@@ -247,7 +247,7 @@ function winSynchronize(): ScreenInfo[] | null {
       });
       return 1;
     },
-    { args: [T.u64, T.u64, T.ptr, T.u64], returns: T.i32 },
+    { args: [T.u64, T.u64, T.ptr, T.i64], returns: T.i32 },
   );
 
   try {
