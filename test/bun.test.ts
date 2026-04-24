@@ -112,11 +112,13 @@ describe(`mechatron [${backend}]`, () => {
   }
 
   // Bun ≤ 1.3.13 segfaults in bun:ffi's dlclose cleanup during process
-  // shutdown on macOS.  Force a clean exit after all tests (and reporter
-  // output) finish to avoid the teardown crash.
+  // shutdown on macOS.  Force a clean exit after all tests and reporter
+  // output have been flushed — afterAll runs after bun:test has written
+  // JUnit XML and coverage, so process.exit here bypasses the faulty
+  // native teardown.
   if (process.platform === "darwin") {
     afterAll(() => {
-      setTimeout(() => process.exit(0), 100);
+      process.exit(process.exitCode ?? 0);
     });
   }
 });
