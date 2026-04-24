@@ -81,6 +81,7 @@ function mac_keyboard_press(keycode: number): void {
   const F = cf();
   if (!C || !F) return;
   const src = macSource();
+  if (src === null) return;
   const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, true);
   if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
@@ -92,6 +93,7 @@ function mac_keyboard_release(keycode: number): void {
   const F = cf();
   if (!C || !F) return;
   const src = macSource();
+  if (src === null) return;
   const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, false);
   if (!evt) return;
   C.CGEventPost(kCGHIDEventTap, evt);
