@@ -306,6 +306,16 @@ function mac_initKeys(): void {
   _axZoomAction = cfStringFromJS("AXZoomAction");
 }
 
+// ── macOS scratch buffers ─────────────────────────────────────────
+// Pre-allocated typed arrays reused across FFI calls to avoid creating
+// hundreds of short-lived TypedArray objects that pressure JSC's GC.
+// Safe because all JS execution is single-threaded.
+
+const _scratchI32   = new Int32Array(1);
+const _scratchU32   = new Uint32Array(1);
+const _scratchU64   = new BigUint64Array(1);
+const _scratchF64x2 = new Float64Array(2);
+
 // ── macOS helpers ──────────────────────────────────────────────────
 
 /**
@@ -341,9 +351,9 @@ function mac_cfDictGetInt32(dict: Pointer, key: Pointer): number {
   if (!CF || !F || !dict || !key) return 0;
   const val = CF.CFDictionaryGetValue(dict, key);
   if (!val) return 0;
-  const buf = new Int32Array(1);
-  if (CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(buf)) === 0) return 0;
-  return buf[0];
+  _scratchI32[0] = 0;
+  if (CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32)) === 0) return 0;
+  return _scratchI32[0];
 }
 
 /** Read a CFString from a CFDictionary value. */
@@ -378,21 +388,20 @@ function mac_getAXElement(windowId: number): Pointer {
   if (pid === 0) return null;
   const app = AX.AXUIElementCreateApplication(pid);
   if (!app) return null;
-  const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(app, _axWindows, F.ptr(valueBuf));
-  if (err !== 0 || valueBuf[0] === 0n) {
+  _scratchU64[0] = 0n;
+  const err = AX.AXUIElementCopyAttributeValue(app, _axWindows, F.ptr(_scratchU64));
+  if (err !== 0 || _scratchU64[0] === 0n) {
     CF.CFRelease(app);
     return null;
   }
-  const winArray = valueBuf[0] as unknown as Pointer;
+  const winArray = _scratchU64[0] as unknown as Pointer;
   const count = Number(CF.CFArrayGetCount(winArray));
   let found: Pointer = null;
-  const widBuf = new Uint32Array(1);
   for (let i = 0; i < count; i++) {
     const elem = CF.CFArrayGetValueAtIndex(winArray, BigInt(i));
     if (!elem) continue;
-    widBuf[0] = 0;
-    if (AX._AXUIElementGetWindow(elem, F.ptr(widBuf)) === 0 && widBuf[0] === windowId) {
+    _scratchU32[0] = 0;
+    if (AX._AXUIElementGetWindow(elem, F.ptr(_scratchU32)) === 0 && _scratchU32[0] === windowId) {
       CF.CFRetain(elem);
       found = elem;
       break;
@@ -407,10 +416,10 @@ function mac_getAXElement(windowId: number): Pointer {
 function mac_getAXString(element: Pointer, attr: Pointer): string {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F || !element || !attr) return "";
-  const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(valueBuf));
-  if (err !== 0 || valueBuf[0] === 0n) return "";
-  const val = valueBuf[0] as unknown as Pointer;
+  _scratchU64[0] = 0n;
+  const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
+  if (err !== 0 || _scratchU64[0] === 0n) return "";
+  const val = _scratchU64[0] as unknown as Pointer;
   const s = cfStringToJS(val);
   CF.CFRelease(val);
   return s;
@@ -420,10 +429,10 @@ function mac_getAXString(element: Pointer, attr: Pointer): string {
 function mac_getAXBool(element: Pointer, attr: Pointer): boolean {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F || !element || !attr) return false;
-  const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(valueBuf));
-  if (err !== 0 || valueBuf[0] === 0n) return false;
-  const val = valueBuf[0] as unknown as Pointer;
+  _scratchU64[0] = 0n;
+  const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
+  if (err !== 0 || _scratchU64[0] === 0n) return false;
+  const val = _scratchU64[0] as unknown as Pointer;
   const result = CF.CFBooleanGetValue(val) !== 0;
   CF.CFRelease(val);
   return result;
@@ -434,16 +443,14 @@ function mac_getAXPosition(element: Pointer): { x: number; y: number } | null {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F || !element) return null;
   mac_initKeys();
-  const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(element, _axPosition, F.ptr(valueBuf));
-  if (err !== 0 || valueBuf[0] === 0n) return null;
-  const val = valueBuf[0] as unknown as Pointer;
-  // AXValue wrapping CGPoint — two Float64s
-  const point = new Float64Array(2);
-  const ok = AX.AXValueGetValue(val, kAXValueCGPointType, F.ptr(point));
+  _scratchU64[0] = 0n;
+  const err = AX.AXUIElementCopyAttributeValue(element, _axPosition, F.ptr(_scratchU64));
+  if (err !== 0 || _scratchU64[0] === 0n) return null;
+  const val = _scratchU64[0] as unknown as Pointer;
+  const ok = AX.AXValueGetValue(val, kAXValueCGPointType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
   if (ok === 0) return null;
-  return { x: point[0], y: point[1] };
+  return { x: _scratchF64x2[0], y: _scratchF64x2[1] };
 }
 
 /** Get AXSize as {w, h}. */
@@ -451,15 +458,14 @@ function mac_getAXSize(element: Pointer): { w: number; h: number } | null {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F || !element) return null;
   mac_initKeys();
-  const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(element, _axSize, F.ptr(valueBuf));
-  if (err !== 0 || valueBuf[0] === 0n) return null;
-  const val = valueBuf[0] as unknown as Pointer;
-  const size = new Float64Array(2);
-  const ok = AX.AXValueGetValue(val, kAXValueCGSizeType, F.ptr(size));
+  _scratchU64[0] = 0n;
+  const err = AX.AXUIElementCopyAttributeValue(element, _axSize, F.ptr(_scratchU64));
+  if (err !== 0 || _scratchU64[0] === 0n) return null;
+  const val = _scratchU64[0] as unknown as Pointer;
+  const ok = AX.AXValueGetValue(val, kAXValueCGSizeType, F.ptr(_scratchF64x2));
   CF.CFRelease(val);
   if (ok === 0) return null;
-  return { w: size[0], h: size[1] };
+  return { w: _scratchF64x2[0], h: _scratchF64x2[1] };
 }
 
 /** Set AXPosition. */
@@ -467,8 +473,8 @@ function mac_setAXPosition(element: Pointer, x: number, y: number): void {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F || !element) return;
   mac_initKeys();
-  const point = new Float64Array([x, y]);
-  const val = AX.AXValueCreate(kAXValueCGPointType, F.ptr(point));
+  _scratchF64x2[0] = x; _scratchF64x2[1] = y;
+  const val = AX.AXValueCreate(kAXValueCGPointType, F.ptr(_scratchF64x2));
   if (!val) return;
   AX.AXUIElementSetAttributeValue(element, _axPosition, val);
   CF.CFRelease(val);
@@ -479,8 +485,8 @@ function mac_setAXSize(element: Pointer, w: number, h: number): void {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F || !element) return;
   mac_initKeys();
-  const size = new Float64Array([w, h]);
-  const val = AX.AXValueCreate(kAXValueCGSizeType, F.ptr(size));
+  _scratchF64x2[0] = Math.max(1, w); _scratchF64x2[1] = Math.max(1, h);
+  const val = AX.AXValueCreate(kAXValueCGSizeType, F.ptr(_scratchF64x2));
   if (!val) return;
   AX.AXUIElementSetAttributeValue(element, _axSize, val);
   CF.CFRelease(val);
@@ -499,10 +505,10 @@ function mac_close(handle: number): void {
   const AX = ax(); const CF = cf(); const F = macFFI();
   if (!AX || !CF || !F) { CF?.CFRelease(elem); return; }
   mac_initKeys();
-  const valueBuf = new BigUint64Array(1);
-  const err = AX.AXUIElementCopyAttributeValue(elem, _axCloseButton, F.ptr(valueBuf));
-  if (err === 0 && valueBuf[0] !== 0n) {
-    const closeBtn = valueBuf[0] as unknown as Pointer;
+  _scratchU64[0] = 0n;
+  const err = AX.AXUIElementCopyAttributeValue(elem, _axCloseButton, F.ptr(_scratchU64));
+  if (err === 0 && _scratchU64[0] !== 0n) {
+    const closeBtn = _scratchU64[0] as unknown as Pointer;
     AX.AXUIElementPerformAction(closeBtn, _axPress!);
     CF.CFRelease(closeBtn);
   }
@@ -637,7 +643,7 @@ function mac_setBounds(handle: number, x: number, y: number, w: number, h: numbe
   const elem = mac_getAXElement(handle);
   if (!elem) return;
   mac_setAXPosition(elem, x, y);
-  mac_setAXSize(elem, Math.max(1, w), Math.max(1, h));
+  mac_setAXSize(elem, w, h);
   cf()!.CFRelease(elem);
 }
 
@@ -676,26 +682,23 @@ function mac_getActive(): number {
   const systemWide = AX.AXUIElementCreateSystemWide();
   if (!systemWide) return 0;
 
-  // Get focused application
-  const appBuf = new BigUint64Array(1);
-  let err = AX.AXUIElementCopyAttributeValue(systemWide, _axFocusedApplication, F.ptr(appBuf));
+  _scratchU64[0] = 0n;
+  let err = AX.AXUIElementCopyAttributeValue(systemWide, _axFocusedApplication, F.ptr(_scratchU64));
   CF.CFRelease(systemWide);
-  if (err !== 0 || appBuf[0] === 0n) return 0;
-  const app = appBuf[0] as unknown as Pointer;
+  if (err !== 0 || _scratchU64[0] === 0n) return 0;
+  const app = _scratchU64[0] as unknown as Pointer;
 
-  // Get focused window
-  const winBuf = new BigUint64Array(1);
-  err = AX.AXUIElementCopyAttributeValue(app, _axFocusedWindow, F.ptr(winBuf));
+  _scratchU64[0] = 0n;
+  err = AX.AXUIElementCopyAttributeValue(app, _axFocusedWindow, F.ptr(_scratchU64));
   CF.CFRelease(app);
-  if (err !== 0 || winBuf[0] === 0n) return 0;
-  const win = winBuf[0] as unknown as Pointer;
+  if (err !== 0 || _scratchU64[0] === 0n) return 0;
+  const win = _scratchU64[0] as unknown as Pointer;
 
-  // Get CGWindowID from AXUIElement
-  const widBuf = new Uint32Array(1);
-  err = AX._AXUIElementGetWindow(win, F.ptr(widBuf));
+  _scratchU32[0] = 0;
+  err = AX._AXUIElementGetWindow(win, F.ptr(_scratchU32));
   CF.CFRelease(win);
   if (err !== 0) return 0;
-  return widBuf[0];
+  return _scratchU32[0];
 }
 
 function mac_setActive(handle: number): void {

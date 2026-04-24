@@ -91,3 +91,14 @@ export function cstr(s: string): Uint8Array {
   buf[enc.length] = 0;
   return buf;
 }
+
+const _cstrCache = new Map<string, Uint8Array>();
+
+/** Like cstr() but caches the result — use for repeated short strings. */
+export function cstrCached(s: string): Uint8Array {
+  let buf = _cstrCache.get(s);
+  if (buf) return buf;
+  buf = cstr(s);
+  _cstrCache.set(s, buf);
+  return buf;
+}

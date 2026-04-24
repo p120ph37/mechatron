@@ -100,14 +100,7 @@ describe(`mechatron [${backend}]`, () => {
           log(`  ${displayName} (skipped: matrix)\n`);
           return;
         }
-        process.stderr.write(`>>> start: ${displayName}\n`);
-        try {
-          await entry.test();
-          process.stderr.write(`>>> end:   ${displayName}\n`);
-        } catch (e) {
-          process.stderr.write(`>>> error: ${displayName}: ${(e as Error).message}\n`);
-          throw e;
-        }
+        await entry.test();
       }, timeout);
     }
   }

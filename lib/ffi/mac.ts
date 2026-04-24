@@ -33,7 +33,7 @@
  * `NSScreen.frame`) use napi-provided fallbacks or degrade gracefully.
  */
 
-import { getBunFFI, cstr, type BunFFI, type Pointer } from "./bun";
+import { getBunFFI, cstr, cstrCached, type BunFFI, type Pointer } from "./bun";
 
 // ── Interfaces ────────────────────────────────────────────────────────
 
@@ -400,7 +400,7 @@ export function cls(name: string): Pointer {
   const o = objc();
   const F = macFFI();
   if (!o || !F) return null;
-  const p = o.objc_getClass(F.ptr(cstr(name)));
+  const p = o.objc_getClass(F.ptr(cstrCached(name)));
   _classCache.set(name, p);
   return p;
 }
@@ -410,7 +410,7 @@ export function sel(name: string): Pointer {
   const o = objc();
   const F = macFFI();
   if (!o || !F) return null;
-  const s = o.sel_registerName(F.ptr(cstr(name)));
+  const s = o.sel_registerName(F.ptr(cstrCached(name)));
   _selCache.set(name, s);
   return s;
 }
@@ -498,22 +498,25 @@ export function cfStringFromJS(s: string): Pointer {
   if (!C || !F) return null;
   const m = C.CFStringCreateMutable(null, 0n);
   if (!m) return null;
-  C.CFStringAppendCString(m, F.ptr(cstr(s)), kCFStringEncodingUTF8);
+  C.CFStringAppendCString(m, F.ptr(cstrCached(s)), kCFStringEncodingUTF8);
   return m;
 }
 
 /** Decode a CFStringRef to JS.  Does not release the CFString. */
+let _cfStrBuf = new Uint8Array(256);
+const _utf8Dec = new TextDecoder("utf-8");
+
 export function cfStringToJS(cfstr: Pointer): string {
   const C = cf();
   const F = macFFI();
   if (!C || !F || !cfstr) return "";
   const len = C.CFStringGetLength(cfstr);
-  const max = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8));
-  const buf = new Uint8Array(max + 1);
-  if (C.CFStringGetCString(cfstr, F.ptr(buf), BigInt(buf.byteLength), kCFStringEncodingUTF8) === 0) return "";
+  const need = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8)) + 1;
+  if (need > _cfStrBuf.length) _cfStrBuf = new Uint8Array(need);
+  if (C.CFStringGetCString(cfstr, F.ptr(_cfStrBuf), BigInt(_cfStrBuf.byteLength), kCFStringEncodingUTF8) === 0) return "";
   let end = 0;
-  while (end < buf.length && buf[end] !== 0) end++;
-  return new TextDecoder("utf-8").decode(buf.subarray(0, end));
+  while (end < _cfStrBuf.length && _cfStrBuf[end] !== 0) end++;
+  return _utf8Dec.decode(_cfStrBuf.subarray(0, end));
 }
 
 /** Decode a NUL-terminated byte buffer up to `len` bytes as UTF-8. */
