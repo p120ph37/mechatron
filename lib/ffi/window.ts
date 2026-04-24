@@ -1286,6 +1286,24 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
 if (IS_MAC) {
   mac_initKeys();
   mac_withWindowDict(0xFFFFFFFF, false, () => true);
+
+  // Release cached CFStrings on exit so CoreFoundation can be cleanly
+  // unloaded — prevents Bun FFI teardown crash (separate from the
+  // async-context crash above).
+  process.on('exit', () => {
+    if (!_macKeysInited) return;
+    const CF = cf();
+    if (!CF) return;
+    const keys = [
+      _kCGWindowNumber, _kCGWindowOwnerPID, _kCGWindowName, _kCGWindowBounds,
+      _kCGWindowLayer, _axWindows, _axFocusedWindow, _axFocusedApplication,
+      _axPosition, _axSize, _axTitle, _axMinimized, _axFullScreen, _axRaise,
+      _axSubrole, _axStandardWindow, _axCloseButton, _axPress, _axMinimize,
+      _axZoomAction,
+    ];
+    for (const k of keys) { if (k) CF.CFRelease(k); }
+    _macKeysInited = false;
+  });
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {
