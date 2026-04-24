@@ -99,7 +99,9 @@ describe(`mechatron [${backend}]`, () => {
       const needsGC = mod.prefix !== _prevPrefix;
       _prevPrefix = mod.prefix;
       test(displayName, async () => {
-        if (needsGC && typeof (globalThis as any).Bun?.gc === "function") {
+        // Bun ≤ 1.3.13 crashes in bun:ffi's JIT thunk GC on macOS when
+        // Bun.gc(true) runs after many dlopen'd symbols are active.
+        if (needsGC && process.platform !== "darwin" && typeof (globalThis as any).Bun?.gc === "function") {
           (globalThis as any).Bun.gc(true);
         }
         if (!compatMatrix.shouldRun(entry.functions)) {
