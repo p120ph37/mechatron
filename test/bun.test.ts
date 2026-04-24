@@ -18,7 +18,7 @@
  * (Bun has no 32-bit Windows build) and for any direct `node` invocations.
  */
 
-import { describe, test } from "bun:test";
+import { describe, test, afterAll } from "bun:test";
 
 // Default backend when none specified: ffi on every supported platform.
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
@@ -109,5 +109,14 @@ describe(`mechatron [${backend}]`, () => {
         await entry.test();
       }, timeout);
     }
+  }
+
+  // Bun ≤ 1.3.13 segfaults in bun:ffi's dlclose cleanup during process
+  // shutdown on macOS.  Force a clean exit after all tests (and reporter
+  // output) finish to avoid the teardown crash.
+  if (process.platform === "darwin") {
+    afterAll(() => {
+      setTimeout(() => process.exit(0), 100);
+    });
   }
 });
