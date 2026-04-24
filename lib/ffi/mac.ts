@@ -82,13 +82,16 @@ interface CoreFoundation {
   CFRelease: (cf: Pointer) => void;
   CFStringCreateMutable: (alloc: Pointer, maxLength: bigint) => Pointer;
   CFStringAppendCString: (s: Pointer, cstr: Pointer, encoding: number) => void;
-  CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => number;
-  CFStringGetLength: (s: Pointer) => bigint;
+  // i64 first arg so tagged CFString pointers pass through.
+  CFStringGetCString: (s: bigint, buf: Pointer, size: bigint, encoding: number) => number;
+  CFStringGetLength: (s: bigint) => bigint;
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
   // Array / dictionary access (window list parsing)
   CFArrayGetCount: (theArray: Pointer) => bigint;
   CFArrayGetValueAtIndex: (theArray: Pointer, idx: bigint) => Pointer;
-  // Returns u64 (bigint) — CF values can be tagged pointers above 2^53.
+  // Returns i64 — CF values can be tagged pointers (high bit set).  Using
+  // i64 lets the signed bigint pass directly to other i64-typed CF args
+  // without bun:ffi rejecting values above 2^63 (which T.ptr does).
   CFDictionaryGetValue: (theDict: Pointer, key: Pointer) => bigint;
   CFNumberGetValue: (cfNum: bigint, theType: bigint, valuePtr: Pointer) => number;
 }
@@ -213,18 +216,22 @@ function tryDlopen(): void {
       CFRelease:                          { args: [T.ptr], returns: T.void },
       CFStringCreateMutable:              { args: [T.ptr, T.i64], returns: T.ptr },
       CFStringAppendCString:              { args: [T.ptr, T.ptr, T.u32], returns: T.void },
-      CFStringGetCString:                 { args: [T.ptr, T.ptr, T.i64, T.u32], returns: T.i32 },
-      CFStringGetLength:                  { args: [T.ptr], returns: T.i64 },
+      // i64 first arg so tagged CFString pointers pass through.
+      CFStringGetCString:                 { args: [T.i64, T.ptr, T.i64, T.u32], returns: T.i32 },
+      CFStringGetLength:                  { args: [T.i64], returns: T.i64 },
       CFStringGetMaximumSizeForEncoding:  { args: [T.i64, T.u32], returns: T.i64 },
       // CFIndex CFArrayGetCount(CFArrayRef) — CFIndex is signed long (i64 on 64-bit)
       CFArrayGetCount:                    { args: [T.ptr], returns: T.i64 },
       // const void * CFArrayGetValueAtIndex(CFArrayRef, CFIndex)
       CFArrayGetValueAtIndex:             { args: [T.ptr, T.i64], returns: T.ptr },
       // const void * CFDictionaryGetValue(CFDictionaryRef, const void *key)
-      // Returns T.u64 (bigint) — CF values can be tagged pointers above 2^53.
-      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.u64 },
+      // Returns T.i64 — tagged pointers have the high bit set; i64 lets the
+      // signed bigint flow directly to other i64-typed args without the
+      // "Unable to convert … to a pointer" rejection that T.ptr causes.
+      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.i64 },
       // Boolean CFNumberGetValue(CFNumberRef, CFNumberType, void *) — Boolean is unsigned char (u8)
-      CFNumberGetValue:                   { args: [T.ptr, T.i64, T.ptr], returns: T.u8 },
+      // First arg is i64 (not ptr) so tagged CFNumber pointers pass through.
+      CFNumberGetValue:                   { args: [T.i64, T.i64, T.ptr], returns: T.u8 },
     });
     _cf = lib.symbols;
     _dlopenHandles.push(lib);
@@ -475,14 +482,17 @@ export function cfStringFromJS(s: string): Pointer {
   return m;
 }
 
-/** Decode a CFStringRef to JS.  Does not release the CFString. */
+/**
+ * Decode a CFStringRef to JS.  Does not release the CFString.
+ * Accepts bigint (i64) so tagged CFString pointers pass through.
+ */
 let _cfStrBuf = new Uint8Array(256);
 const _utf8Dec = new TextDecoder("utf-8");
 
-export function cfStringToJS(cfstr: Pointer): string {
+export function cfStringToJS(cfstr: bigint): string {
   const C = cf();
   const F = macFFI();
-  if (!C || !F || !cfstr) return "";
+  if (!C || !F || cfstr === 0n) return "";
   const len = C.CFStringGetLength(cfstr);
   const need = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8)) + 1;
   if (need > _cfStrBuf.length) _cfStrBuf = new Uint8Array(need);
