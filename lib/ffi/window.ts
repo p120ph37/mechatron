@@ -1275,35 +1275,13 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   return false;
 }
 
-// Eagerly initialise cached CFString keys and prime the full
-// CGWindowListCopyWindowInfo → CFArray → CFDictionary → CFNumber path at
-// module-load time (synchronous, outside any async function).
-// Bun ≤ 1.3.13 segfaults in JSC's MicrotaskQueue::drain when these FFI
-// calls first happen inside an async function's continuation on macOS.
-// Running mac_withWindowDict once here — with a handle that won't match
-// any real window — exercises every FFI call in the chain and avoids
-// the crash on both arm64 and x64 (Rosetta).
-if (IS_MAC) {
+// Bun ≤ 1.3.13 segfaults when macOS FFI calls first happen inside an
+// async function's continuation.  Callers must prime the path by calling
+// window_warmup() synchronously before any async Window usage.
+export function window_warmup(): void {
+  if (!IS_MAC) return;
   mac_initKeys();
   mac_withWindowDict(0xFFFFFFFF, false, () => true);
-
-  // Release cached CFStrings on exit so CoreFoundation can be cleanly
-  // unloaded — prevents Bun FFI teardown crash (separate from the
-  // async-context crash above).
-  process.on('exit', () => {
-    if (!_macKeysInited) return;
-    const CF = cf();
-    if (!CF) return;
-    const keys = [
-      _kCGWindowNumber, _kCGWindowOwnerPID, _kCGWindowName, _kCGWindowBounds,
-      _kCGWindowLayer, _axWindows, _axFocusedWindow, _axFocusedApplication,
-      _axPosition, _axSize, _axTitle, _axMinimized, _axFullScreen, _axRaise,
-      _axSubrole, _axStandardWindow, _axCloseButton, _axPress, _axMinimize,
-      _axZoomAction,
-    ];
-    for (const k of keys) { if (k) CF.CFRelease(k); }
-    _macKeysInited = false;
-  });
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {

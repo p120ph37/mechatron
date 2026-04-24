@@ -573,13 +573,4 @@ export function clipboard_getSequence(): number {
   return 0;
 }
 
-// Release cached CFString on exit so CoreFoundation can be cleanly unloaded.
-if (IS_MAC) {
-  process.on('exit', () => {
-    if (_macTypeStr) {
-      const CF = cf();
-      if (CF) CF.CFRelease(_macTypeStr);
-      _macTypeStr = null;
-    }
-  });
-}
+

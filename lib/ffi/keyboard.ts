@@ -126,17 +126,6 @@ export const keyboard_getKeyState =
   platform === "darwin" ? mac_keyboard_getKeyState :
                           (_k: number) => false;
 
-// Release cached CGEventSource on exit so CoreGraphics can be cleanly unloaded.
-if (platform === "darwin") {
-  process.on('exit', () => {
-    if (_macSource) {
-      const F = cf();
-      if (F) F.CFRelease(_macSource as any);
-      _macSource = null;
-    }
-  });
-}
-
 // Signal unavailability to the backend resolver when the required native
 // libraries cannot be loaded on this platform.
 if (platform === "linux" && !isXTestAvailable() && !uinputSelected()) {
