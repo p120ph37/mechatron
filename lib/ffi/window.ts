@@ -1267,22 +1267,13 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   return false;
 }
 
-// Release cached CFStrings on exit so CoreFoundation can be cleanly unloaded.
+// Eagerly initialise cached CFString keys so the work is done at module-load
+// time rather than being deferred into the first real window-query call.
+// This avoids creating 20 CF objects in the middle of the first
+// CGWindowListCopyWindowInfo call chain, which triggers a Bun/JSC segfault
+// during microtask drain on macOS (arm64 & x64, Bun ≤ 1.3.13).
 if (IS_MAC) {
-  process.on('exit', () => {
-    if (!_macKeysInited) return;
-    const CF = cf();
-    if (!CF) return;
-    const keys = [
-      _kCGWindowNumber, _kCGWindowOwnerPID, _kCGWindowName, _kCGWindowBounds,
-      _kCGWindowLayer, _axWindows, _axFocusedWindow, _axFocusedApplication,
-      _axPosition, _axSize, _axTitle, _axMinimized, _axFullScreen, _axRaise,
-      _axSubrole, _axStandardWindow, _axCloseButton, _axPress, _axMinimize,
-      _axZoomAction,
-    ];
-    for (const k of keys) { if (k) CF.CFRelease(k); }
-    _macKeysInited = false;
-  });
+  mac_initKeys();
 }
 
 if (!IS_LINUX && !IS_WIN && !IS_MAC) {

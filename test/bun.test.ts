@@ -91,11 +91,17 @@ describe(`mechatron [${backend}]`, () => {
     }
   });
 
+  let _prevPrefix = "";
   for (const mod of allModules) {
     for (const entry of mod.entries) {
       const displayName = `${mod.prefix}: ${entry.name}`;
       const timeout = mod.prefix === "window" ? 15000 : undefined;
+      const needsGC = mod.prefix !== _prevPrefix;
+      _prevPrefix = mod.prefix;
       test(displayName, async () => {
+        if (needsGC && typeof (globalThis as any).Bun?.gc === "function") {
+          (globalThis as any).Bun.gc(true);
+        }
         if (!compatMatrix.shouldRun(entry.functions)) {
           log(`  ${displayName} (skipped: matrix)\n`);
           return;
