@@ -5,7 +5,7 @@ import {
 import {
   getDisplay, isXTestAvailable, x11, xtest,
 } from "./x11";
-import { getBunFFI } from "./bun";
+import { getBunFFI, bp } from "./bun";
 import {
   user32, winFFI,
   MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
@@ -258,11 +258,12 @@ function mac_cgButton(button: number): { type_down: number; type_up: number; cg_
   }
 }
 
-let _macMouseSource: Pointer = null;
-function macMouseSource(): Pointer {
-  if (_macMouseSource) return _macMouseSource;
-  const C = cg(); if (!C) return null;
+let _macMouseSource: bigint | null = null;
+function macMouseSource(): bigint {
+  if (_macMouseSource !== null) return _macMouseSource;
+  const C = cg(); if (!C) { _macMouseSource = 0n; return 0n; }
   _macMouseSource = C.CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+  if (_macMouseSource === 0n) return 0n;
   return _macMouseSource;
 }
 
@@ -274,8 +275,9 @@ function mac_mouse_press(button: number): void {
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
   const src = macMouseSource();
+  if (src === 0n) return;
   const evt = C.CGEventCreateMouseEvent(src, spec.type_down, _macLastPos.x, _macLastPos.y, spec.cg_btn);
-  if (!evt) return;
+  if (evt === 0n) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -286,8 +288,9 @@ function mac_mouse_release(button: number): void {
   const spec = mac_cgButton(button);
   if (!C || !F || !spec) return;
   const src = macMouseSource();
+  if (src === 0n) return;
   const evt = C.CGEventCreateMouseEvent(src, spec.type_up, _macLastPos.x, _macLastPos.y, spec.cg_btn);
-  if (!evt) return;
+  if (evt === 0n) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -296,8 +299,8 @@ function mac_mouse_scrollV(amount: number): void {
   const C = cg();
   const F = cf();
   if (!C || !F) return;
-  const evt = C.CGEventCreateScrollWheelEvent2(null, kCGScrollEventUnitPixel, 1, amount | 0, 0, 0);
-  if (!evt) return;
+  const evt = C.CGEventCreateScrollWheelEvent2(0n, kCGScrollEventUnitPixel, 1, amount | 0, 0, 0);
+  if (evt === 0n) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -306,8 +309,8 @@ function mac_mouse_scrollH(amount: number): void {
   const C = cg();
   const F = cf();
   if (!C || !F) return;
-  const evt = C.CGEventCreateScrollWheelEvent2(null, kCGScrollEventUnitPixel, 2, 0, amount | 0, 0);
-  if (!evt) return;
+  const evt = C.CGEventCreateScrollWheelEvent2(0n, kCGScrollEventUnitPixel, 2, 0, amount | 0, 0);
+  if (evt === 0n) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }

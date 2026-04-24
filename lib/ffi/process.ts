@@ -21,6 +21,7 @@ import {
   x11, ffi as x11ffi, getDisplay,
   atom, getWindowProperty, getWindowAttributes, IsViewable,
 } from "./x11";
+import { bp } from "./bun";
 import {
   libc as mac, macFFI, bufToStr,
   TASK_DYLD_INFO, TASK_DYLD_INFO_COUNT,
@@ -148,7 +149,7 @@ function macGetTask(pid: number): number {
   if (!m || !F || pid <= 0) return 0;
   const self = m.mach_task_self();
   const out = new Uint32Array(1);
-  if (m.task_for_pid(self, pid, F.ptr(out)) !== 0) return 0;
+  if (m.task_for_pid(self, pid, bp(out)) !== 0) return 0;
   return out[0];
 }
 
@@ -167,7 +168,7 @@ function macProcessExists(pid: number): boolean {
   const buf = new Uint8Array(16);
   const F = macFFI();
   if (!F) return false;
-  return m.proc_pidpath(pid, F.ptr(buf), buf.length) > 0;
+  return m.proc_pidpath(pid, bp(buf), buf.length) > 0;
 }
 
 function macGetPath(pid: number): string {
@@ -176,7 +177,7 @@ function macGetPath(pid: number): string {
   if (!m || !F || pid <= 0) return "";
   const PATH_MAX = 1024;
   const buf = new Uint8Array(PATH_MAX);
-  const len = m.proc_pidpath(pid, F.ptr(buf), buf.length);
+  const len = m.proc_pidpath(pid, bp(buf), buf.length);
   return len > 0 ? bufToStr(buf, len) : "";
 }
 
@@ -185,7 +186,7 @@ function macGetName(pid: number): string {
   const F = macFFI();
   if (!m || !F || pid <= 0) return "";
   const buf = new Uint8Array(256);
-  const len = m.proc_name(pid, F.ptr(buf), buf.length);
+  const len = m.proc_name(pid, bp(buf), buf.length);
   if (len > 0) return bufToStr(buf, len);
   const p = macGetPath(pid);
   return p ? p.substring(p.lastIndexOf("/") + 1) : "";
@@ -205,8 +206,8 @@ function macIsDebugged(pid: number): boolean {
   const excMask = (EXC_MASK_ALL & ~(EXC_MASK_RESOURCE | EXC_MASK_GUARD)) >>> 0;
   if (m.task_get_exception_ports(
     task, excMask,
-    F.ptr(masks), F.ptr(count),
-    F.ptr(ports), F.ptr(behaviors), F.ptr(flavors),
+    bp(masks), bp(count),
+    bp(ports), bp(behaviors), bp(flavors),
   ) !== 0) return false;
   const n = count[0];
   for (let i = 0; i < n; i++) {
@@ -230,7 +231,7 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
   // let task_info overwrite only what it needs.
   const dyld = new BigUint64Array(3); // 24 bytes
   const dyldCount = new Uint32Array([TASK_DYLD_INFO_COUNT]);
-  if (m.task_info(task, TASK_DYLD_INFO, F.ptr(dyld), F.ptr(dyldCount)) !== 0) return out;
+  if (m.task_info(task, TASK_DYLD_INFO, bp(dyld), bp(dyldCount)) !== 0) return out;
   const allImageInfoAddr = dyld[0];
   const allImageInfoSize = dyld[1];
   if (allImageInfoAddr === 0n || allImageInfoSize === 0n) return out;
@@ -244,7 +245,7 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
   const outSize = new BigUint64Array(1);
   if (m.mach_vm_read_overwrite(
     task, allImageInfoAddr, BigInt(readSize),
-    BigInt(F.ptr(header) as any), F.ptr(outSize),
+    bp(header), bp(outSize),
   ) !== 0 || outSize[0] < BigInt(readSize)) return out;
   const hdv = new DataView(header.buffer);
   const imgCount = hdv.getUint32(4, true);
@@ -259,7 +260,7 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
   const outInfos = new BigUint64Array(1);
   if (m.mach_vm_read_overwrite(
     task, arrayAddr, BigInt(infosBytes),
-    BigInt(F.ptr(infos) as any), F.ptr(outInfos),
+    bp(infos), bp(outInfos),
   ) !== 0 || outInfos[0] < BigInt(infosBytes)) return out;
   const idv = new DataView(infos.buffer);
 
@@ -287,7 +288,7 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
       outPath[0] = 0n;
       if (m.mach_vm_read_overwrite(
         task, pathAddr, BigInt(PATH_MAX),
-        BigInt(F.ptr(pathBuf) as any), F.ptr(outPath),
+        bp(pathBuf), bp(outPath),
       ) !== 0 || outPath[0] === 0n) continue;
       const raw = bufToStr(pathBuf, Number(outPath[0]));
       if (!raw) continue;
@@ -296,8 +297,8 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
         const cstrBuf = new TextEncoder().encode(raw);
         const zeroTerm = new Uint8Array(cstrBuf.length + 1);
         zeroTerm.set(cstrBuf);
-        const rp = m.realpath(F.ptr(zeroTerm), null);
-        if (rp && (rp as any) !== 0n) {
+        const rp = m.realpath(bp(zeroTerm), 0n);
+        if (rp !== 0n) {
           // Read the returned C string via the FFI CString helper.
           // `new CString(ptr)` returns a String-wrapper object; coerce to
           // a primitive string (otherwise `typeof` reports "object").
@@ -331,12 +332,12 @@ function macGetList(re: RegExp | null): number[] {
   const F = macFFI();
   const out: number[] = [];
   if (!m || !F) return out;
-  // First call with null to get count
-  const count = m.proc_listallpids(null, 0);
+  // First call with 0n to get count
+  const count = m.proc_listallpids(0n, 0);
   if (count <= 0) return out;
   const bufI32 = new Int32Array(count + 64);
   const bufBytes = bufI32.byteLength;
-  const actual = m.proc_listallpids(F.ptr(bufI32), bufBytes);
+  const actual = m.proc_listallpids(bp(bufI32), bufBytes);
   if (actual <= 0) return out;
   const n = (actual / 4) | 0;
   for (let i = 0; i < n; i++) {
@@ -782,7 +783,7 @@ export function process_isSys64Bit(): boolean {
     // `struct utsname` on macOS has 5 fields of 256 chars each = 1280 bytes;
     // machine is the 5th field at offset 4*256.  We zero-fill and read back.
     const buf = new Uint8Array(1280);
-    if (m.uname(F.ptr(buf)) !== 0) return process.arch === "x64" || process.arch === "arm64";
+    if (m.uname(bp(buf)) !== 0) return process.arch === "x64" || process.arch === "arm64";
     const machine = bufToStr(buf.subarray(4 * 256), 256);
     return machine === "x86_64" || machine === "aarch64" || machine === "arm64";
   }

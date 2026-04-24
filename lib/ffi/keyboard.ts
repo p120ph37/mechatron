@@ -2,7 +2,7 @@ import { injectKeysym, uinputSelected } from "./uinput";
 import {
   getDisplay, isXTestAvailable, x11, xtest,
 } from "./x11";
-import { getBunFFI } from "./bun";
+import { getBunFFI, bp } from "./bun";
 import {
   user32, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC,
 } from "./win";
@@ -82,7 +82,7 @@ function mac_keyboard_press(keycode: number): void {
   if (!C || !F) return;
   const src = macSource();
   const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, true);
-  if (!evt) return;
+  if (evt === 0n) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -93,7 +93,7 @@ function mac_keyboard_release(keycode: number): void {
   if (!C || !F) return;
   const src = macSource();
   const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, false);
-  if (!evt) return;
+  if (evt === 0n) return;
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }

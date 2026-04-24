@@ -12,6 +12,7 @@
 
 import * as fs from "fs";
 
+import { bp } from "./bun";
 import { libc, libcFFI, _SC_PAGESIZE, makeIovec, makeRemoteIovec } from "./linux";
 import { kernel32, winFFI } from "./win";
 import {
@@ -121,7 +122,7 @@ function macGetTask(pid: number): number {
   if (!m || !F || pid <= 0) return 0;
   const self = m.mach_task_self();
   const out = new Uint32Array(1);
-  if (m.task_for_pid(self, pid, F.ptr(out)) !== 0) return 0;
+  if (m.task_for_pid(self, pid, bp(out)) !== 0) return 0;
   return out[0];
 }
 
@@ -132,7 +133,7 @@ function macProcessExists(pid: number): boolean {
   if (m.kill(pid, 0) === 0) return true;
   // Fallback: proc_pidpath returns > 0 if the pid is valid.
   const buf = new Uint8Array(16);
-  return m.proc_pidpath(pid, F.ptr(buf), buf.length) > 0;
+  return m.proc_pidpath(pid, bp(buf), buf.length) > 0;
 }
 
 /**
@@ -155,9 +156,9 @@ function macGetRegion(task: number, address: number): RegionInfo {
   const port = new Uint32Array(1);
   base[0] = BigInt(address);
   if (m.mach_vm_region(
-    task, F.ptr(base), F.ptr(size),
+    task, bp(base), bp(size),
     VM_REGION_BASIC_INFO_64,
-    F.ptr(info), F.ptr(count), F.ptr(port),
+    bp(info), bp(count), bp(port),
   ) !== 0) return r;
 
   const iv = new DataView(info.buffer);
@@ -194,7 +195,7 @@ function macRead(task: number, address: number, buf: Uint8Array): number {
   const outSize = new BigUint64Array(1);
   const r = m.mach_vm_read_overwrite(
     task, BigInt(address), BigInt(buf.length),
-    BigInt(F.ptr(buf) as any), F.ptr(outSize),
+    bp(buf), bp(outSize),
   );
   return r === 0 ? Number(outSize[0]) : 0;
 }
@@ -203,7 +204,7 @@ function macWrite(task: number, address: number, buf: Uint8Array): number {
   const m = mac();
   const F = macFFI();
   if (!m || !F || task === 0 || buf.length === 0) return 0;
-  const r = m.mach_vm_write(task, BigInt(address), BigInt(F.ptr(buf) as any), buf.length);
+  const r = m.mach_vm_write(task, BigInt(address), bp(buf), buf.length);
   return r === 0 ? buf.length : 0;
 }
 
@@ -543,7 +544,7 @@ export function memory_getPtrSize(pid: number): number {
     // P_LP64; on modern arm64 macOS the kernel doesn't reliably set it,
     // so treat any successful call as 64-bit.
     const buf = new Uint8Array(232);
-    const ret = m.proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0n, F.ptr(buf), buf.length);
+    const ret = m.proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0n, bp(buf), buf.length);
     if (ret > 0) {
       const flags = new DataView(buf.buffer).getUint32(48, true);
       if ((flags & 0x04) !== 0) return 8;

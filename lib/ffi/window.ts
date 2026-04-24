@@ -15,7 +15,7 @@ import {
   sendClientMessage, IsViewable, PropModeReplace, CurrentTime,
 } from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
-import { getBunFFI, cstr, type Pointer } from "./bun";
+import { getBunFFI, bp, cstr, type Pointer } from "./bun";
 import {
   cg, cf, macFFI, cfStringFromJS, cfStringToJS, kCFNumberSInt32Type,
   kCGWindowListOptionOnScreenOnly, kCGWindowListExcludeDesktopElements, kCGNullWindowID,
@@ -488,7 +488,7 @@ function win_setActive(handle: number): void {
 // values.  The signed bigint preserves the full 64-bit pattern — at
 // the ABI level, signed and unsigned integers occupy the same register.
 
-let _cgKeys: { number: Pointer; layer: Pointer; name: Pointer } | null = null;
+let _cgKeys: { number: bigint; layer: bigint; name: bigint } | null = null;
 let _cgKeysInit = false;
 
 function getCGKeys() {
@@ -497,7 +497,7 @@ function getCGKeys() {
   const n = cfStringFromJS("kCGWindowNumber");
   const l = cfStringFromJS("kCGWindowLayer");
   const nm = cfStringFromJS("kCGWindowName");
-  if (!n || !l || !nm) return null;
+  if (n === 0n || l === 0n || nm === 0n) return null;
   _cgKeys = { number: n, layer: l, name: nm };
   return _cgKeys;
 }
@@ -508,15 +508,14 @@ const _sType = BigInt(kCFNumberSInt32Type);
 function mac_getList(regexStr?: string): number[] {
   const C = cg();
   const CF = cf();
-  const F = macFFI();
-  if (!C || !CF || !F) return [];
+  if (!C || !CF) return [];
 
   const keys = getCGKeys();
   if (!keys) return [];
 
   const option = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
   const infoList = C.CGWindowListCopyWindowInfo(option, kCGNullWindowID);
-  if (!infoList) return [];
+  if (infoList === 0n) return [];
 
   const re = makeRegex(regexStr);
   const out: number[] = [];
@@ -526,19 +525,19 @@ function mac_getList(regexStr?: string): number[] {
 
     for (let i = 0; i < count; i++) {
       const dict = CF.CFArrayGetValueAtIndex(infoList, BigInt(i));
-      if (!dict) continue;
+      if (dict === 0n) continue;
 
       const layerRef = CF.CFDictionaryGetValue(dict, keys.layer);
       if (layerRef !== 0n) {
         _numBuf[0] = -1;
-        CF.CFNumberGetValue(layerRef, _sType, F.ptr(_numBuf));
+        CF.CFNumberGetValue(layerRef, _sType, bp(_numBuf));
         if (_numBuf[0] !== 0) continue;
       }
 
       const numRef = CF.CFDictionaryGetValue(dict, keys.number);
       if (numRef === 0n) continue;
       _numBuf[0] = 0;
-      CF.CFNumberGetValue(numRef, _sType, F.ptr(_numBuf));
+      CF.CFNumberGetValue(numRef, _sType, bp(_numBuf));
       const winId = _numBuf[0];
       if (winId <= 0) continue;
 

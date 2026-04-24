@@ -21,7 +21,7 @@ import {
   cls, sel, msgSendTyped, cfStringFromJS,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
-import type { Pointer } from "./bun";
+import { bp, type Pointer } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -254,35 +254,35 @@ function winSequence(): number {
 // `F.read.ptr()` truncating high-bit bigint returns through a JS number
 // round-trip, which corrupts tagged-pointer class bits and leaves ObjC
 // interpreting the result as an `__NSTaggedDate`.
-let _macTypeStr: Pointer = null;
-function macTypeString(): Pointer {
-  if (_macTypeStr) return _macTypeStr;
+let _macTypeStr = 0n;
+function macTypeString(): bigint {
+  if (_macTypeStr !== 0n) return _macTypeStr;
   _macTypeStr = cfStringFromJS("public.utf8-plain-text");
   return _macTypeStr;
 }
 
-function macGeneralPasteboard(): Pointer {
-  const F = macFFI(); if (!F) return null;
+function macGeneralPasteboard(): bigint {
+  const F = macFFI(); if (!F) return 0n;
   const T = F.FFIType;
-  const send = msgSendTyped([T.ptr, T.ptr], T.ptr);
-  if (!send) return null;
+  const send = msgSendTyped([T.i64, T.i64], T.i64);
+  if (!send) return 0n;
   return send(cls("NSPasteboard"), sel("generalPasteboard"));
 }
 
 /** Build an NSArray containing a single object. */
-function macArrayWithOne(obj: Pointer): Pointer {
-  const F = macFFI(); if (!F) return null;
+function macArrayWithOne(obj: bigint): bigint {
+  const F = macFFI(); if (!F) return 0n;
   const T = F.FFIType;
-  const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
-  if (!send) return null;
+  const send = msgSendTyped([T.i64, T.i64, T.i64], T.i64);
+  if (!send) return 0n;
   return send(cls("NSArray"), sel("arrayWithObject:"), obj);
 }
 
 /** [obj release] — balance +alloc/+initWith when no autorelease pool is present. */
-function macRelease(obj: Pointer): void {
-  const F = macFFI(); if (!F || !obj) return;
+function macRelease(obj: bigint): void {
+  const F = macFFI(); if (!F || obj === 0n) return;
   const T = F.FFIType;
-  const send = msgSendTyped([T.ptr, T.ptr], T.void);
+  const send = msgSendTyped([T.i64, T.i64], T.void);
   if (send) send(obj, sel("release"));
 }
 
@@ -292,8 +292,8 @@ function macClear(): boolean {
   if (!hasAppKit()) return false;
   const F = macFFI(); if (!F) return false;
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return false;
-  const send = msgSendTyped([T.ptr, T.ptr], T.void);
+  const board = macGeneralPasteboard(); if (board === 0n) return false;
+  const send = msgSendTyped([T.i64, T.i64], T.void);
   if (!send) return false;
   send(board, sel("clearContents"));
   return true;
@@ -304,17 +304,17 @@ function macHasText(): boolean {
   const F = macFFI(); const O = objc();
   if (!F || !O) return false;
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return false;
+  const board = macGeneralPasteboard(); if (board === 0n) return false;
   const typeStr = macTypeString();
-  if (!typeStr) return false;
+  if (typeStr === 0n) return false;
   const pool = O.objc_autoreleasePoolPush();
   try {
     const arr = macArrayWithOne(typeStr);
-    if (!arr) return false;
-    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+    if (arr === 0n) return false;
+    const send = msgSendTyped([T.i64, T.i64, T.i64], T.i64);
     if (!send) return false;
     const r = send(board, sel("availableTypeFromArray:"), arr);
-    return !!r && r !== 0n;
+    return r !== 0n;
   } finally {
     O.objc_autoreleasePoolPop(pool);
   }
@@ -325,24 +325,22 @@ function macGetText(): string {
   const F = macFFI(); const O = objc();
   if (!F || !O) return "";
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return "";
+  const board = macGeneralPasteboard(); if (board === 0n) return "";
   const typeStr = macTypeString();
-  if (!typeStr) return "";
+  if (typeStr === 0n) return "";
   const pool = O.objc_autoreleasePoolPush();
   try {
-    // Read via dataForType: → -[NSData bytes]/-length to avoid NSString
-    // tagged-pointer round-trip hazards (see macSetText).
-    const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+    const send = msgSendTyped([T.i64, T.i64, T.i64], T.i64);
     if (!send) return "";
     const nsData = send(board, sel("dataForType:"), typeStr);
-    if (!nsData || nsData === 0n) return "";
-    const getBytes = msgSendTyped([T.ptr, T.ptr], T.ptr);
-    const getLen = msgSendTyped([T.ptr, T.ptr], T.u64);
+    if (nsData === 0n) return "";
+    const getBytes = msgSendTyped([T.i64, T.i64], T.i64);
+    const getLen = msgSendTyped([T.i64, T.i64], T.u64);
     if (!getBytes || !getLen) return "";
     const bytesPtr = getBytes(nsData, sel("bytes"));
     const lenRaw = getLen(nsData, sel("length"));
     const len = typeof lenRaw === "bigint" ? Number(lenRaw) : (lenRaw as number);
-    if (!bytesPtr || bytesPtr === 0n || len <= 0) return "";
+    if (bytesPtr === 0n || len <= 0) return "";
     const ab = F.toArrayBuffer(bytesPtr as Pointer, 0, len);
     return new TextDecoder("utf-8").decode(new Uint8Array(ab));
   } finally {
@@ -355,33 +353,22 @@ function macSetText(text: string): boolean {
   const F = macFFI(); const O = objc();
   if (!F || !O) return false;
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return false;
-  // Use NSData rather than NSString: short immutable NSString instances
-  // on arm64 Darwin are *tagged pointers* (bit 63 set), and bun:ffi's
-  // T.ptr can't round-trip values ≥ 2^63 without truncation through a
-  // JS number cast — which corrupts the tag bits so subsequent -copy /
-  // isKindOfClass: on the object dereferences garbage and segfaults.
-  // NSData is always heap-allocated and NSPasteboard's setData:forType: /
-  // dataForType: are the primitive operations that setString:/stringForType:
-  // wrap — they match on UTI string value the same way.
+  const board = macGeneralPasteboard(); if (board === 0n) return false;
   const typeStr = macTypeString();
-  if (!typeStr) return false;
+  if (typeStr === 0n) return false;
   const pool = O.objc_autoreleasePoolPush();
   try {
     const bytes = new TextEncoder().encode(text);
-    const dataCls = cls("NSData"); if (!dataCls) return false;
-    const mkData = msgSendTyped([T.ptr, T.ptr, T.ptr, T.u64], T.ptr);
+    const dataCls = cls("NSData"); if (dataCls === 0n) return false;
+    const mkData = msgSendTyped([T.i64, T.i64, T.i64, T.u64], T.i64);
     if (!mkData) return false;
-    const dataPtr = F.ptr(bytes);
-    const nsData = mkData(dataCls, sel("dataWithBytes:length:"), dataPtr, BigInt(bytes.length));
-    // Reference `bytes` again after the call to block aggressive escape
-    // analysis — dataWithBytes:length: copies internally, but we need the
-    // source buffer alive during the copy.
+    const nsData = mkData(dataCls, sel("dataWithBytes:length:"), bp(bytes), BigInt(bytes.length));
+    // Reference `bytes` after the call to keep it alive during the copy.
     if (bytes.length < 0) return false;
-    if (!nsData || nsData === 0n) return false;
-    const clear = msgSendTyped([T.ptr, T.ptr], T.void);
+    if (nsData === 0n) return false;
+    const clear = msgSendTyped([T.i64, T.i64], T.void);
     if (clear) clear(board, sel("clearContents"));
-    const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
+    const send = msgSendTyped([T.i64, T.i64, T.i64, T.i64], T.i8);
     if (!send) return false;
     const r = send(board, sel("setData:forType:"), nsData, typeStr);
     return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
@@ -394,12 +381,12 @@ function macHasImage(): boolean {
   if (!hasAppKit()) return false;
   const F = macFFI(); if (!F) return false;
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return false;
-  const imgCls = cls("NSImage"); if (!imgCls) return false;
-  const arr = macArrayWithOne(imgCls); if (!arr) return false;
-  const send = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr], T.i8);
+  const board = macGeneralPasteboard(); if (board === 0n) return false;
+  const imgCls = cls("NSImage"); if (imgCls === 0n) return false;
+  const arr = macArrayWithOne(imgCls); if (arr === 0n) return false;
+  const send = msgSendTyped([T.i64, T.i64, T.i64, T.i64], T.i8);
   if (!send) return false;
-  const r = send(board, sel("canReadObjectForClasses:options:"), arr, null);
+  const r = send(board, sel("canReadObjectForClasses:options:"), arr, 0n);
   return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
 }
 
@@ -408,23 +395,21 @@ function macGetImage(): { width: number; height: number; data: Uint32Array } | n
   const F = macFFI(); const C = cf(); const CG = cg();
   if (!F || !C || !CG) return null;
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return null;
+  const board = macGeneralPasteboard(); if (board === 0n) return null;
 
-  // [[NSImage alloc] initWithPasteboard:board]
-  const alloc = msgSendTyped([T.ptr, T.ptr], T.ptr);
-  const initPB = msgSendTyped([T.ptr, T.ptr, T.ptr], T.ptr);
+  const alloc = msgSendTyped([T.i64, T.i64], T.i64);
+  const initPB = msgSendTyped([T.i64, T.i64, T.i64], T.i64);
   if (!alloc || !initPB) return null;
   const raw = alloc(cls("NSImage"), sel("alloc"));
-  if (!raw || raw === 0n) return null;
+  if (raw === 0n) return null;
   const nsImg = initPB(raw, sel("initWithPasteboard:"), board);
-  if (!nsImg || nsImg === 0n) return null;
+  if (nsImg === 0n) return null;
 
   try {
-    // [nsImg CGImageForProposedRect:NULL context:nil hints:nil]
-    const getCG = msgSendTyped([T.ptr, T.ptr, T.ptr, T.ptr, T.ptr], T.ptr);
+    const getCG = msgSendTyped([T.i64, T.i64, T.i64, T.i64, T.i64], T.i64);
     if (!getCG) return null;
-    const cgImg = getCG(nsImg, sel("CGImageForProposedRect:context:hints:"), null, null, null);
-    if (!cgImg || cgImg === 0n) return null;
+    const cgImg = getCG(nsImg, sel("CGImageForProposedRect:context:hints:"), 0n, 0n, 0n);
+    if (cgImg === 0n) return null;
 
     const w = Number(CG.CGImageGetWidth(cgImg));
     const h = Number(CG.CGImageGetHeight(cgImg));
@@ -432,13 +417,13 @@ function macGetImage(): { width: number; height: number; data: Uint32Array } | n
 
     const pixels = new Uint32Array(w * h);
     const cs = CG.CGColorSpaceCreateDeviceRGB();
-    if (!cs) return null;
+    if (cs === 0n) return null;
     const ctx = CG.CGBitmapContextCreate(
-      F.ptr(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
+      bp(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
       cs, BITMAP_INFO_BGRA_PMA,
     );
     CG.CGColorSpaceRelease(cs);
-    if (!ctx || ctx === 0n) return null;
+    if (ctx === 0n) return null;
     try {
       CG.CGContextDrawImage(ctx, 0, 0, w, h, cgImg);
     } finally {
@@ -457,42 +442,39 @@ function macSetImage(width: number, height: number, data: Uint32Array): boolean 
   const T = F.FFIType;
   if (width <= 0 || height <= 0) return false;
 
-  // Own a stable copy of the pixel data — CGBitmapContextCreate keeps a
-  // pointer to the buffer and we need it alive until CreateImage runs.
   const pixels = new Uint32Array(width * height);
   pixels.set(data.subarray(0, Math.min(data.length, pixels.length)));
 
   const cs = CG.CGColorSpaceCreateDeviceRGB();
-  if (!cs) return false;
+  if (cs === 0n) return false;
   const ctx = CG.CGBitmapContextCreate(
-    F.ptr(pixels), BigInt(width), BigInt(height), 8n, BigInt(width * 4),
+    bp(pixels), BigInt(width), BigInt(height), 8n, BigInt(width * 4),
     cs, BITMAP_INFO_BGRA_PMA,
   );
   CG.CGColorSpaceRelease(cs);
-  if (!ctx || ctx === 0n) return false;
+  if (ctx === 0n) return false;
 
   const cgImg = CG.CGBitmapContextCreateImage(ctx);
   CG.CGContextRelease(ctx);
-  if (!cgImg || cgImg === 0n) return false;
+  if (cgImg === 0n) return false;
 
   try {
-    // [[NSImage alloc] initWithCGImage:cgImg size:NSZeroSize]
-    const alloc = msgSendTyped([T.ptr, T.ptr], T.ptr);
-    const initCG = msgSendTyped([T.ptr, T.ptr, T.ptr, T.f64, T.f64], T.ptr);
+    const alloc = msgSendTyped([T.i64, T.i64], T.i64);
+    const initCG = msgSendTyped([T.i64, T.i64, T.i64, T.f64, T.f64], T.i64);
     if (!alloc || !initCG) return false;
     const raw = alloc(cls("NSImage"), sel("alloc"));
-    if (!raw || raw === 0n) return false;
+    if (raw === 0n) return false;
     const nsImg = initCG(raw, sel("initWithCGImage:size:"), cgImg, 0.0, 0.0);
-    if (!nsImg || nsImg === 0n) return false;
+    if (nsImg === 0n) return false;
 
     try {
       const board = macGeneralPasteboard();
-      if (!board) return false;
-      const clear = msgSendTyped([T.ptr, T.ptr], T.void);
+      if (board === 0n) return false;
+      const clear = msgSendTyped([T.i64, T.i64], T.void);
       if (clear) clear(board, sel("clearContents"));
       const arr = macArrayWithOne(nsImg);
-      if (!arr) return false;
-      const send = msgSendTyped([T.ptr, T.ptr, T.ptr], T.i8);
+      if (arr === 0n) return false;
+      const send = msgSendTyped([T.i64, T.i64, T.i64], T.i8);
       if (!send) return false;
       const r = send(board, sel("writeObjects:"), arr);
       return (typeof r === "bigint" ? Number(r) : (r as number)) !== 0;
@@ -508,8 +490,8 @@ function macSequence(): number {
   if (!hasAppKit()) return 0;
   const F = macFFI(); if (!F) return 0;
   const T = F.FFIType;
-  const board = macGeneralPasteboard(); if (!board) return 0;
-  const send = msgSendTyped([T.ptr, T.ptr], T.i64);
+  const board = macGeneralPasteboard(); if (board === 0n) return 0;
+  const send = msgSendTyped([T.i64, T.i64], T.i64);
   if (!send) return 0;
   const r = send(board, sel("changeCount"));
   return typeof r === "bigint" ? Number(r) : (r as number);

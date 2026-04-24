@@ -94,6 +94,18 @@ export function cstr(s: string): Uint8Array {
 
 const _cstrCache = new Map<string, Uint8Array>();
 
+/**
+ * Convert F.ptr() result to bigint for T.i64 FFI args.
+ *
+ * On darwin, all pointer-typed FFI args use T.i64 so that opaque 64-bit
+ * values (including tagged pointers) survive the bun:ffi boundary.  This
+ * helper normalises the Pointer union returned by F.ptr().
+ */
+export function bp(view: ArrayBufferView): bigint {
+  const p = _ffi!.ptr(view);
+  return typeof p === "bigint" ? p : BigInt(p as number);
+}
+
 /** Like cstr() but caches the result — use for repeated short strings. */
 export function cstrCached(s: string): Uint8Array {
   let buf = _cstrCache.get(s);
