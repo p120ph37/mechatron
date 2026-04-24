@@ -74,6 +74,8 @@ interface CoreGraphics {
   CGImageGetHeight: (image: Pointer) => bigint;
   CGColorSpaceCreateDeviceRGB: () => Pointer;
   CGColorSpaceRelease: (space: Pointer) => void;
+  // Window list
+  CGWindowListCopyWindowInfo: (option: number, relativeToWindow: number) => Pointer;
 }
 
 interface CoreFoundation {
@@ -83,6 +85,11 @@ interface CoreFoundation {
   CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => number;
   CFStringGetLength: (s: Pointer) => bigint;
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
+  // Array / dictionary access (window list parsing)
+  CFArrayGetCount: (theArray: Pointer) => bigint;
+  CFArrayGetValueAtIndex: (theArray: Pointer, idx: bigint) => Pointer;
+  CFDictionaryGetValue: (theDict: Pointer, key: Pointer) => Pointer;
+  CFNumberGetValue: (cfNum: Pointer, theType: bigint, valuePtr: Pointer) => number;
 }
 
 interface Objc {
@@ -193,6 +200,8 @@ function tryDlopen(): void {
       CGImageGetHeight:                     { args: [T.ptr], returns: T.u64 },
       CGColorSpaceCreateDeviceRGB:          { args: [], returns: T.ptr },
       CGColorSpaceRelease:                  { args: [T.ptr], returns: T.void },
+      // CGWindowListOption (uint32_t), CGWindowID (uint32_t) → CFArrayRef
+      CGWindowListCopyWindowInfo:           { args: [T.u32, T.u32], returns: T.ptr },
     });
     _cg = lib.symbols;
     _dlopenHandles.push(lib);
@@ -206,6 +215,14 @@ function tryDlopen(): void {
       CFStringGetCString:                 { args: [T.ptr, T.ptr, T.i64, T.u32], returns: T.i32 },
       CFStringGetLength:                  { args: [T.ptr], returns: T.i64 },
       CFStringGetMaximumSizeForEncoding:  { args: [T.i64, T.u32], returns: T.i64 },
+      // CFIndex CFArrayGetCount(CFArrayRef) — CFIndex is signed long (i64 on 64-bit)
+      CFArrayGetCount:                    { args: [T.ptr], returns: T.i64 },
+      // const void * CFArrayGetValueAtIndex(CFArrayRef, CFIndex)
+      CFArrayGetValueAtIndex:             { args: [T.ptr, T.i64], returns: T.ptr },
+      // const void * CFDictionaryGetValue(CFDictionaryRef, const void *key)
+      CFDictionaryGetValue:               { args: [T.ptr, T.ptr], returns: T.ptr },
+      // Boolean CFNumberGetValue(CFNumberRef, CFNumberType, void *) — Boolean is unsigned char (u8)
+      CFNumberGetValue:                   { args: [T.ptr, T.i64, T.ptr], returns: T.u8 },
     });
     _cf = lib.symbols;
     _dlopenHandles.push(lib);
@@ -297,6 +314,11 @@ export const kCGScrollEventUnitPixel = 1;
 // button presses without having to supply a cursor position (since we
 // can't read CGEventGetLocation — struct-by-value return is unsupported).
 export const kCGMouseEventButtonNumber = 3;
+
+// CGWindowListCopyWindowInfo option flags
+export const kCGWindowListOptionOnScreenOnly = 1 << 0;
+export const kCGWindowListExcludeDesktopElements = 1 << 4;
+export const kCGNullWindowID = 0;
 
 // CGImage bitmap info: little-endian 32-bit BGRA, premultiplied-first alpha.
 // Equivalent to (kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst).

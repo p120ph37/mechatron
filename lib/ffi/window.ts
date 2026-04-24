@@ -5,6 +5,8 @@
  * extents, title, enumeration, activation).
  * Windows: Win32 window management via user32.dll (state, bounds, title,
  * enumeration, activation).
+ * macOS: CoreGraphics CGWindowList for read-only enumeration; Accessibility
+ * framework for mutation (loaded separately to isolate Bun FFI crashes).
  */
 
 import {
@@ -14,9 +16,15 @@ import {
 } from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
 import { getBunFFI, cstr, type Pointer } from "./bun";
+import {
+  cg, cf, macFFI, cfStringFromJS, cfStringToJS,
+  kCFNumberSInt32Type,
+  kCGWindowListOptionOnScreenOnly, kCGWindowListExcludeDesktopElements, kCGNullWindowID,
+} from "./mac";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 
 // ── Atom helpers (lazy/cached) ───────────────────────────────────────
 
@@ -473,6 +481,78 @@ function win_setActive(handle: number): void {
   u.SetForegroundWindow(BigInt(handle));
 }
 
+// ── macOS: CGWindowList-based enumeration ───────────────────────────
+
+let _cgKeys: { number: Pointer; layer: Pointer; name: Pointer } | null = null;
+let _cgKeysInit = false;
+
+function getCGKeys() {
+  if (_cgKeysInit) return _cgKeys;
+  _cgKeysInit = true;
+  const n = cfStringFromJS("kCGWindowNumber");
+  const l = cfStringFromJS("kCGWindowLayer");
+  const nm = cfStringFromJS("kCGWindowName");
+  if (!n || !l || !nm) return null;
+  _cgKeys = { number: n, layer: l, name: nm };
+  return _cgKeys;
+}
+
+const _numBuf = new Int32Array(1);
+const _sType = BigInt(kCFNumberSInt32Type);
+
+function mac_getList(regexStr?: string): number[] {
+  const C = cg();
+  const CF = cf();
+  const F = macFFI();
+  if (!C || !CF || !F) return [];
+
+  const keys = getCGKeys();
+  if (!keys) return [];
+
+  const option = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+  const infoList = C.CGWindowListCopyWindowInfo(option, kCGNullWindowID);
+  if (!infoList) return [];
+
+  const re = makeRegex(regexStr);
+  const out: number[] = [];
+
+  try {
+    const count = Number(CF.CFArrayGetCount(infoList));
+
+    for (let i = 0; i < count; i++) {
+      const dict = CF.CFArrayGetValueAtIndex(infoList, BigInt(i));
+      if (!dict) continue;
+
+      const layerRef = CF.CFDictionaryGetValue(dict, keys.layer);
+      if (layerRef) {
+        _numBuf[0] = -1;
+        CF.CFNumberGetValue(layerRef, _sType, F.ptr(_numBuf));
+        if (_numBuf[0] !== 0) continue;
+      }
+
+      const numRef = CF.CFDictionaryGetValue(dict, keys.number);
+      if (!numRef) continue;
+      _numBuf[0] = 0;
+      CF.CFNumberGetValue(numRef, _sType, F.ptr(_numBuf));
+      const winId = _numBuf[0];
+      if (winId <= 0) continue;
+
+      if (re) {
+        const nameRef = CF.CFDictionaryGetValue(dict, keys.name);
+        if (!nameRef) continue;
+        const title = cfStringToJS(nameRef);
+        if (!re.test(title)) continue;
+      }
+
+      out.push(winId);
+    }
+  } finally {
+    CF.CFRelease(infoList);
+  }
+
+  return out;
+}
+
 // ── NAPI-compatible exports ─────────────────────────────────────────
 
 export function window_isValid(handle: number): boolean {
@@ -703,6 +783,7 @@ export function window_getList(regexStr?: string): number[] {
     return out;
   }
   if (IS_WIN) return win_getList(regexStr);
+  if (IS_MAC) return mac_getList(regexStr);
   return [];
 }
 
@@ -739,8 +820,8 @@ export function window_isAxEnabled(prompt?: boolean): boolean {
   return false;
 }
 
-if (!IS_LINUX && !IS_WIN) {
-  throw new Error("ffi/window: requires Linux with libX11 or Windows with user32.dll");
+if (!IS_LINUX && !IS_WIN && !IS_MAC) {
+  throw new Error("ffi/window: requires Linux with libX11, Windows with user32.dll, or macOS with CoreGraphics");
 }
 if (IS_LINUX && !getDisplay()) {
   throw new Error("ffi/window: requires Linux with libX11 (no display available)");

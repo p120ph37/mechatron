@@ -388,5 +388,21 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				assert(typeof await Window.isAxEnabled() === "boolean", "isAxEnabled bool");
 			}
 		},
+		// ── Fuzz: window_getList stress loop ──
+		{
+			name: "window_getList fuzz (500 iterations)",
+			functions: ["window_getList"],
+			test: async function () {
+				for (var i = 0; i < 500; i++) {
+					var list = await Window.getList();
+					assert(list instanceof Array, "fuzz[" + i + "] array");
+					if (i % 50 === 0) {
+						var filtered = await Window.getList("nonexistent_fuzz_" + i);
+						assert(filtered instanceof Array, "fuzz[" + i + "] filtered");
+						assert(filtered.length === 0, "fuzz[" + i + "] no matches");
+					}
+				}
+			}
+		},
 	];
 };

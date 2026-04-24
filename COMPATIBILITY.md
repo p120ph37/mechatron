@@ -26,7 +26,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | win32-napi | Pre-built Rust .node binary | Windows | |
 | win32-ffi | bun:ffi | Windows | user32.dll / kernel32.dll |
 | darwin-napi | Pre-built Rust .node binary | macOS | |
-| darwin-ffi | bun:ffi | macOS | CoreGraphics (no window — Bun FFI crash) |
+| darwin-ffi | bun:ffi | macOS | CoreGraphics + CoreFoundation |
 | darwin-nolib | Pure TS (subprocess) | macOS | pbcopy/pbpaste; clipboard only |
 
 ---
@@ -80,7 +80,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | window_setClient | ok | ok | ok | ok | ok | ok | skip |
 | window_mapToClient | ok | ok | ok | ok | ok | ok | skip |
 | window_mapToScreen | ok | ok | ok | ok | ok | ok | skip |
-| window_getList | ok | ok | ok | ok | ok | ok | skip |
+| window_getList | ok | ok | ok | ok | ok | ok | ok |
 | window_getActive | ok | ok | ok | ok | ok | ok | skip |
 | window_setActive | ok | ok | ok | ok | ok | ok | skip |
 | window_isAxEnabled | ok | ok | ok | ok | ok | ok | skip |
