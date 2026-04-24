@@ -16,7 +16,7 @@ import {
 } from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
 import { getBunFFI, cstr, type Pointer } from "./bun";
-import { cg, cf, ax, macFFI, cfStringFromJS, cfStringToJS, kCFNumberSInt32Type } from "./mac";
+import { cg, cf, wcf, wcg, ax, macFFI, cfStringFromJS, cfStringToJS, kCFNumberSInt32Type } from "./mac";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -332,16 +332,16 @@ function readPtr(): Pointer {
  * return value, or `fallback` if not found.
  */
 function mac_withWindowDict<T>(windowId: number, fallback: T, visitor: (dict: Pointer) => T): T {
-  const C = cg(); const CF = cf();
-  if (!C || !CF) return fallback;
+  const WCG = wcg(); const WCF = wcf(); const CF = cf();
+  if (!WCG || !WCF || !CF) return fallback;
   mac_initKeys();
-  const info = C.CGWindowListCopyWindowInfo(
+  const info = WCG.CGWindowListCopyWindowInfo(
     kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
   if (!info) return fallback;
-  const count = Number(CF.CFArrayGetCount(info));
+  const count = Number(WCF.CFArrayGetCount(info));
   let result = fallback;
   for (let i = 0; i < count; i++) {
-    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
+    const dict = WCF.CFArrayGetValueAtIndex(info, BigInt(i));
     if (!dict) continue;
     if (mac_cfDictGetInt32(dict, _kCGWindowNumber) === windowId) {
       result = visitor(dict);
@@ -354,21 +354,21 @@ function mac_withWindowDict<T>(windowId: number, fallback: T, visitor: (dict: Po
 
 /** Read a CFNumber (SInt32) from a CFDictionary value. */
 function mac_cfDictGetInt32(dict: Pointer, key: Pointer): number {
-  const CF = cf();
+  const WCF = wcf();
   const F = macFFI();
-  if (!CF || !F || !dict || !key) return 0;
-  const val = CF.CFDictionaryGetValue(dict, key);
+  if (!WCF || !F || !dict || !key) return 0;
+  const val = WCF.CFDictionaryGetValue(dict, key);
   if (!val) return 0;
   _scratchI32[0] = 0;
-  if (CF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32)) === 0) return 0;
+  if (WCF.CFNumberGetValue(val, kCFNumberSInt32Type, F.ptr(_scratchI32)) === 0) return 0;
   return _scratchI32[0];
 }
 
 /** Read a CFString from a CFDictionary value. */
 function mac_cfDictGetString(dict: Pointer, key: Pointer): string {
-  const CF = cf();
-  if (!CF || !dict || !key) return "";
-  const val = CF.CFDictionaryGetValue(dict, key);
+  const WCF = wcf();
+  if (!WCF || !dict || !key) return "";
+  const val = WCF.CFDictionaryGetValue(dict, key);
   if (!val) return "";
   return cfStringToJS(val);
 }
@@ -389,8 +389,8 @@ function mac_getPidForWindow(windowId: number): number {
  * Caller must CFRelease the returned element.
  */
 function mac_getAXElement(windowId: number): Pointer {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F) return null;
+  const AX = ax(); const CF = cf(); const WCF = wcf(); const F = macFFI();
+  if (!AX || !CF || !WCF || !F) return null;
   mac_initKeys();
   const pid = mac_getPidForWindow(windowId);
   if (pid === 0) return null;
@@ -403,14 +403,14 @@ function mac_getAXElement(windowId: number): Pointer {
     return null;
   }
   const winArray = readPtr();
-  const count = Number(CF.CFArrayGetCount(winArray));
+  const count = Number(WCF.CFArrayGetCount(winArray));
   let found: Pointer = null;
   for (let i = 0; i < count; i++) {
-    const elem = CF.CFArrayGetValueAtIndex(winArray, BigInt(i));
+    const elem = WCF.CFArrayGetValueAtIndex(winArray, BigInt(i));
     if (!elem) continue;
     _scratchU32[0] = 0;
     if (AX._AXUIElementGetWindow(elem, F.ptr(_scratchU32)) === 0 && _scratchU32[0] === windowId) {
-      CF.CFRetain(elem);
+      WCF.CFRetain(elem);
       found = elem;
       break;
     }
@@ -435,13 +435,13 @@ function mac_getAXString(element: Pointer, attr: Pointer): string {
 
 /** Get an AX attribute as a boolean. */
 function mac_getAXBool(element: Pointer, attr: Pointer): boolean {
-  const AX = ax(); const CF = cf(); const F = macFFI();
-  if (!AX || !CF || !F || !element || !attr) return false;
+  const AX = ax(); const CF = cf(); const WCF = wcf(); const F = macFFI();
+  if (!AX || !CF || !WCF || !F || !element || !attr) return false;
   _scratchU64[0] = 0n;
   const err = AX.AXUIElementCopyAttributeValue(element, attr, F.ptr(_scratchU64));
   if (err !== 0 || _scratchU64[0] === 0n) return false;
   const val = readPtr();
-  const result = CF.CFBooleanGetValue(val) !== 0;
+  const result = WCF.CFBooleanGetValue(val) !== 0;
   CF.CFRelease(val);
   return result;
 }
@@ -656,21 +656,20 @@ function mac_setBounds(handle: number, x: number, y: number, w: number, h: numbe
 }
 
 function mac_getList(regexStr?: string): number[] {
-  const C = cg(); const CF = cf();
-  if (!C || !CF) return [];
+  const WCG = wcg(); const WCF = wcf(); const CF = cf();
+  if (!WCG || !WCF || !CF) return [];
   mac_initKeys();
-  const info = C.CGWindowListCopyWindowInfo(
+  const info = WCG.CGWindowListCopyWindowInfo(
     kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0);
   if (!info) return [];
-  const count = Number(CF.CFArrayGetCount(info));
+  const count = Number(WCF.CFArrayGetCount(info));
   const results: number[] = [];
   const re = makeRegex(regexStr);
   for (let i = 0; i < count; i++) {
-    const dict = CF.CFArrayGetValueAtIndex(info, BigInt(i));
+    const dict = WCF.CFArrayGetValueAtIndex(info, BigInt(i));
     if (!dict) continue;
     const wid = mac_cfDictGetInt32(dict, _kCGWindowNumber);
     if (wid === 0) continue;
-    // Skip windows at negative layer (desktop elements that slipped through)
     const layer = mac_cfDictGetInt32(dict, _kCGWindowLayer);
     if (layer < 0) continue;
     if (re) {
