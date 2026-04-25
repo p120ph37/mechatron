@@ -46,7 +46,7 @@ export const SUBSYSTEMS = [
 
 export type Subsystem = (typeof SUBSYSTEMS)[number];
 export type Backend = "napi" | "ffi" | "nolib";
-export type Variant = "x11" | "portal" | "vt";
+export type Variant = "x11" | "portal" | "vt" | "sh";
 
 export interface BackendEntry {
   backend: Backend;
@@ -56,11 +56,11 @@ export interface BackendEntry {
 const IS_BUN = typeof (globalThis as any).Bun !== "undefined";
 const IS_LINUX = process.platform === "linux";
 
-const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "vt"];
+const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "vt", "sh"];
 
 const NAPI_VARIANTS: readonly Variant[] = ["x11", "portal"];
 const FFI_VARIANTS: readonly Variant[] = ["x11", "portal"];
-const NOLIB_VARIANTS: readonly Variant[] = ["x11", "portal", "vt"];
+const NOLIB_VARIANTS: readonly Variant[] = ["x11", "portal", "vt", "sh"];
 
 function variantsFor(backend: Backend): readonly Variant[] {
   switch (backend) {
@@ -87,8 +87,8 @@ function parseEntries(raw: string): BackendEntry[] {
       }
     } else if (IS_LINUX) {
       for (const v of variantsFor(backend)) entries.push({ backend, variant: v });
-    } else if (process.env.DISPLAY && backend === "nolib") {
-      entries.push({ backend, variant: "x11" });
+    } else if (backend === "nolib") {
+      entries.push({ backend, variant: "sh" });
     } else {
       entries.push({ backend });
     }
@@ -115,6 +115,7 @@ function defaultOrder(): BackendEntry[] {
   if (!IS_LINUX) {
     const base: BackendEntry[] = [{ backend: "napi" }];
     if (IS_BUN) base.push({ backend: "ffi" });
+    base.push({ backend: "nolib", variant: "sh" });
     return base;
   }
   const entries: BackendEntry[] = [];

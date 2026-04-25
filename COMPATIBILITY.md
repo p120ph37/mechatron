@@ -23,11 +23,12 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | linux-nolib[x11] | Pure TS (xproto wire) | Any OS with $DISPLAY | No native libraries at all |
 | linux-nolib[portal] | Pure TS (D-Bus) | Linux/Wayland | RemoteDesktop + ScreenCast portals |
 | linux-nolib[vt] | Pure TS (uinput + fb) | Linux VT / headless | /dev/uinput + /dev/fb0 |
+| linux-nolib[sh] | Pure TS (subprocess) | Linux | xclip/xsel/wl-copy; clipboard only |
 | win32-napi | Pre-built Rust .node binary | Windows | |
 | win32-ffi | bun:ffi | Windows | user32.dll / kernel32.dll |
 | darwin-napi | Pre-built Rust .node binary | macOS | |
 | darwin-ffi | bun:ffi | macOS | CoreGraphics + CoreFoundation |
-| darwin-nolib | Pure TS (subprocess) | macOS | pbcopy/pbpaste; clipboard only |
+| darwin-nolib[sh] | Pure TS (subprocess) | macOS | pbcopy/pbpaste; clipboard only |
 
 ---
 
@@ -118,17 +119,17 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Clipboard
 
-| Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib |
-|----------|------|------|------|------|------|------|------|------|
-| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_clear | skip | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_hasText | skip | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_getText | skip | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_setText | skip | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_hasImage | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getImage | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_setImage | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getSequence | skip | skip | skip | ok | ok | ok | ok | skip |
+| Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
+|----------|------|------|------|------|------|------|------|------|------|
+| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_clear | skip | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_getText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_setText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasImage | skip | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getImage | skip | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_setImage | skip | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getSequence | skip | skip | skip | skip | ok | ok | ok | ok | skip |
 
 ## Memory
 

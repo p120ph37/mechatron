@@ -54,6 +54,14 @@ import {
   encodeQueryPointer, parseQueryPointerReply, type QueryPointerReply,
   encodeTranslateCoordinates, parseTranslateCoordinatesReply, type TranslateCoordinatesReply,
   encodeQueryKeymap, parseQueryKeymapReply, type QueryKeymapReply,
+  encodeCreateWindow,
+  encodeDeleteProperty,
+  encodeSetSelectionOwner,
+  encodeGetSelectionOwner, parseGetSelectionOwnerReply,
+  encodeConvertSelection,
+  parseSelectionRequestEvent, parseSelectionNotifyEvent,
+  EVENT_SELECTION_REQUEST, EVENT_SELECTION_NOTIFY,
+  type SelectionRequestEvent, type SelectionNotifyEvent,
 } from "./request";
 
 export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
@@ -62,7 +70,8 @@ export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
   GetWindowAttributesReply, GetGeometryReply, QueryTreeReply,
   GetPropertyReply, QueryPointerReply, TranslateCoordinatesReply,
   QueryKeymapReply, ConfigureWindowArgs, ChangePropertyArgs,
-  SendEventArgs, GetPropertyArgs };
+  SendEventArgs, GetPropertyArgs,
+  SelectionRequestEvent, SelectionNotifyEvent };
 
 export class XProtoError extends Error {
   public readonly code: number;
@@ -108,6 +117,8 @@ export class XConnection {
   private rxTotal = 0;
   private closed = false;
   private closeReason: Error | null = null;
+  private _eventHandlers = new Map<number, Array<(event: Buffer) => void>>();
+  private _nextResourceId = 1;
 
   /**
    * Open a socket, send the connection setup, parse the reply, and
@@ -287,7 +298,12 @@ export class XConnection {
       else { this.tearDown(new XProtoError(err)); }
       return;
     }
-    // Events (kind 2..34) are not observed.
+    // Dispatch events to registered handlers.
+    const eventType = kind & 0x7f; // mask off "sent-event" bit
+    const handlers = this._eventHandlers.get(eventType);
+    if (handlers) {
+      for (let i = 0; i < handlers.length; i++) handlers[i](pkt);
+    }
   }
 
   private tearDown(err: Error): void {
@@ -574,6 +590,68 @@ export class XConnection {
   async queryKeymap(): Promise<QueryKeymapReply> {
     const reply = await this.sendRequest(encodeQueryKeymap());
     return parseQueryKeymapReply(reply);
+  }
+
+  // ── Event handling ────────────────────────────────────────────────────
+  // Selection-based clipboard requires observing SelectionNotify (31) and
+  // SelectionRequest (30) events from the server.
+
+  onEvent(type: number, callback: (event: Buffer) => void): () => void {
+    let list = this._eventHandlers.get(type);
+    if (!list) { list = []; this._eventHandlers.set(type, list); }
+    list.push(callback);
+    return () => {
+      const idx = list!.indexOf(callback);
+      if (idx >= 0) list!.splice(idx, 1);
+    };
+  }
+
+  waitForEvent(type: number, predicate?: (event: Buffer) => boolean, timeoutMs = 3000): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        off();
+        reject(new Error(`Timeout waiting for X11 event type ${type}`));
+      }, timeoutMs);
+      const off = this.onEvent(type, (event) => {
+        if (predicate && !predicate(event)) return;
+        clearTimeout(timer);
+        off();
+        resolve(event);
+      });
+    });
+  }
+
+  // ── Resource ID allocation ────────────────────────────────────────────
+
+  allocId(): number {
+    const id = this.info.resourceIdBase | (this._nextResourceId & this.info.resourceIdMask);
+    this._nextResourceId++;
+    return id;
+  }
+
+  // ── Selection protocol ────────────────────────────────────────────────
+
+  createWindow(parent: number, x = 0, y = 0, width = 1, height = 1): number {
+    const wid = this.allocId();
+    this.sendRequestNoReply(encodeCreateWindow(wid, parent, x, y, width, height));
+    return wid;
+  }
+
+  deleteProperty(window: number, property: number): void {
+    this.sendRequestNoReply(encodeDeleteProperty(window, property));
+  }
+
+  setSelectionOwner(owner: number, selection: number, timestamp = 0): void {
+    this.sendRequestNoReply(encodeSetSelectionOwner(owner, selection, timestamp));
+  }
+
+  async getSelectionOwner(selection: number): Promise<number> {
+    const reply = await this.sendRequest(encodeGetSelectionOwner(selection));
+    return parseGetSelectionOwnerReply(reply).owner;
+  }
+
+  convertSelection(requestor: number, selection: number, target: number, property: number, timestamp = 0): void {
+    this.sendRequestNoReply(encodeConvertSelection(requestor, selection, target, property, timestamp));
   }
 
   close(): void { this.tearDown(new Error("X11 connection closed by client")); }

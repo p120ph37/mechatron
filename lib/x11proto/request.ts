@@ -59,6 +59,11 @@ export const OP_GET_PROPERTY = 20;
 export const OP_SEND_EVENT = 25;
 export const OP_QUERY_POINTER = 38;
 export const OP_TRANSLATE_COORDINATES = 40;
+export const OP_CREATE_WINDOW = 1;
+export const OP_DELETE_PROPERTY = 19;
+export const OP_SET_SELECTION_OWNER = 22;
+export const OP_GET_SELECTION_OWNER = 23;
+export const OP_CONVERT_SELECTION = 24;
 export const OP_QUERY_KEYMAP = 44;
 
 // XTEST extension minor opcodes (we only ever send FakeInput).
@@ -977,6 +982,193 @@ export interface QueryKeymapReply {
 export function parseQueryKeymapReply(buf: Buffer): QueryKeymapReply {
   if (buf.length < 40) throw new Error("QueryKeymap reply too short");
   return { keys: new Uint8Array(buf.buffer, buf.byteOffset + 8, 32) };
+}
+
+// =============================================================================
+// CreateWindow (core opcode 1)
+//
+// Input-only window, no attributes.
+// Wire layout (32 bytes, length = 8):
+//   0   1           opcode
+//   1   depth       0 = CopyFromParent
+//   2-4 8           length in 4-byte units
+//   4-8 wid         WINDOW
+//   8-12 parent     WINDOW
+//   12-14 x         INT16
+//   14-16 y         INT16
+//   16-18 width     CARD16
+//   18-20 height    CARD16
+//   20-22 border-w  CARD16
+//   22-24 class     CARD16 (2 = InputOnly)
+//   24-28 visual    VISUALID (0 = CopyFromParent)
+//   28-32 value-mask CARD32 (0 = none)
+// =============================================================================
+
+export function encodeCreateWindow(
+  wid: number, parent: number, x: number, y: number,
+  width: number, height: number,
+): Buffer {
+  const buf = Buffer.allocUnsafe(32);
+  buf.writeUInt8(OP_CREATE_WINDOW, 0);
+  buf.writeUInt8(0, 1); // depth = CopyFromParent
+  buf.writeUInt16LE(8, 2); // length in 4-byte units
+  buf.writeUInt32LE(wid, 4);
+  buf.writeUInt32LE(parent, 8);
+  buf.writeInt16LE(x, 12);
+  buf.writeInt16LE(y, 14);
+  buf.writeUInt16LE(width, 16);
+  buf.writeUInt16LE(height, 18);
+  buf.writeUInt16LE(0, 20); // border_width
+  buf.writeUInt16LE(2, 22); // class = InputOnly
+  buf.writeUInt32LE(0, 24); // visual = CopyFromParent
+  buf.writeUInt32LE(0, 28); // value_mask = none
+  return buf;
+}
+
+// =============================================================================
+// DeleteProperty (core opcode 19)  — no reply
+//
+// Wire layout (12 bytes, length = 3):
+//   0   19          opcode
+//   1   unused
+//   2-4 3           length
+//   4-8 window      WINDOW
+//   8-12 property   ATOM
+// =============================================================================
+
+export function encodeDeleteProperty(window: number, property: number): Buffer {
+  const buf = Buffer.allocUnsafe(12);
+  buf.writeUInt8(19, 0);
+  buf.writeUInt8(0, 1);
+  buf.writeUInt16LE(3, 2);
+  buf.writeUInt32LE(window, 4);
+  buf.writeUInt32LE(property, 8);
+  return buf;
+}
+
+// =============================================================================
+// SetSelectionOwner (core opcode 22)  — no reply
+//
+// Wire layout (16 bytes, length = 4):
+//   0   22          opcode
+//   1   unused
+//   2-4 4           length
+//   4-8 owner       WINDOW (0 = None)
+//   8-12 selection  ATOM
+//   12-16 timestamp TIMESTAMP (0 = CurrentTime)
+// =============================================================================
+
+export function encodeSetSelectionOwner(owner: number, selection: number, timestamp = 0): Buffer {
+  const buf = Buffer.allocUnsafe(16);
+  buf.writeUInt8(OP_SET_SELECTION_OWNER, 0);
+  buf.writeUInt8(0, 1);
+  buf.writeUInt16LE(4, 2);
+  buf.writeUInt32LE(owner, 4);
+  buf.writeUInt32LE(selection, 8);
+  buf.writeUInt32LE(timestamp, 12);
+  return buf;
+}
+
+// =============================================================================
+// GetSelectionOwner (core opcode 23)
+//
+// Request (8 bytes, length = 2):
+//   0   23          opcode
+//   1   unused
+//   2-4 2           length
+//   4-8 selection   ATOM
+//
+// Reply (32 bytes, reply-length = 0):
+//   8-12 owner      WINDOW (0 = None)
+// =============================================================================
+
+export function encodeGetSelectionOwner(selection: number): Buffer {
+  const buf = Buffer.allocUnsafe(8);
+  buf.writeUInt8(OP_GET_SELECTION_OWNER, 0);
+  buf.writeUInt8(0, 1);
+  buf.writeUInt16LE(2, 2);
+  buf.writeUInt32LE(selection, 4);
+  return buf;
+}
+
+export function parseGetSelectionOwnerReply(buf: Buffer): { owner: number } {
+  return { owner: buf.readUInt32LE(8) };
+}
+
+// =============================================================================
+// ConvertSelection (core opcode 24)  — no reply
+//
+// Wire layout (24 bytes, length = 6):
+//   0   24          opcode
+//   1   unused
+//   2-4 6           length
+//   4-8 requestor   WINDOW
+//   8-12 selection  ATOM
+//   12-16 target    ATOM
+//   16-20 property  ATOM
+//   20-24 timestamp TIMESTAMP (0 = CurrentTime)
+// =============================================================================
+
+export function encodeConvertSelection(
+  requestor: number, selection: number, target: number,
+  property: number, timestamp = 0,
+): Buffer {
+  const buf = Buffer.allocUnsafe(24);
+  buf.writeUInt8(OP_CONVERT_SELECTION, 0);
+  buf.writeUInt8(0, 1);
+  buf.writeUInt16LE(6, 2);
+  buf.writeUInt32LE(requestor, 4);
+  buf.writeUInt32LE(selection, 8);
+  buf.writeUInt32LE(target, 12);
+  buf.writeUInt32LE(property, 16);
+  buf.writeUInt32LE(timestamp, 20);
+  return buf;
+}
+
+// =============================================================================
+// Selection event parsers
+// =============================================================================
+
+// X11 event type codes for selections
+export const EVENT_SELECTION_REQUEST = 30;
+export const EVENT_SELECTION_NOTIFY = 31;
+
+export interface SelectionRequestEvent {
+  time: number;
+  owner: number;
+  requestor: number;
+  selection: number;
+  target: number;
+  property: number;
+}
+
+export interface SelectionNotifyEvent {
+  time: number;
+  requestor: number;
+  selection: number;
+  target: number;
+  property: number; // 0 = None (conversion failed)
+}
+
+export function parseSelectionRequestEvent(buf: Buffer): SelectionRequestEvent {
+  return {
+    time: buf.readUInt32LE(4),
+    owner: buf.readUInt32LE(8),
+    requestor: buf.readUInt32LE(12),
+    selection: buf.readUInt32LE(16),
+    target: buf.readUInt32LE(20),
+    property: buf.readUInt32LE(24),
+  };
+}
+
+export function parseSelectionNotifyEvent(buf: Buffer): SelectionNotifyEvent {
+  return {
+    time: buf.readUInt32LE(4),
+    requestor: buf.readUInt32LE(8),
+    selection: buf.readUInt32LE(12),
+    target: buf.readUInt32LE(16),
+    property: buf.readUInt32LE(20),
+  };
 }
 
 // =============================================================================
