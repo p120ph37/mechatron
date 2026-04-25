@@ -1,4 +1,4 @@
-import { XConnection } from "../x11proto/conn";
+import { XConnection } from "./conn";
 import { getXConnection, closeXConnection, xconnOpenReason, _resetXConnForTests } from "./xconn";
 import { xButton as linux_xButton } from "../mouse/constants";
 

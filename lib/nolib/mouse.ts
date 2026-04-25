@@ -11,11 +11,11 @@
  */
 
 import { getNolibVariant } from "../backend";
-import { getXConnection } from "../ffi/xconn";
+import { getXConnection } from "../x11proto/xconn";
 import {
   xprotoMousePress, xprotoMouseRelease,
   xprotoScrollV, xprotoScrollH, xprotoSetPos,
-} from "../ffi/xproto";
+} from "../x11proto/xproto";
 import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2, evdevButton } from "../mouse/constants";
 import {
   nolibUinputAvailable,

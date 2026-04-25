@@ -13,8 +13,8 @@
 
 import { openSync, readSync, closeSync } from "fs";
 import { getNolibVariant } from "../backend";
-import { getXConnection } from "../ffi/xconn";
-import { xprotoGrabScreen } from "../ffi/xproto";
+import { getXConnection } from "../x11proto/xconn";
+import { xprotoGrabScreen } from "../x11proto/xproto";
 import { ioctlSync, ioctlBridgeAvailable } from "./ioctl";
 import {
   FRAMEBUFFER_DEV, FBIOGET_VSCREENINFO, FBIOGET_FSCREENINFO,

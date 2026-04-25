@@ -1,4 +1,4 @@
-import { XConnection } from "../x11proto/conn";
+import { XConnection } from "./conn";
 
 let _conn: XConnection | null = null;
 let _openPromise: Promise<XConnection | null> | null = null;

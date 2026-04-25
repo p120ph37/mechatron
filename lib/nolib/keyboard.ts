@@ -8,8 +8,8 @@
  */
 
 import { getNolibVariant } from "../backend";
-import { getXConnection } from "../ffi/xconn";
-import { xprotoKeyPress, xprotoKeyRelease } from "../ffi/xproto";
+import { getXConnection } from "../x11proto/xconn";
+import { xprotoKeyPress, xprotoKeyRelease } from "../x11proto/xproto";
 import { nolibUinputAvailable, injectKeysym } from "./uinput";
 import {
   remoteDesktopAvailable, notifyKeyboardKeysym,

@@ -6,7 +6,7 @@
  * Other platforms: not available.
  */
 
-import { getXConnection } from "../ffi/xconn";
+import { getXConnection } from "../x11proto/xconn";
 import type { XConnection } from "../x11proto/conn";
 
 const IS_LINUX = process.platform === "linux";

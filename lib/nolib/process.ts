@@ -7,7 +7,7 @@
  */
 
 import { readdirSync, readFileSync, readlinkSync, existsSync } from "fs";
-import { getXConnection } from "../ffi/xconn";
+import { getXConnection } from "../x11proto/xconn";
 
 const IS_LINUX = process.platform === "linux";
 

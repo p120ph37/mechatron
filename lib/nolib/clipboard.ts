@@ -17,7 +17,7 @@ const variant = getRequestedVariant();
 // x11 variant — ICCCM CLIPBOARD selection via X11 wire protocol
 // ═══════════════════════════════════════════════════════════════════════
 
-import { getXConnection } from "../ffi/xconn";
+import { getXConnection } from "../x11proto/xconn";
 import type { XConnection } from "../x11proto/conn";
 import {
   EVENT_SELECTION_REQUEST, EVENT_SELECTION_NOTIFY,
