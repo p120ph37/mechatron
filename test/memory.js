@@ -593,7 +593,32 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
+	async function testCtor() {
+		log("  Memory ctor... ");
+		var Process = mechatron.Process;
+		var Memory  = mechatron.Memory;
+		var mem = new Memory();
+		assert(!await mem.isValid(), "empty ctor invalid");
+		var proc = new Process();
+		mem = new Memory(proc);
+		assert(!await mem.isValid(), "invalid proc ctor invalid");
+		assert(mem.getProcess().eq(proc), "getProcess eq");
+		proc = await Process.getCurrent();
+		mem = new Memory(proc);
+		assert(await mem.isValid(), "current proc ctor valid");
+		var copy = new Memory(mem);
+		assert(await copy.isValid(), "copy ctor valid");
+		assert(copy.getProcess().eq(proc), "copy ctor getProcess eq");
+		log("OK\n");
+		return true;
+	}
+
 	return [
+		{
+			name: "memory ctor",
+			functions: ["memory_ctor"],
+			test: testCtor,
+		},
 		{
 			name: "memory",
 			functions: [

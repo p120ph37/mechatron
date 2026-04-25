@@ -134,7 +134,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi | linux-ffi | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|
-| memory_ctor | skip | skip | skip | skip | skip | skip |
+| memory_ctor | ok | ok | ok | ok | ok | ok |
 | memory_isValid | ok | ok | ok | ok | ok | ok |
 | memory_getRegions | ok | ok | ok | ok | ok | ok |
 | memory_getRegion | ok | ok | ok | ok | ok | ok |
