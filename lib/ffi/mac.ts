@@ -543,14 +543,8 @@ let _cfBoolTrue = 0n;
 let _cfBoolFalse = 0n;
 let _cfBoolInit = false;
 
-/**
- * Return the kCFBooleanTrue or kCFBooleanFalse singleton.
- *
- * Resolved via dlsym at first call.  The symbol address (a dlsym result)
- * is a code/data-segment virtual address — Number() conversion is safe
- * because bun:ffi's read.ptr requires a JS number and VA ranges on
- * current macOS hardware are well within Number precision.
- */
+// dlsym returns a code/data-segment VA — Number() is safe because
+// read.ptr requires a JS number and VAs are within Number precision.
 export function cfBool(v: boolean): bigint {
   if (!_cfBoolInit) {
     _cfBoolInit = true;

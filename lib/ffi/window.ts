@@ -506,6 +506,8 @@ function getCGKeys() {
 
 const _numBuf = new Int32Array(1);
 const _sType = BigInt(kCFNumberSInt32Type);
+const _f64Type = BigInt(kCFNumberFloat64Type);
+const ZERO_BOUNDS = { x: 0, y: 0, w: 0, h: 0 };
 
 function mac_getList(regexStr?: string): number[] {
   const C = cg();
@@ -643,29 +645,34 @@ function mac_getPid(handle: number): number {
   }, 0);
 }
 
-const _f64Buf = new Float64Array(2);
+const _f64Buf = new Float64Array(1);
+
+function cfReadFloat64(cfNum: bigint): number {
+  _f64Buf[0] = 0;
+  cf()!.CFNumberGetValue(cfNum, _f64Type, bp(_f64Buf));
+  return _f64Buf[0];
+}
 
 function mac_getBoundsFromDict(dict: bigint): { x: number; y: number; w: number; h: number } {
   const CF = cf()!;
   const extra = getCGExtraKeys()!;
   const boundsDict = CF.CFDictionaryGetValue(dict, extra.bounds);
-  if (!boundsDict) return { x: 0, y: 0, w: 0, h: 0 };
-  const f64Type = BigInt(kCFNumberFloat64Type);
-  let x = 0, y = 0, w = 0, h = 0;
+  if (!boundsDict) return ZERO_BOUNDS;
   const xRef = CF.CFDictionaryGetValue(boundsDict, extra.bx);
-  if (xRef) { CF.CFNumberGetValue(xRef, f64Type, bp(_f64Buf)); x = _f64Buf[0]; }
   const yRef = CF.CFDictionaryGetValue(boundsDict, extra.by);
-  if (yRef) { CF.CFNumberGetValue(yRef, f64Type, bp(_f64Buf)); y = _f64Buf[0]; }
   const wRef = CF.CFDictionaryGetValue(boundsDict, extra.bw);
-  if (wRef) { CF.CFNumberGetValue(wRef, f64Type, bp(_f64Buf)); w = _f64Buf[0]; }
   const hRef = CF.CFDictionaryGetValue(boundsDict, extra.bh);
-  if (hRef) { CF.CFNumberGetValue(hRef, f64Type, bp(_f64Buf)); h = _f64Buf[0]; }
-  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+  return {
+    x: xRef ? Math.round(cfReadFloat64(xRef)) : 0,
+    y: yRef ? Math.round(cfReadFloat64(yRef)) : 0,
+    w: wRef ? Math.round(cfReadFloat64(wRef)) : 0,
+    h: hRef ? Math.round(cfReadFloat64(hRef)) : 0,
+  };
 }
 
 function mac_getBounds(handle: number): { x: number; y: number; w: number; h: number } {
-  if (!getCGExtraKeys()) return { x: 0, y: 0, w: 0, h: 0 };
-  return mac_withWindowDict(handle, mac_getBoundsFromDict, { x: 0, y: 0, w: 0, h: 0 });
+  if (!getCGExtraKeys()) return ZERO_BOUNDS;
+  return mac_withWindowDict(handle, mac_getBoundsFromDict, ZERO_BOUNDS);
 }
 
 // ── macOS: AX-based window manipulation ────────────────────────────
@@ -716,14 +723,14 @@ function getAXAttrs() {
 const _axOutBuf = new BigInt64Array(1);
 const _widBuf = new Uint32Array(1);
 
-function mac_withAXWindow<T>(handle: number, fn: (axWin: bigint) => T, fallback: T): T {
+function mac_withAXWindow<T>(handle: number, fn: (axWin: bigint) => T, fallback: T, knownPid?: number): T {
   const AX = ax();
   const CF = cf();
   if (!AX || !CF) return fallback;
   const attrs = getAXAttrs();
   if (!attrs) return fallback;
 
-  const pid = mac_getPid(handle);
+  const pid = knownPid ?? mac_getPid(handle);
   if (pid <= 0) return fallback;
 
   const appElem = AX.AXUIElementCreateApplication(pid);
@@ -852,30 +859,25 @@ function mac_getActive(): number {
   const sysWide = AX.AXUIElementCreateSystemWide();
   if (!sysWide) return 0;
 
+  const owned: bigint[] = [sysWide];
   try {
     _axOutBuf[0] = 0n;
     if (AX.AXUIElementCopyAttributeValue(sysWide, attrs.focusedApp, bp(_axOutBuf)) !== 0) return 0;
     const appElem = _axOutBuf[0];
     if (!appElem) return 0;
+    owned.push(appElem);
 
-    try {
-      _axOutBuf[0] = 0n;
-      if (AX.AXUIElementCopyAttributeValue(appElem, attrs.focusedWindow, bp(_axOutBuf)) !== 0) return 0;
-      const focWin = _axOutBuf[0];
-      if (!focWin) return 0;
+    _axOutBuf[0] = 0n;
+    if (AX.AXUIElementCopyAttributeValue(appElem, attrs.focusedWindow, bp(_axOutBuf)) !== 0) return 0;
+    const focWin = _axOutBuf[0];
+    if (!focWin) return 0;
+    owned.push(focWin);
 
-      try {
-        _widBuf[0] = 0;
-        if (AX._AXUIElementGetWindow(focWin, bp(_widBuf)) !== 0) return 0;
-        return _widBuf[0];
-      } finally {
-        CF.CFRelease(focWin);
-      }
-    } finally {
-      CF.CFRelease(appElem);
-    }
+    _widBuf[0] = 0;
+    if (AX._AXUIElementGetWindow(focWin, bp(_widBuf)) !== 0) return 0;
+    return _widBuf[0];
   } finally {
-    CF.CFRelease(sysWide);
+    for (let i = owned.length - 1; i >= 0; i--) CF.CFRelease(owned[i]);
   }
 }
 
@@ -899,7 +901,7 @@ function mac_setActive(handle: number): void {
 
   mac_withAXWindow(handle, (axWin) => {
     AX.AXUIElementPerformAction(axWin, attrs.raise);
-  }, undefined);
+  }, undefined, pid);
 }
 
 function mac_isAxEnabled(): boolean {
@@ -927,7 +929,6 @@ export function window_close(handle: number): void {
     if (!win_isValid(handle)) return;
     win_close(handle);
   } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
     mac_close(handle);
   }
 }
@@ -936,7 +937,6 @@ export function window_isTopMost(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_TOPMOST);
   if (IS_WIN) return win_isValid(handle) && win_isTopMost(handle);
   if (IS_MAC) {
-    if (!mac_isValid(handle)) return false;
     const keys = getCGKeys();
     if (!keys) return false;
     return mac_withWindowDict(handle, (dict) => {
@@ -973,14 +973,14 @@ export function window_isBorderless(handle: number): boolean {
 export function window_isMinimized(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MINIMIZE);
   if (IS_WIN) return win_isValid(handle) && win_isMinimized(handle);
-  if (IS_MAC) return mac_isValid(handle) && mac_isMinimized(handle);
+  if (IS_MAC) return mac_isMinimized(handle);
   return false;
 }
 
 export function window_isMaximized(handle: number): boolean {
   if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MAXIMIZE);
   if (IS_WIN) return win_isValid(handle) && win_isMaximized(handle);
-  if (IS_MAC) return mac_isValid(handle) && mac_isMaximized(handle);
+  if (IS_MAC) return mac_isMaximized(handle);
   return false;
 }
 
@@ -1026,7 +1026,6 @@ export function window_setMinimized(handle: number, minimized: boolean): void {
     if (!win_isValid(handle)) return;
     win_setMinimized(handle, minimized);
   } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
     mac_setMinimized(handle, minimized);
   }
 }
@@ -1040,7 +1039,6 @@ export function window_setMaximized(handle: number, maximized: boolean): void {
     if (!win_isValid(handle)) return;
     win_setMaximized(handle, maximized);
   } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
     mac_setMaximized(handle, maximized);
   }
 }
@@ -1048,7 +1046,7 @@ export function window_setMaximized(handle: number, maximized: boolean): void {
 export function window_getProcess(handle: number): number {
   if (IS_LINUX) return winIsValid(handle) ? getPid(BigInt(handle)) : 0;
   if (IS_WIN) return win_isValid(handle) ? win_getPid(handle) : 0;
-  if (IS_MAC) return mac_isValid(handle) ? mac_getPid(handle) : 0;
+  if (IS_MAC) return mac_getPid(handle);
   return 0;
 }
 
@@ -1069,7 +1067,7 @@ export function window_setHandle(_handle: number, newHandle: number): boolean {
 export function window_getTitle(handle: number): string {
   if (IS_LINUX) return winIsValid(handle) ? getTitle(BigInt(handle)) : "";
   if (IS_WIN) return win_isValid(handle) ? win_getTitle(handle) : "";
-  if (IS_MAC) return mac_isValid(handle) ? mac_getTitle(handle) : "";
+  if (IS_MAC) return mac_getTitle(handle);
   return "";
 }
 
@@ -1085,7 +1083,6 @@ export function window_setTitle(handle: number, title: string): void {
     if (!win_isValid(handle)) return;
     win_setTitle(handle, title);
   } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
     mac_setTitle(handle, title);
   }
 }
@@ -1098,7 +1095,7 @@ export function window_getBounds(handle: number): { x: number; y: number; w: num
     return { x: c.x - f.left, y: c.y - f.top, w: c.w + f.right, h: c.h + f.bottom };
   }
   if (IS_WIN) return win_isValid(handle) ? win_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
-  if (IS_MAC) return mac_isValid(handle) ? mac_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_MAC) return mac_getBounds(handle);
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -1116,7 +1113,6 @@ export function window_setBounds(handle: number, x: number, y: number, w: number
     if (!win_isValid(handle)) return;
     win_setBounds(handle, x, y, w, h);
   } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
     mac_setBounds(handle, x, y, w, h);
   }
 }
@@ -1124,7 +1120,7 @@ export function window_setBounds(handle: number, x: number, y: number, w: number
 export function window_getClient(handle: number): { x: number; y: number; w: number; h: number } {
   if (IS_LINUX) return winIsValid(handle) ? getClient(BigInt(handle)) : { x: 0, y: 0, w: 0, h: 0 };
   if (IS_WIN) return win_isValid(handle) ? win_getClient(handle) : { x: 0, y: 0, w: 0, h: 0 };
-  if (IS_MAC) return mac_isValid(handle) ? mac_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_MAC) return mac_getBounds(handle);
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -1139,7 +1135,6 @@ export function window_setClient(handle: number, x: number, y: number, w: number
     if (!win_isValid(handle)) return;
     win_setClient(handle, x, y, w, h);
   } else if (IS_MAC) {
-    if (!mac_isValid(handle)) return;
     mac_setBounds(handle, x, y, w, h);
   }
 }
@@ -1152,7 +1147,6 @@ export function window_mapToClient(handle: number, x: number, y: number): { x: n
   }
   if (IS_WIN) return win_isValid(handle) ? win_mapToClient(handle, x, y) : { x, y };
   if (IS_MAC) {
-    if (!mac_isValid(handle)) return { x, y };
     const b = mac_getBounds(handle);
     return { x: x - b.x, y: y - b.y };
   }
@@ -1167,7 +1161,6 @@ export function window_mapToScreen(handle: number, x: number, y: number): { x: n
   }
   if (IS_WIN) return win_isValid(handle) ? win_mapToScreen(handle, x, y) : { x, y };
   if (IS_MAC) {
-    if (!mac_isValid(handle)) return { x, y };
     const b = mac_getBounds(handle);
     return { x: x + b.x, y: y + b.y };
   }
