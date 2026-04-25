@@ -19,6 +19,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | Column | Backend | Platform | Notes |
 |--------|---------|----------|-------|
 | linux-napi[x11] | Pre-built Rust .node binary | Linux (X11) | Gold-standard reference |
+| linux-napi[portal] | Pre-built Rust .node binary | Linux/Wayland | zwlr-data-control-v1; clipboard only |
 | linux-ffi[x11] | bun:ffi | Linux (X11/EWMH) | Requires libX11; XTest for input |
 | linux-nolib[x11] | Pure TS (xproto wire) | Any OS with $DISPLAY | No native libraries at all |
 | linux-nolib[portal] | Pure TS (D-Bus) | Linux/Wayland | RemoteDesktop + ScreenCast portals |
@@ -118,17 +119,17 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Clipboard
 
-| Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
-|----------|------|------|------|------|------|------|------|------|------|
-| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_clear | skip | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_getText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_setText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasImage | skip | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getImage | skip | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_setImage | skip | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getSequence | skip | skip | skip | skip | ok | ok | ok | ok | skip |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
+|----------|------|------|------|------|------|------|------|------|------|------|
+| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_clear | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_getText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_setText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_setImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getSequence | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
 
 ## Memory
 

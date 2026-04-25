@@ -10,47 +10,180 @@ pub struct ClipboardImage {
 }
 
 // =============================================================================
-// Linux stubs — no clipboard manager on X11, all operations return false/empty.
+// Linux — X11 (ICCCM selections) or Wayland (zwlr_data_control_v1)
 // =============================================================================
 
 #[cfg(target_os = "linux")]
+#[path = "clipboard_x11.rs"]
+mod clipboard_x11;
+
+#[cfg(target_os = "linux")]
+#[path = "clipboard_wl.rs"]
+mod clipboard_wl;
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, PartialEq)]
+enum LinuxBackend { Wayland, X11, None }
+
+#[cfg(target_os = "linux")]
+fn detect_backend() -> LinuxBackend {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    static mut BACKEND: LinuxBackend = LinuxBackend::None;
+    unsafe {
+        INIT.call_once(|| {
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() && clipboard_wl::is_available() {
+                BACKEND = LinuxBackend::Wayland;
+            } else if std::env::var_os("DISPLAY").is_some() {
+                BACKEND = LinuxBackend::X11;
+            }
+        });
+        BACKEND
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn argb_to_png(width: u32, height: u32, data: &[u32]) -> Option<Vec<u8>> {
+    let pixel_count = (width as usize) * (height as usize);
+    if data.len() < pixel_count { return None; }
+
+    let mut rgba = Vec::with_capacity(pixel_count * 4);
+    for &pixel in &data[..pixel_count] {
+        rgba.push(((pixel >> 16) & 0xFF) as u8);
+        rgba.push(((pixel >> 8) & 0xFF) as u8);
+        rgba.push((pixel & 0xFF) as u8);
+        rgba.push(((pixel >> 24) & 0xFF) as u8);
+    }
+
+    let mut buf = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut buf, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&rgba).ok()?;
+    }
+    Some(buf)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn png_to_argb(png_data: &[u8]) -> Option<(u32, u32, Vec<u32>)> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(png_data));
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let buf = &buf[..info.buffer_size()];
+    let w = info.width;
+    let h = info.height;
+    let n = (w * h) as usize;
+    let mut argb = Vec::with_capacity(n);
+
+    match info.color_type {
+        png::ColorType::Rgba => {
+            for i in 0..n {
+                let r = buf[i * 4] as u32;
+                let g = buf[i * 4 + 1] as u32;
+                let b = buf[i * 4 + 2] as u32;
+                let a = buf[i * 4 + 3] as u32;
+                argb.push((a << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+        png::ColorType::Rgb => {
+            for i in 0..n {
+                let r = buf[i * 3] as u32;
+                let g = buf[i * 3 + 1] as u32;
+                let b = buf[i * 3 + 2] as u32;
+                argb.push(0xFF000000 | (r << 16) | (g << 8) | b);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for i in 0..n {
+                let v = buf[i * 2] as u32;
+                let a = buf[i * 2 + 1] as u32;
+                argb.push((a << 24) | (v << 16) | (v << 8) | v);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for i in 0..n {
+                let v = buf[i] as u32;
+                argb.push(0xFF000000 | (v << 16) | (v << 8) | v);
+            }
+        }
+        _ => return None,
+    }
+    Some((w, h, argb))
+}
+
+#[cfg(target_os = "linux")]
 fn platform_clear() -> bool {
-    false
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_clear(),
+        LinuxBackend::X11 => clipboard_x11::x11_clear(),
+        LinuxBackend::None => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn platform_has_text() -> bool {
-    false
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_has_text(),
+        LinuxBackend::X11 => clipboard_x11::x11_has_text(),
+        LinuxBackend::None => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn platform_get_text() -> String {
-    String::new()
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_get_text(),
+        LinuxBackend::X11 => clipboard_x11::x11_get_text(),
+        LinuxBackend::None => String::new(),
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_set_text(_text: &str) -> bool {
-    false
+fn platform_set_text(text: &str) -> bool {
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_set_text(text),
+        LinuxBackend::X11 => clipboard_x11::x11_set_text(text),
+        LinuxBackend::None => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn platform_has_image() -> bool {
-    false
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_has_image(),
+        LinuxBackend::X11 => clipboard_x11::x11_has_image(),
+        LinuxBackend::None => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    None
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_get_image(),
+        LinuxBackend::X11 => clipboard_x11::x11_get_image(),
+        LinuxBackend::None => None,
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_set_image(_width: u32, _height: u32, _data: &[u32]) -> bool {
-    false
+fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_set_image(width, height, data),
+        LinuxBackend::X11 => clipboard_x11::x11_set_image(width, height, data),
+        LinuxBackend::None => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn platform_get_sequence() -> f64 {
-    0.0
+    match detect_backend() {
+        LinuxBackend::Wayland => clipboard_wl::wl_get_sequence(),
+        LinuxBackend::X11 => clipboard_x11::x11_get_sequence(),
+        LinuxBackend::None => 0.0,
+    }
 }
 
 // =============================================================================
