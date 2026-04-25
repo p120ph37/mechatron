@@ -64,6 +64,15 @@ Module.Segment = Segment;
 Memory.Stats   = Stats;
 Memory.Region  = Region;
 
+// Cache stubs — robot-js 2.x exposed caching on Memory but it was never
+// implemented beyond the NAPI layer.  Modern mechatron drops it entirely;
+// provide synchronous noop stubs here for ABI compatibility.
+mech.Memory.prototype.createCache = function () { return false; };
+mech.Memory.prototype.clearCache = function () {};
+mech.Memory.prototype.deleteCache = function () {};
+mech.Memory.prototype.isCaching = function () { return false; };
+mech.Memory.prototype.getCacheSize = function () { return 0; };
+
 // ---------------------------------------------------------------------------
 // Top-level time helpers (robot-js had mRobot.sleep / mRobot.clock)
 // ---------------------------------------------------------------------------
