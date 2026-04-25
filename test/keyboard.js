@@ -207,6 +207,28 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			},
 		},
 
+		// ── standalone press/release (no getKeyState dependency) ────────
+
+		{
+			name: "press standalone",
+			functions: ["keyboard_press"],
+			test: async function () {
+				var k = new Keyboard();
+				await k.press(KEYS.KEY_SHIFT);
+				await k.release(KEYS.KEY_SHIFT);
+			},
+		},
+
+		{
+			name: "release standalone",
+			functions: ["keyboard_release"],
+			test: async function () {
+				var k = new Keyboard();
+				await k.press(KEYS.KEY_SHIFT);
+				await k.release(KEYS.KEY_SHIFT);
+			},
+		},
+
 		// ── press + getState round-trip ─────────────────────────────────
 
 		{

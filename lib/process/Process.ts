@@ -1,4 +1,3 @@
-import { Window } from "../window";
 import { getNative } from "../backend";
 import type { Module } from "./Module";
 
@@ -86,11 +85,6 @@ export class Process {
       mod._proc = this;
       return mod;
     });
-  }
-
-  async getWindows(regex?: string): Promise<Window[]> {
-    const handles: number[] = await getNative("process").process_getWindows(this._pid, regex);
-    return handles.map((h) => new Window(h));
   }
 
   eq(other: Process | number): boolean {

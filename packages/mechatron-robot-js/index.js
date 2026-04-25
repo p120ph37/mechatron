@@ -73,6 +73,19 @@ mech.Memory.prototype.deleteCache = function () {};
 mech.Memory.prototype.isCaching = function () { return false; };
 mech.Memory.prototype.getCacheSize = function () { return 0; };
 
+// getWindows — moved out of the Process class in modern mechatron; the
+// window subsystem handles all window enumeration.  This shim uses
+// Window.getList + PID filtering to maintain the robot-js API shape.
+mech.Process.prototype.getWindows = async function (regex) {
+  var pid = this.getPID();
+  var wins = await mech.Window.getList(regex);
+  var out = [];
+  for (var i = 0; i < wins.length; i++) {
+    if (await wins[i].getPID() === pid) out.push(wins[i]);
+  }
+  return out;
+};
+
 // ---------------------------------------------------------------------------
 // Top-level time helpers (robot-js had mRobot.sleep / mRobot.clock)
 // ---------------------------------------------------------------------------

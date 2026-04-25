@@ -19,6 +19,5 @@ export const process_hasExited: (pid: number) => boolean = native.process_hasExi
 export const process_getCurrent: () => number = native.process_getCurrent;
 export const process_isSys64Bit: () => boolean = native.process_isSys64Bit;
 export const process_getList: (regex?: string) => number[] = native.process_getList;
-export const process_getWindows: (pid: number, regex?: string) => number[] = native.process_getWindows;
 export const process_getModules: (pid: number, regex?: string) => any[] = native.process_getModules;
 export const process_getSegments: (pid: number, base: number) => any[] = native.process_getSegments;

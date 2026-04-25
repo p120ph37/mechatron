@@ -159,17 +159,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			}
 		},
 
-		// ----- getWindows -----
-		{
-			name: "Process getWindows",
-			functions: ["process_getCurrent", "process_getWindows"],
-			test: async function () {
-				var curr = await Process.getCurrent();
-				var wins = await curr.getWindows();
-				assert(wins instanceof Array, "getWindows is array");
-			}
-		},
-
 		// ----- getModules (includes Module class tests and getSegments) -----
 		{
 			name: "Process getModules / Module class / getSegments",

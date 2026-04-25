@@ -17,10 +17,6 @@ import {
   user32, kernel32, psapi, winFFI,
   w2js, js2w,
 } from "./win";
-import {
-  x11, ffi as x11ffi, getDisplay,
-  atom, getWindowProperty, getWindowAttributes, IsViewable,
-} from "./x11";
 import { bp } from "./bun";
 import {
   libc as mac, macFFI, bufToStr,
@@ -352,101 +348,11 @@ function macGetList(re: RegExp | null): number[] {
   return out;
 }
 
-// ── Linux X11 window enumeration (PID-filtered) ────────────────────────
-
 function makeRegex(s?: string): RegExp | null {
   if (!s) return null;
   try { return new RegExp(s); } catch { return null; }
 }
 
-function getWindowPid(win: bigint): number {
-  const wmPid = atom("_NET_WM_PID");
-  if (wmPid === 0n) return 0;
-  const r = getWindowProperty(win, wmPid);
-  if (!r || r.nitems === 0n) return 0;
-  const F = x11ffi();
-  const X = x11();
-  if (!F || !X) return 0;
-  // Property is CARDINAL/32 → first value is a long.  Read it.
-  const pid = Number(F.read.u64(Number(r.data), 0) & 0xFFFFFFFFn);
-  X.XFree(r.data);
-  return pid;
-}
-
-function getWindowTitle(win: bigint): string {
-  const X = x11();
-  const F = x11ffi();
-  if (!X || !F) return "";
-  const wmName = atom("_NET_WM_NAME");
-  if (wmName !== 0n) {
-    const r = getWindowProperty(win, wmName);
-    if (r && r.nitems > 0n) {
-      const s = new (F as any).CString(r.data) as string;
-      X.XFree(r.data);
-      if (s) return s;
-    }
-  }
-  const xaWmName = atom("WM_NAME", false);
-  if (xaWmName !== 0n) {
-    const r = getWindowProperty(win, xaWmName);
-    if (r && r.nitems > 0n) {
-      const s = new (F as any).CString(r.data) as string;
-      X.XFree(r.data);
-      return s;
-    }
-  }
-  return "";
-}
-
-function winIsValid(win: bigint): boolean {
-  if (win === 0n) return false;
-  const wmPid = atom("_NET_WM_PID");
-  if (wmPid === 0n) return false;
-  const r = getWindowProperty(win, wmPid);
-  if (!r) return false;
-  const X = x11();
-  if (X) X.XFree(r.data);
-  return true;
-}
-
-function enumWindows(win: bigint, re: RegExp | null, pidFilter: number, out: number[]): void {
-  const X = x11();
-  const F = x11ffi();
-  const d = getDisplay();
-  if (!X || !F || !d) return;
-  const attr = getWindowAttributes(win);
-  if (attr && attr.map_state === IsViewable && winIsValid(win)) {
-    const pid = pidFilter === 0 ? -1 : getWindowPid(win);
-    if (pidFilter === 0 || pid === pidFilter) {
-      let ok = true;
-      if (re) {
-        const t = getWindowTitle(win);
-        ok = re.test(t);
-      }
-      if (ok) out.push(Number(win));
-    }
-  }
-  // recurse via XQueryTree
-  const root = new BigUint64Array(1);
-  const parent = new BigUint64Array(1);
-  const children = new BigUint64Array(1); // pointer
-  const ncount = new Uint32Array(1);
-  if (X.XQueryTree(d, win, F.ptr(root), F.ptr(parent), F.ptr(children), F.ptr(ncount)) !== 0) {
-    const ptr = children[0];
-    const n = ncount[0];
-    if (ptr !== 0n && n > 0) {
-      for (let i = 0; i < n; i++) {
-        // Bun's read.u64 rejects bigint pointer args with "Expected a
-        // pointer"; ptr came from BigUint64Array[0] (XQueryTree's Window**
-        // out-param).  Linux userspace VAs fit in 48 bits, so the
-        // Number round-trip is lossless.
-        const child = F.read.u64(Number(ptr), i * 8);
-        enumWindows(child, re, pidFilter, out);
-      }
-      X.XFree(ptr);
-    }
-  }
-}
 
 // ── NAPI-compatible exports ────────────────────────────────────────────
 
@@ -694,18 +600,6 @@ export function process_getModules(pid: number, regexStr?: string): ModuleEntry[
       winCloseHandle(h);
     }
   }
-  return out;
-}
-
-export function process_getWindows(pid: number, regexStr?: string): number[] {
-  if (!IS_LINUX) return [];
-  const X = x11();
-  const d = getDisplay();
-  if (!X || !d) return [];
-  const re = makeRegex(regexStr);
-  const out: number[] = [];
-  const root = X.XDefaultRootWindow(d);
-  enumWindows(root, re, pid, out);
   return out;
 }
 

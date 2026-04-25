@@ -523,14 +523,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			assert(Array.isArray(mvStride), "readInt8 with stride returns array");
 		}
 
-		// --- setAccess both overloads ---
-		if (readable) {
-			var access = await mem.setAccess(readable, readable.readable, readable.writable, readable.executable);
-			assert(typeof access === "boolean", "setAccess rwx returns bool");
-			var accessFlags = await mem.setAccess(readable, readable.access);
-			assert(typeof accessFlags === "boolean", "setAccess flags returns bool");
-		}
-
 		// --- Flag-bearing reads: SKIP_ERRORS / AUTO_ACCESS ---
 		// These drive the per-region walker in lib/ffi/memory.ts (linux/mac/win
 		// have separate implementations at lines ~676-706, ~717-754, ~763-809
@@ -576,7 +568,45 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
+	async function testSetAccess() {
+		log("  setAccess... ");
+		var Process = mechatron.Process;
+		var Memory  = mechatron.Memory;
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		assert(await mem.isValid(), "setAccess: mem valid");
+		var regions = await mem.getRegions();
+		var readable = null;
+		for (var i = 0; i < regions.length; ++i) {
+			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16) {
+				readable = regions[i];
+				break;
+			}
+		}
+		assert(readable !== null, "setAccess: found readable region");
+		var access = await mem.setAccess(readable, readable.readable, readable.writable, readable.executable);
+		assert(typeof access === "boolean", "setAccess rwx returns bool");
+		var accessFlags = await mem.setAccess(readable, readable.access);
+		assert(typeof accessFlags === "boolean", "setAccess flags returns bool");
+		await proc.close();
+		log("OK\n");
+		return true;
+	}
+
 	return [
-		{ name: "memory", functions: ["memory_ctor"], test: testMemory },
+		{
+			name: "memory",
+			functions: [
+				"memory_isValid", "memory_getRegions", "memory_getRegion",
+				"memory_getPageSize", "memory_getMinAddress", "memory_getMaxAddress",
+				"memory_getPtrSize", "memory_readData", "memory_writeData", "memory_find",
+			],
+			test: testMemory,
+		},
+		{
+			name: "memory setAccess",
+			functions: ["memory_setAccess", "memory_setAccessFlags"],
+			test: testSetAccess,
+		},
 	];
 };

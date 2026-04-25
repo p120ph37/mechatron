@@ -36,7 +36,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|------|------|
-| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
 | keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_getKeyState | ok | ok | ok | skip | skip | ok | ok | ok | ok |
@@ -45,7 +45,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|------|------|
-| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
 | mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok |
@@ -58,11 +58,11 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|
-| window_ctor | ok | ok | ok | ok | ok | ok | ok |
+| window_ctor | skip | skip | skip | skip | skip | skip | skip |
 | window_isValid | ok | ok | ok | ok | ok | ok | ok |
 | window_close | ok | ok | ok | ok | ok | ok | ok |
 | window_isTopMost | ok | ok | ok | ok | ok | ok | ok |
-| window_isBorderless | ok | ok | ok | skip | ok | skip | skip |
+| window_isBorderless | ok | ok | ok | ok | ok | skip | skip |
 | window_isMinimized | ok | ok | ok | ok | ok | ok | ok |
 | window_isMaximized | ok | ok | ok | ok | ok | ok | ok |
 | window_setTopMost | ok | ok | ok | ok | ok | skip | skip |
@@ -88,32 +88,31 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Process
 
-| Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|
-| process_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_open | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_close | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_isValid | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_is64Bit | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_isDebugged | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getHandle | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getName | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getPath | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_exit | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_kill | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_hasExited | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getCurrent | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_isSys64Bit | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getList | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getWindows | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| process_getModules | ok | ok | skip | skip | skip | ok | ok | ok | ok |
-| process_getSegments | ok | ok | skip | skip | skip | ok | ok | ok | ok |
+| Function | linux-napi | linux-ffi | linux-nolib | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|
+| process_ctor | skip | skip | skip | skip | skip | skip | skip |
+| process_open | ok | ok | ok | ok | ok | ok | ok |
+| process_close | ok | ok | ok | ok | ok | ok | ok |
+| process_isValid | ok | ok | ok | ok | ok | ok | ok |
+| process_is64Bit | ok | ok | ok | ok | ok | ok | ok |
+| process_isDebugged | ok | ok | ok | ok | ok | ok | ok |
+| process_getHandle | ok | ok | ok | ok | ok | ok | ok |
+| process_getName | ok | ok | ok | ok | ok | ok | ok |
+| process_getPath | ok | ok | ok | ok | ok | ok | ok |
+| process_exit | ok | ok | ok | ok | ok | ok | ok |
+| process_kill | ok | ok | ok | ok | ok | ok | ok |
+| process_hasExited | ok | ok | ok | ok | ok | ok | ok |
+| process_getCurrent | ok | ok | ok | ok | ok | ok | ok |
+| process_isSys64Bit | ok | ok | ok | ok | ok | ok | ok |
+| process_getList | ok | ok | ok | ok | ok | ok | ok |
+| process_getModules | ok | ok | skip | ok | ok | ok | ok |
+| process_getSegments | ok | ok | skip | ok | ok | ok | ok |
 
 ## Screen
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|------|------|
-| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
 | screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 
@@ -121,7 +120,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
 |----------|------|------|------|------|------|------|------|------|------|
-| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
 | clipboard_clear | skip | skip | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_hasText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_getText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
@@ -135,7 +134,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi | linux-ffi | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|
-| memory_ctor | ok | ok | ok | ok | ok | ok |
+| memory_ctor | skip | skip | skip | skip | skip | skip |
 | memory_isValid | ok | ok | ok | ok | ok | ok |
 | memory_getRegions | ok | ok | ok | ok | ok | ok |
 | memory_getRegion | ok | ok | ok | ok | ok | ok |
