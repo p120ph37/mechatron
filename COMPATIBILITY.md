@@ -61,7 +61,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | window_isValid | ok | ok | ok | ok | ok | ok | ok |
 | window_close | ok | ok | ok | ok | ok | ok | ok |
 | window_isTopMost | ok | ok | ok | ok | ok | ok | ok |
-| window_isBorderless | ok | ok | ok | ok | ok | ok | skip |
+| window_isBorderless | ok | ok | ok | skip | ok | skip | skip |
 | window_isMinimized | ok | ok | ok | ok | ok | ok | ok |
 | window_isMaximized | ok | ok | ok | ok | ok | ok | ok |
 | window_setTopMost | ok | ok | ok | ok | ok | skip | skip |
@@ -121,17 +121,34 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib |
 |----------|------|------|------|------|------|------|------|------|
 | clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_clear | ok | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_hasText | ok | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_getText | ok | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_setText | ok | skip | ok | ok | ok | ok | ok | ok |
-| clipboard_hasImage | ok | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getImage | ok | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_setImage | ok | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getSequence | ok | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_clear | skip | skip | ok | ok | ok | ok | ok | ok |
+| clipboard_hasText | skip | skip | ok | ok | ok | ok | ok | ok |
+| clipboard_getText | skip | skip | ok | ok | ok | ok | ok | ok |
+| clipboard_setText | skip | skip | ok | ok | ok | ok | ok | ok |
+| clipboard_hasImage | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getImage | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_setImage | skip | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getSequence | skip | skip | skip | ok | ok | ok | ok | skip |
 
 ## Memory
 
 | Function | linux-napi[x11] | linux-ffi[x11] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|
 | memory_ctor | ok | ok | ok | ok | ok | ok |
+| memory_isValid | ok | ok | ok | ok | ok | ok |
+| memory_getRegions | ok | ok | ok | ok | ok | ok |
+| memory_getRegion | ok | ok | ok | ok | ok | ok |
+| memory_getPageSize | ok | ok | ok | ok | ok | ok |
+| memory_getMinAddress | ok | ok | ok | ok | ok | ok |
+| memory_getMaxAddress | ok | ok | ok | ok | ok | ok |
+| memory_getPtrSize | ok | ok | ok | ok | ok | ok |
+| memory_readData | ok | ok | ok | ok | ok | ok |
+| memory_writeData | ok | ok | ok | ok | ok | ok |
+| memory_find | ok | ok | ok | ok | ok | ok |
+| memory_setAccess | skip | skip | ok | ok | ok | ok |
+| memory_setAccessFlags | skip | skip | ok | ok | ok | ok |
+| memory_createCache | skip | skip | skip | skip | skip | skip |
+| memory_clearCache | skip | skip | skip | skip | skip | skip |
+| memory_deleteCache | skip | skip | skip | skip | skip | skip |
+| memory_isCaching | skip | skip | skip | skip | skip | skip |
+| memory_getCacheSize | skip | skip | skip | skip | skip | skip |

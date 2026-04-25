@@ -140,31 +140,6 @@ export function memory_find(
   return 0;
 }
 
-export function memory_setAccess(_pid: number, _address: number, _size: number, _access: number): boolean {
-  // Can't change memory protection without mprotect/mach_vm_protect
-  return false;
-}
-
-export function memory_setAccessFlags(_pid: number, _address: number, _size: number, _flags: number): boolean {
-  return false;
-}
-
-export function memory_createCache(_pid: number, _address: number, _size: number, _blockSize: number, _maxBlocks?: number, _flags?: number): boolean {
-  return false;
-}
-
-export function memory_clearCache(_pid: number): void {}
-
-export function memory_deleteCache(_pid: number): void {}
-
-export function memory_isCaching(_pid: number): boolean {
-  return false;
-}
-
-export function memory_getCacheSize(_pid: number): number {
-  return 0;
-}
-
 if (!IS_LINUX) {
   throw new Error("nolib/memory: requires Linux");
 }

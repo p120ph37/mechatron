@@ -933,11 +933,3 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
 
   throw new Error("memory: not implemented on this platform");
 }
-
-// ── Cache stubs (match napi behavior) ─────────────────────────────────
-
-export function memory_createCache(_pid: number, _addr: number, _size: number, _block: number, _max?: number, _flags?: number): boolean { return false; }
-export function memory_clearCache(_pid: number): void { /* no-op */ }
-export function memory_deleteCache(_pid: number): void { /* no-op */ }
-export function memory_isCaching(_pid: number): boolean { return false; }
-export function memory_getCacheSize(_pid: number): number { return 0; }
