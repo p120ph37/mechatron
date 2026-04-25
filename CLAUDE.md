@@ -1,5 +1,44 @@
 # Mechatron
 
+## Project structure
+
+This is a monorepo. The Rust/napi native layer lives in `napi/` and is built
+from this same repository — it is not an external dependency.
+
+### napi/ — Rust Cargo workspace
+
+- **`napi/Cargo.toml`** — workspace root with 8 member crates
+- **`napi/shared/`** — shared helpers (x11.rs, mach.rs) used by multiple crates
+- **`napi/{keyboard,mouse,clipboard,screen,window,process,memory}/`** — per-subsystem
+  crate directories, each containing `Cargo.toml`, `build.rs`, and `src/lib.rs`
+- **`napi/src/{subsystem}.rs`** — platform implementations guarded by
+  `#[cfg(target_os = "linux")]`, `#[cfg(target_os = "macos")]`,
+  `#[cfg(target_os = "windows")]`
+- Each crate builds a `.node` cdylib via napi-rs, published as
+  `@mechatronic/napi-{subsystem}`
+
+Build: `cd napi && cargo build --release`
+
+### Backend resolution order
+
+`lib/napi.ts` resolves backends in order: **napi → ffi → nolib**. Each
+subsystem can have variants (e.g. x11, portal, vt, sh). The `usesVariant` flag
+in the backend resolver prevents false variant tagging for subsystems that don't
+use variants (like process and memory).
+
+### Key directories
+
+| Directory | Purpose |
+|-----------|---------|
+| `lib/napi/` | TS wrappers that call into `.node` binaries |
+| `lib/ffi/` | `bun:ffi` backend — dlopens system libs directly |
+| `lib/nolib/` | Pure TS backend — no native libraries at all |
+| `lib/x11proto/` | Pure X11 wire protocol (conn, wire, request, xconn, xproto) |
+| `lib/dbus/` | Pure TS D-Bus wire protocol |
+| `lib/portal/` | XDG portal clients (remote-desktop, screenshot) |
+| `test/` | Test suite; `test/matrix.js` reads `COMPATIBILITY.md` tables |
+| `packages/mechatron-robot-js/` | robot-js 2.2.0 backward-compat shim |
+
 ## bun:ffi darwin pointer-handling conventions
 
 All darwin FFI work must follow these rules:
