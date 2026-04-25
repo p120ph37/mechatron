@@ -860,9 +860,9 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					catch (_) { postCloseThrew = true; }
 					assert(postCloseThrew, "post-close sendRequest rejects");
 
-					// ── FFI bridge: sync→async dispatch via lib/ffi/xproto ──
+					// ── xproto bridge: sync→async dispatch via lib/x11proto/xproto ──
 					// Only exercise under the FFI backend — the napi backend
-					// doesn't load lib/ffi/xproto.ts and the sync wrappers
+					// doesn't load lib/x11proto/xproto.ts and the sync wrappers
 					// would have nothing to forward to.
 					var be = (process.env.MECHATRON_BACKEND || "").toLowerCase();
 					if (be === "ffi" && mechatron.isAvailable("keyboard")) {
@@ -872,7 +872,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 						Platform.setMechanism("input", "xproto");
 						assert(Platform.getMechanism("input") === "xproto",
 							"xproto selected as input mechanism");
-						var bridge = require("../lib/ffi/xproto");
+						var bridge = require("../lib/x11proto/xproto");
 						bridge._resetXprotoForTests();
 						await bridge.xprotoSetPos(42, 51);
 						await bridge.xprotoMousePress(mechatron.BUTTON_LEFT);
