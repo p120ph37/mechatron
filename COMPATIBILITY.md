@@ -36,7 +36,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|------|------|
-| keyboard_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
+| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_getKeyState | ok | ok | ok | skip | skip | ok | ok | ok | ok |
@@ -45,7 +45,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|------|------|
-| mouse_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
+| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok |
@@ -58,7 +58,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|
-| window_ctor | skip | skip | skip | skip | skip | skip | skip |
+| window_ctor | ok | ok | ok | ok | ok | ok | ok |
 | window_isValid | ok | ok | ok | ok | ok | ok | ok |
 | window_close | ok | ok | ok | ok | ok | ok | ok |
 | window_isTopMost | ok | ok | ok | ok | ok | ok | ok |
@@ -90,7 +90,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi | linux-ffi | linux-nolib | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|
-| process_ctor | skip | skip | skip | skip | skip | skip | skip |
+| process_ctor | ok | ok | ok | ok | ok | ok | ok |
 | process_open | ok | ok | ok | ok | ok | ok | ok |
 | process_close | ok | ok | ok | ok | ok | ok | ok |
 | process_isValid | ok | ok | ok | ok | ok | ok | ok |
@@ -112,7 +112,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|------|------|------|
-| screen_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
+| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 
@@ -120,7 +120,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 | Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
 |----------|------|------|------|------|------|------|------|------|------|
-| clipboard_ctor | skip | skip | skip | skip | skip | skip | skip | skip | skip |
+| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_clear | skip | skip | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_hasText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_getText | skip | skip | ok | ok | ok | ok | ok | ok | ok |
