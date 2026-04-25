@@ -143,7 +143,7 @@ export { getRequestedVariant as getNolibVariant };
 
 // ─── Backend loaders ────────────────────────────────────────────────
 
-const _variantCache: Partial<Record<string, any>> = {};
+const _variantCache: Partial<Record<string, { mod: any; usesVariant: boolean } | null>> = {};
 
 function cacheKey(backend: Backend, subsystem: Subsystem, variant?: Variant): string {
   return variant ? `${backend}:${subsystem}:${variant}` : `${backend}:${subsystem}`;
@@ -151,9 +151,9 @@ function cacheKey(backend: Backend, subsystem: Subsystem, variant?: Variant): st
 
 function tryLoadVariant(
   backend: Backend, subsystem: Subsystem, variant?: Variant,
-): any | null {
+): { mod: any; usesVariant: boolean } | null {
   const key = cacheKey(backend, subsystem, variant);
-  if (key in _variantCache) return _variantCache[key];
+  if (key in _variantCache) return _variantCache[key] ?? null;
 
   if (backend === "ffi" && !IS_BUN) {
     _variantCache[key] = null;
@@ -204,8 +204,10 @@ function tryLoadVariant(
   _currentVariant = variant;
   try {
     const mod = require(modPath);
-    _variantCache[key] = mod;
-    return mod;
+    const usesVariant = isVariantSpecific || backend === "nolib";
+    const result = { mod, usesVariant };
+    _variantCache[key] = result;
+    return result;
   } catch {
     _variantCache[key] = null;
     return null;
@@ -225,13 +227,13 @@ function tryLoad(subsystem: Subsystem): any | null {
   const order = parseBackendPref(subsystem) || defaultOrder();
 
   for (const entry of order) {
-    const mod = tryLoadVariant(entry.backend, subsystem, entry.variant);
-    if (mod) {
-      _cache[subsystem] = mod;
-      _backend[subsystem] = entry.variant
+    const result = tryLoadVariant(entry.backend, subsystem, entry.variant);
+    if (result) {
+      _cache[subsystem] = result.mod;
+      _backend[subsystem] = (entry.variant && result.usesVariant)
         ? `${entry.backend}[${entry.variant}]`
         : entry.backend;
-      return mod;
+      return result.mod;
     }
   }
 

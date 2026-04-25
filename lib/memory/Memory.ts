@@ -223,26 +223,6 @@ export class Memory {
     return getNative("memory").memory_find(this._pid, pattern, start, stop, limit, flags);
   }
 
-  async createCache(address: number, size: number, blockSize: number, maxBlocks?: number, flags?: number): Promise<boolean> {
-    return getNative("memory").memory_createCache(this._pid, address, size, blockSize, maxBlocks, flags);
-  }
-
-  async clearCache(): Promise<void> {
-    getNative("memory").memory_clearCache(this._pid);
-  }
-
-  async deleteCache(): Promise<void> {
-    getNative("memory").memory_deleteCache(this._pid);
-  }
-
-  async isCaching(): Promise<boolean> {
-    return getNative("memory").memory_isCaching(this._pid);
-  }
-
-  async getCacheSize(): Promise<number> {
-    return getNative("memory").memory_getCacheSize(this._pid);
-  }
-
   async readData(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
     const len = length !== undefined ? length : buffer.length;
     if (buffer.length < len) throw new RangeError("Buffer is too small");

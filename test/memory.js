@@ -576,47 +576,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
-	async function testMemoryCache() {
-		log("  Memory cache... ");
-
-		var Process = mechatron.Process;
-		var Memory  = mechatron.Memory;
-
-		var proc = await Process.getCurrent();
-		var mem = new Memory(proc);
-		if (!await mem.isValid()) return;
-
-		assert(typeof await mem.isCaching() === "boolean", "isCaching bool");
-		assert(typeof await mem.getCacheSize() === "number", "getCacheSize number");
-		await mem.clearCache();
-		await mem.deleteCache();
-
-		var regions = await mem.getRegions();
-		var readable = null;
-		for (var i = 0; i < regions.length; ++i) {
-			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16) {
-				readable = regions[i];
-				break;
-			}
-		}
-		if (readable) {
-			var cached = await mem.createCache(readable.start, readable.size, 4096);
-			assert(typeof cached === "boolean", "createCache returns boolean");
-			if (cached) {
-				assert(await mem.isCaching(), "isCaching after createCache");
-				assert(await mem.getCacheSize() > 0, "getCacheSize > 0");
-				await mem.clearCache();
-				await mem.deleteCache();
-				assert(!await mem.isCaching(), "!isCaching after deleteCache");
-			}
-		}
-
-		log("OK\n");
-		return true;
-	}
-
 	return [
 		{ name: "memory", functions: ["memory_ctor"], test: testMemory },
-		{ name: "memory cache", functions: ["memory_createCache", "memory_isCaching", "memory_getCacheSize", "memory_clearCache", "memory_deleteCache"], test: testMemoryCache },
 	];
 };

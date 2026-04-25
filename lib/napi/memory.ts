@@ -17,8 +17,3 @@ export const memory_writeData: (pid: number, address: number, data: Buffer, flag
 export const memory_find: (pid: number, pattern: string, start?: number, stop?: number, limit?: number, flags?: string) => number[] = native.memory_find;
 export const memory_setAccess: (pid: number, address: number, readable: boolean, writable: boolean, executable: boolean) => boolean = native.memory_setAccess;
 export const memory_setAccessFlags: (pid: number, address: number, flags: number) => boolean = native.memory_setAccessFlags;
-export const memory_createCache: (pid: number, address: number, size: number, blockSize: number, maxBlocks?: number, flags?: number) => boolean = native.memory_createCache;
-export const memory_clearCache: (pid: number) => void = native.memory_clearCache;
-export const memory_deleteCache: (pid: number) => void = native.memory_deleteCache;
-export const memory_isCaching: (pid: number) => boolean = native.memory_isCaching;
-export const memory_getCacheSize: (pid: number) => number = native.memory_getCacheSize;

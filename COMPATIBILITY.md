@@ -132,7 +132,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Memory
 
-| Function | linux-napi[x11] | linux-ffi[x11] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+| Function | linux-napi | linux-ffi | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
 |----------|------|------|------|------|------|------|
 | memory_ctor | ok | ok | ok | ok | ok | ok |
 | memory_isValid | ok | ok | ok | ok | ok | ok |
@@ -147,8 +147,3 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | memory_find | ok | ok | ok | ok | ok | ok |
 | memory_setAccess | skip | skip | ok | ok | ok | ok |
 | memory_setAccessFlags | skip | skip | ok | ok | ok | ok |
-| memory_createCache | skip | skip | skip | skip | skip | skip |
-| memory_clearCache | skip | skip | skip | skip | skip | skip |
-| memory_deleteCache | skip | skip | skip | skip | skip | skip |
-| memory_isCaching | skip | skip | skip | skip | skip | skip |
-| memory_getCacheSize | skip | skip | skip | skip | skip | skip |
