@@ -7,6 +7,10 @@ use crate::x11::*;
 
 #[cfg(target_os = "linux")]
 fn do_press(keycode: u32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_key(keycode, true);
+        return;
+    }
     unsafe {
         if !is_xtest_available() { return; }
         let display = get_display();
@@ -18,6 +22,10 @@ fn do_press(keycode: u32) {
 
 #[cfg(target_os = "linux")]
 fn do_release(keycode: u32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_key(keycode, false);
+        return;
+    }
     unsafe {
         if !is_xtest_available() { return; }
         let display = get_display();

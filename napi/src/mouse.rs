@@ -30,6 +30,10 @@ fn x_button(button: i32) -> Option<u32> {
 
 #[cfg(target_os = "linux")]
 fn do_press(button: i32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_button(button, true);
+        return;
+    }
     if let Some(xbtn) = x_button(button) {
         unsafe {
             if !is_xtest_available() { return; }
@@ -42,6 +46,10 @@ fn do_press(button: i32) {
 
 #[cfg(target_os = "linux")]
 fn do_release(button: i32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_button(button, false);
+        return;
+    }
     if let Some(xbtn) = x_button(button) {
         unsafe {
             if !is_xtest_available() { return; }
@@ -54,6 +62,10 @@ fn do_release(button: i32) {
 
 #[cfg(target_os = "linux")]
 fn platform_scroll_h(amount: i32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_scroll_discrete(amount, 0);
+        return;
+    }
     unsafe {
         if !is_xtest_available() { return; }
         let display = get_display();
@@ -69,6 +81,10 @@ fn platform_scroll_h(amount: i32) {
 
 #[cfg(target_os = "linux")]
 fn platform_scroll_v(amount: i32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_scroll_discrete(0, -amount);
+        return;
+    }
     unsafe {
         if !is_xtest_available() { return; }
         let display = get_display();
@@ -119,6 +135,10 @@ fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn platform_set_pos(x: i32, y: i32) {
+    if crate::ei_input::is_available() {
+        crate::ei_input::ei_motion_absolute(x as f64, y as f64);
+        return;
+    }
     unsafe {
         if !is_xtest_available() { return; }
         let display = get_display();
