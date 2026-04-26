@@ -105,18 +105,13 @@ fn keysym_to_evdev(keysym: u32) -> Option<u32> {
     }
 }
 
-// Button constants (matching mouse.rs)
-const BUTTON_LEFT: i32 = 0;
-const BUTTON_MID: i32 = 1;
-const BUTTON_RIGHT: i32 = 2;
-
 fn button_to_evdev(button: i32) -> Option<u32> {
     match button {
-        BUTTON_LEFT => Some(0x110),  // BTN_LEFT
-        BUTTON_MID => Some(0x112),   // BTN_MIDDLE
-        BUTTON_RIGHT => Some(0x111), // BTN_RIGHT
-        3 => Some(0x113),            // BTN_SIDE (X1)
-        4 => Some(0x114),            // BTN_EXTRA (X2)
+        0 => Some(0x110), // BTN_LEFT
+        1 => Some(0x112), // BTN_MIDDLE
+        2 => Some(0x111), // BTN_RIGHT
+        3 => Some(0x113), // BTN_SIDE (X1)
+        4 => Some(0x114), // BTN_EXTRA (X2)
         _ => None,
     }
 }
@@ -267,7 +262,6 @@ unsafe fn ei_thread(
         return;
     }
 
-    // Main event loop
     loop {
         let mut fds = [
             libc::pollfd { fd: ei_fd, events: libc::POLLIN, revents: 0 },
@@ -275,13 +269,11 @@ unsafe fn ei_thread(
         ];
         libc::poll(fds.as_mut_ptr(), 2, -1);
 
-        // Drain wake pipe
         if fds[1].revents & libc::POLLIN != 0 {
             let mut buf = [0u8; 64];
             while libc::read(wake_rd, buf.as_mut_ptr() as *mut c_void, buf.len()) > 0 {}
         }
 
-        // Dispatch EI events (handle pause/resume)
         if fds[0].revents & libc::POLLIN != 0 {
             (fns.ei_dispatch)(ei);
             loop {
@@ -305,39 +297,27 @@ unsafe fn ei_thread(
             }
         }
 
-        // Process commands
         while let Ok(cmd) = rx.try_recv() {
-            let ok = ready && !device.is_null();
-            match cmd {
+            let (resp, did_emit) = match cmd {
                 EiCmd::Key { keycode, press, resp } => {
-                    if ok {
-                        (fns.ei_device_keyboard_key)(device, keycode, press);
-                        (fns.ei_device_frame)(device, (fns.ei_now)(ei));
-                    }
-                    let _ = resp.send(ok);
+                    if ready { (fns.ei_device_keyboard_key)(device, keycode, press); }
+                    (resp, ready)
                 }
                 EiCmd::Button { button, press, resp } => {
-                    if ok {
-                        (fns.ei_device_button_button)(device, button, press);
-                        (fns.ei_device_frame)(device, (fns.ei_now)(ei));
-                    }
-                    let _ = resp.send(ok);
+                    if ready { (fns.ei_device_button_button)(device, button, press); }
+                    (resp, ready)
                 }
                 EiCmd::ScrollDiscrete { dx, dy, resp } => {
-                    if ok {
-                        (fns.ei_device_scroll_discrete)(device, dx, dy);
-                        (fns.ei_device_frame)(device, (fns.ei_now)(ei));
-                    }
-                    let _ = resp.send(ok);
+                    if ready { (fns.ei_device_scroll_discrete)(device, dx, dy); }
+                    (resp, ready)
                 }
                 EiCmd::MotionAbsolute { x, y, resp } => {
-                    if ok {
-                        (fns.ei_device_pointer_motion_absolute)(device, x, y);
-                        (fns.ei_device_frame)(device, (fns.ei_now)(ei));
-                    }
-                    let _ = resp.send(ok);
+                    if ready { (fns.ei_device_pointer_motion_absolute)(device, x, y); }
+                    (resp, ready)
                 }
-            }
+            };
+            if did_emit { (fns.ei_device_frame)(device, (fns.ei_now)(ei)); }
+            let _ = resp.send(did_emit);
         }
     }
 }

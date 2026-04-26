@@ -486,86 +486,60 @@ fn extract_session_handle(response_body: &[u8]) -> Option<String> {
     None
 }
 
+unsafe fn portal_call(
+    conn: &mut DBusConn, method: &str, sig: &str, body: &[u8], token: &str,
+) -> Option<Vec<u8>> {
+    let req = request_path(&conn.unique_name, token);
+    let rule = format!(
+        "type='signal',sender='{}',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
+        PORTAL_DEST, req
+    );
+    add_match(conn, &rule);
+    let serial = conn.next_serial();
+    let msg = build_method_call(serial, PORTAL_DEST, PORTAL_PATH, RD_IFACE, method, sig, body, 0);
+    sock_write_all(conn.fd, &msg);
+    recv_dbus_msg(conn.fd);
+    wait_for_response(conn, &req)
+}
+
 pub unsafe fn portal_get_eis_fd() -> Option<RawFd> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
     let mut conn = dbus_connect()?;
     let pid = libc::getpid();
-    static mut COUNTER: u32 = 0;
-    COUNTER += 1;
-    let cnt = COUNTER;
+    let cnt = COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
 
     // CreateSession
     let token1 = format!("mechatron_{}_{}_cs", pid, cnt);
     let session_token = format!("mechatron_{}_{}_s", pid, cnt);
-    let req1 = request_path(&conn.unique_name, &token1);
-    let rule1 = format!(
-        "type='signal',sender='{}',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        PORTAL_DEST, req1
-    );
-    add_match(&mut conn, &rule1);
-
     let ht = variant_string_bytes(&token1);
     let st = variant_string_bytes(&session_token);
     let body1 = build_asv(&[("handle_token", &ht), ("session_handle_token", &st)]);
-    let serial1 = conn.next_serial();
-    let msg1 = build_method_call(
-        serial1, PORTAL_DEST, PORTAL_PATH, RD_IFACE, "CreateSession",
-        "a{sv}", &body1, 0,
-    );
-    sock_write_all(conn.fd, &msg1);
-    // Read and discard method return
-    recv_dbus_msg(conn.fd);
-    let resp1 = wait_for_response(&mut conn, &req1)?;
+    let resp1 = portal_call(&mut conn, "CreateSession", "a{sv}", &body1, &token1)?;
     let session_path = extract_session_handle(&resp1)?;
 
     // SelectDevices (types: 3 = keyboard + pointer)
     let token2 = format!("mechatron_{}_{}_sd", pid, cnt);
-    let req2 = request_path(&conn.unique_name, &token2);
-    let rule2 = format!(
-        "type='signal',sender='{}',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        PORTAL_DEST, req2
-    );
-    add_match(&mut conn, &rule2);
-
     let ht2 = variant_string_bytes(&token2);
     let types_v = variant_u32_bytes(3);
     let mut body2 = Vec::new();
     dbus_object_path(&mut body2, &session_path);
     let opts2 = build_asv(&[("handle_token", &ht2), ("types", &types_v)]);
     body2.extend_from_slice(&opts2);
-    let serial2 = conn.next_serial();
-    let msg2 = build_method_call(
-        serial2, PORTAL_DEST, PORTAL_PATH, RD_IFACE, "SelectDevices",
-        "oa{sv}", &body2, 0,
-    );
-    sock_write_all(conn.fd, &msg2);
-    recv_dbus_msg(conn.fd);
-    let resp2 = wait_for_response(&mut conn, &req2)?;
+    let resp2 = portal_call(&mut conn, "SelectDevices", "oa{sv}", &body2, &token2)?;
     let mut p2 = 0;
     if rd_u32(&resp2, &mut p2) != 0 { return None; }
 
     // Start
     let token3 = format!("mechatron_{}_{}_st", pid, cnt);
-    let req3 = request_path(&conn.unique_name, &token3);
-    let rule3 = format!(
-        "type='signal',sender='{}',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        PORTAL_DEST, req3
-    );
-    add_match(&mut conn, &rule3);
-
     let ht3 = variant_string_bytes(&token3);
     let mut body3 = Vec::new();
     dbus_object_path(&mut body3, &session_path);
-    dbus_string(&mut body3, ""); // parent_window
+    dbus_string(&mut body3, "");
     let opts3 = build_asv(&[("handle_token", &ht3)]);
     body3.extend_from_slice(&opts3);
-    let serial3 = conn.next_serial();
-    let msg3 = build_method_call(
-        serial3, PORTAL_DEST, PORTAL_PATH, RD_IFACE, "Start",
-        "osa{sv}", &body3, 0,
-    );
-    sock_write_all(conn.fd, &msg3);
-    recv_dbus_msg(conn.fd);
-    let resp3 = wait_for_response(&mut conn, &req3)?;
+    let resp3 = portal_call(&mut conn, "Start", "osa{sv}", &body3, &token3)?;
     let mut p3 = 0;
     if rd_u32(&resp3, &mut p3) != 0 { return None; }
 
