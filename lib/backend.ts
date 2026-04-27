@@ -205,7 +205,14 @@ function tryLoadVariant(
   _currentVariant = variant;
   try {
     const mod = require(modPath);
-    const usesVariant = isVariantSpecific || backend === "nolib";
+    // Variant tagging: napi/ffi tag iff a variant-specific file was found.
+    // For nolib, tag iff the subsystem actually has variants — memory and
+    // process are pure /proc readers with no variant fan-out, so tagging
+    // them as nolib[portal] would break COMPATIBILITY.md lookups (the
+    // Memory/Process tables only have a `linux-nolib` column).
+    const usesVariant =
+      isVariantSpecific ||
+      (backend === "nolib" && NOLIB_VARIANT_SUBSYSTEMS.has(subsystem));
     const result = { mod, usesVariant };
     _variantCache[key] = result;
     return result;
@@ -216,6 +223,10 @@ function tryLoadVariant(
     _currentVariant = prev;
   }
 }
+
+const NOLIB_VARIANT_SUBSYSTEMS = new Set<Subsystem>([
+  "keyboard", "mouse", "clipboard", "screen", "window",
+]);
 
 // ─── Resolution ─────────────────────────────────────────────────────
 
