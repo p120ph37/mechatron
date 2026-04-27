@@ -597,6 +597,29 @@ would bypass the portal permission dialog entirely for apps running on GNOME
 with the extension installed.  Worth exploring once the window management
 extension is battle-tested and user adoption is validated.
 
+### Future: Per-Window Image Grab
+
+**Status: Noted — do NOT implement yet.**
+
+A `Window.grabImage()` (or `Screen.grabWindow(handle)`) method that captures
+pixels from a specific window rather than the full screen.  On platforms that
+support it, this can return content for non-topmost or partially-occluded
+windows:
+
+- **Windows**: `PrintWindow` or `BitBlt` from the window's own DC — works
+  even if the window is behind another.
+- **macOS**: `CGWindowListCreateImage` with a specific `windowID` — captures
+  the window's backing store regardless of z-order.
+- **Linux/X11**: `XGetImage` on the window's drawable — works for unobscured
+  regions; occluded pixels return stale data unless the WM uses compositing.
+- **Linux/GNOME extension**: Mutter's `Shell.Screenshot.screenshot_window()`
+  or `meta_window.get_compositor_private().paint_to_content()` — could
+  capture composited window content including off-screen windows.
+
+This would be useful for automation scenarios that need to inspect a
+background window without bringing it to the front (e.g. monitoring a
+game window while interacting with a tool overlay).
+
 ---
 
 ## Roadmap Summary
