@@ -21,7 +21,7 @@ import { join, dirname } from "path";
 
 const EXT_UUID = "mechatron-wm@mechatronic.dev";
 
-export const TOKENS_FILE = "/etc/mechatron-wm/tokens";
+export const TOKENS_FILE = process.env.MECHATRON_TOKENS_FILE || "/etc/mechatron-wm/tokens";
 
 function getExtSourceDir(): string {
   return join(dirname(dirname(__dirname)), "extensions", "gnome-wm");

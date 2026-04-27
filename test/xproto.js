@@ -18,7 +18,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	function testXproto() {
 		log("  xproto... ");
-		var wire = require("../dist/x11proto/wire");
+		// lib/ under Bun (preserves coverage on the TS source); dist/ under
+		// Node (which can't require .ts directly — used by Windows ia32
+		// legacy runner via test/test.js).
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		var wire = IS_BUN
+			? require("../lib/x11proto/wire")
+			: require("../dist/x11proto/wire");
 
 		// ── parseDisplay ─────────────────────────────────────────────
 		var d = wire.parseDisplay(":0");
@@ -269,7 +275,9 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(threw, "connReplyTotalLength throws on <8-byte prefix");
 
 		// ── request.ts: header helper ────────────────────────────────
-		var req = require("../dist/x11proto/request");
+		var req = IS_BUN
+			? require("../lib/x11proto/request")
+			: require("../dist/x11proto/request");
 		var hdrBuf = Buffer.alloc(8);
 		req.writeRequestHeader(hdrBuf, 98, 0);
 		assert(hdrBuf.readUInt8(0) === 98, "major opcode");
@@ -743,7 +751,9 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			var fs = require("fs");
 			if (ep && ep.kind === "unix" && fs.existsSync(ep.path)) {
 				log("(live X) ");
-				var conn = require("../dist/x11proto/conn");
+				var conn = IS_BUN
+					? require("../lib/x11proto/conn")
+					: require("../dist/x11proto/conn");
 				return (async function () {
 					var c;
 					try {
