@@ -2,13 +2,13 @@
  * Helper to install/enable the Mechatron GNOME Shell extension and
  * manage bearer tokens for D-Bus authorization.
  *
- * The extension lives in extensions/gnome-wm/ in the mechatron package.
+ * The extension lives in extensions/mechatron/ in the mechatron package.
  * Installation copies it to ~/.local/share/gnome-shell/extensions/ and
  * enables it via gnome-extensions CLI. A shell restart (Alt+F2 → "r" on
  * X11, or log out/in on Wayland) is required after first install.
  *
  * Token management:
- *   - Tokens are UUIDs stored one-per-line in /etc/mechatron-wm/tokens
+ *   - Tokens are UUIDs stored one-per-line in /etc/mechatron/tokens
  *   - The extension validates every D-Bus call (except Ping) against this file
  *   - provisionToken() generates a UUID, appends it, and returns it
  *   - Writing to /etc requires appropriate permissions (root or group write)
@@ -19,12 +19,12 @@ import { randomBytes } from "crypto";
 import { execSync } from "child_process";
 import { join, dirname } from "path";
 
-const EXT_UUID = "mechatron-wm@mechatronic.dev";
+const EXT_UUID = "mechatron@mechatronic.dev";
 
-export const TOKENS_FILE = process.env.MECHATRON_TOKENS_FILE || "/etc/mechatron-wm/tokens";
+export const TOKENS_FILE = process.env.MECHATRON_TOKENS_FILE || "/etc/mechatron/tokens";
 
 function getExtSourceDir(): string {
-  return join(dirname(dirname(__dirname)), "extensions", "gnome-wm");
+  return join(dirname(dirname(__dirname)), "extensions", "mechatron");
 }
 
 function getExtTargetDir(): string {

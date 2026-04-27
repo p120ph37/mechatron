@@ -46,7 +46,7 @@ export const SUBSYSTEMS = [
 
 export type Subsystem = (typeof SUBSYSTEMS)[number];
 export type Backend = "napi" | "ffi" | "nolib";
-export type Variant = "x11" | "portal" | "vt" | "sh";
+export type Variant = "x11" | "portal" | "gext" | "vt" | "sh";
 
 export interface BackendEntry {
   backend: Backend;
@@ -58,9 +58,9 @@ const IS_LINUX = process.platform === "linux";
 
 const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "vt", "sh"];
 
-const NAPI_VARIANTS: readonly Variant[] = ["x11", "portal"];
-const FFI_VARIANTS: readonly Variant[] = ["x11", "portal"];
-const NOLIB_VARIANTS: readonly Variant[] = ["x11", "portal", "vt", "sh"];
+const NAPI_VARIANTS: readonly Variant[] = ["x11", "portal", "gext"];
+const FFI_VARIANTS: readonly Variant[] = ["x11", "portal", "gext"];
+const NOLIB_VARIANTS: readonly Variant[] = ["x11", "portal", "gext", "vt", "sh"];
 
 function variantsFor(backend: Backend): readonly Variant[] {
   switch (backend) {

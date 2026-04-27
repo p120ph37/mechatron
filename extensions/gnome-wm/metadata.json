@@ -1,8 +1,0 @@
-{
-  "uuid": "mechatron-wm@mechatronic.dev",
-  "name": "Mechatron Window Manager Bridge",
-  "description": "Exposes window management operations over D-Bus for mechatron.",
-  "shell-version": ["45", "46", "47", "48"],
-  "version": 1,
-  "url": "https://github.com/p120ph37/mechatron"
-}

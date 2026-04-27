@@ -1,21 +1,22 @@
 /**
  * D-Bus client for the Mechatron GNOME Shell extension
- * (dev.mechatronic.WindowManager).
+ * (dev.mechatronic.Shell — Window interface).
  *
  * Provides full window management on Wayland/GNOME: list, activate,
  * close, move/resize, minimize/maximize/above, get PID, etc.
  *
  * All methods except Ping require a bearer token. Set the token via
- * gnomeWmSetToken() before calling any other method.
+ * shellSetToken() before calling any other method, or default it via
+ * the MECHATRON_GNOME_TOKEN env var.
  */
 
 import { DBusConnection, DBusError } from "../dbus/connection";
 
-const BUS_NAME = "dev.mechatronic.WindowManager";
-const OBJECT_PATH = "/dev/mechatronic/WindowManager";
-const IFACE = "dev.mechatronic.WindowManager";
+const BUS_NAME = "dev.mechatronic.Shell";
+const OBJECT_PATH = "/dev/mechatronic/Shell";
+const IFACE = "dev.mechatronic.Shell.Window";
 
-export interface GnomeWindowInfo {
+export interface GextWindowInfo {
   id: number;
   title: string;
   pid: number;
@@ -33,14 +34,14 @@ let _connPromise: Promise<DBusConnection> | null = null;
 let _available: boolean | undefined;
 // Default to MECHATRON_GNOME_TOKEN env if set — convenient for CI / tests
 // where the bearer token is provisioned outside the app and threaded in
-// via the environment. Explicit gnomeWmSetToken() always wins.
+// via the environment. Explicit gextWinSetToken() always wins.
 let _token: string = process.env.MECHATRON_GNOME_TOKEN || "";
 
-export function gnomeWmSetToken(token: string): void {
+export function gextWinSetToken(token: string): void {
   _token = token;
 }
 
-export function gnomeWmGetToken(): string {
+export function gextWinGetToken(): string {
   return _token;
 }
 
@@ -74,7 +75,7 @@ function authedCall(member: string, signature?: string, body?: any[]): Promise<a
   return call(member, sig, args);
 }
 
-export async function gnomeWmAvailable(): Promise<boolean> {
+export async function gextWinAvailable(): Promise<boolean> {
   if (_available !== undefined) return _available;
   try {
     const result = await call("Ping");
@@ -85,82 +86,82 @@ export async function gnomeWmAvailable(): Promise<boolean> {
   return _available;
 }
 
-export async function gnomeWmList(): Promise<GnomeWindowInfo[]> {
+export async function gextWinList(): Promise<GextWindowInfo[]> {
   const result = await authedCall("List");
   return JSON.parse(result[0] as string);
 }
 
-export async function gnomeWmGetActive(): Promise<number> {
+export async function gextWinGetActive(): Promise<number> {
   const result = await authedCall("GetActive");
   return result[0] as number;
 }
 
-export async function gnomeWmActivate(id: number): Promise<boolean> {
+export async function gextWinActivate(id: number): Promise<boolean> {
   const result = await authedCall("Activate", "u", [id]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmClose(id: number): Promise<boolean> {
+export async function gextWinClose(id: number): Promise<boolean> {
   const result = await authedCall("Close", "u", [id]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmGetTitle(id: number): Promise<string> {
+export async function gextWinGetTitle(id: number): Promise<string> {
   const result = await authedCall("GetTitle", "u", [id]);
   return result[0] as string;
 }
 
-export async function gnomeWmGetBounds(id: number): Promise<{ x: number; y: number; w: number; h: number }> {
+export async function gextWinGetBounds(id: number): Promise<{ x: number; y: number; w: number; h: number }> {
   const result = await authedCall("GetBounds", "u", [id]);
   return JSON.parse(result[0] as string);
 }
 
-export async function gnomeWmSetBounds(id: number, x: number, y: number, w: number, h: number): Promise<boolean> {
+export async function gextWinSetBounds(id: number, x: number, y: number, w: number, h: number): Promise<boolean> {
   const result = await authedCall("SetBounds", "uiiii", [id, x, y, w, h]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmGetClient(id: number): Promise<{ x: number; y: number; w: number; h: number }> {
+export async function gextWinGetClient(id: number): Promise<{ x: number; y: number; w: number; h: number }> {
   const result = await authedCall("GetClient", "u", [id]);
   return JSON.parse(result[0] as string);
 }
 
-export async function gnomeWmSetMinimized(id: number, minimized: boolean): Promise<boolean> {
+export async function gextWinSetMinimized(id: number, minimized: boolean): Promise<boolean> {
   const result = await authedCall("SetMinimized", "ub", [id, minimized]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmSetMaximized(id: number, maximized: boolean): Promise<boolean> {
+export async function gextWinSetMaximized(id: number, maximized: boolean): Promise<boolean> {
   const result = await authedCall("SetMaximized", "ub", [id, maximized]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmSetAbove(id: number, above: boolean): Promise<boolean> {
+export async function gextWinSetAbove(id: number, above: boolean): Promise<boolean> {
   const result = await authedCall("SetAbove", "ub", [id, above]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmIsMinimized(id: number): Promise<boolean> {
+export async function gextWinIsMinimized(id: number): Promise<boolean> {
   const result = await authedCall("IsMinimized", "u", [id]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmIsMaximized(id: number): Promise<boolean> {
+export async function gextWinIsMaximized(id: number): Promise<boolean> {
   const result = await authedCall("IsMaximized", "u", [id]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmIsAbove(id: number): Promise<boolean> {
+export async function gextWinIsAbove(id: number): Promise<boolean> {
   const result = await authedCall("IsAbove", "u", [id]);
   return result[0] as boolean;
 }
 
-export async function gnomeWmGetPID(id: number): Promise<number> {
+export async function gextWinGetPID(id: number): Promise<number> {
   const result = await authedCall("GetPID", "u", [id]);
   return result[0] as number;
 }
 
-export function resetGnomeWm(): void {
+export function resetGextWindow(): void {
   if (_conn) {
     _conn.close();
     _conn = null;

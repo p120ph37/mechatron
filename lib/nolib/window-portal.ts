@@ -1,45 +1,28 @@
 /**
- * nolib window backend — portal (Wayland) implementation.
+ * nolib[portal] window backend — AT-SPI2 read-only enumeration.
  *
- * Layered approach:
- *   1. GNOME Shell extension (dev.mechatronic.WindowManager) — full
- *      window management via Meta.Window API over D-Bus.
- *   2. AT-SPI2 fallback — universal read-only window enumeration.
- *      Cannot activate, close, move, resize, or change state.
+ * Pure standard-API implementation: talks to the AT-SPI2 accessibility
+ * bus that every freedesktop DE provides. Universal but read-only —
+ * cannot activate, close, move, resize, minimize, maximize, or change
+ * any window state. Apps that need write access on Wayland should
+ * select the [gext] variant (Mechatron Shell extension).
+ *
+ * For write access via the standard portal API: TODO. xdg-desktop-portal
+ * 1.18+ has the GlobalShortcuts and RemoteDesktop interfaces but no
+ * "manage windows" portal; activating/closing windows from outside the
+ * compositor isn't part of the portal API.
  */
-
-import {
-  gnomeWmAvailable, gnomeWmList, gnomeWmGetActive, gnomeWmActivate,
-  gnomeWmClose, gnomeWmGetTitle, gnomeWmGetBounds, gnomeWmSetBounds,
-  gnomeWmGetClient, gnomeWmSetMinimized, gnomeWmSetMaximized,
-  gnomeWmSetAbove, gnomeWmIsMinimized, gnomeWmIsMaximized,
-  gnomeWmIsAbove, gnomeWmGetPID,
-  gnomeWmSetToken, gnomeWmGetToken,
-} from "../portal/gnome-wm";
 
 import { atspiListWindows } from "../portal/atspi";
 
-// ── Token management re-exports ─────────────────────────────────────
+// Token management — accept calls so legacy callers keep compiling, but
+// the [portal] variant has no privileged channel that needs a token.
+let _token = "";
+export function setToken(token: string): void { _token = token; }
+export function getToken(): string { return _token; }
 
-export { gnomeWmSetToken as setToken, gnomeWmGetToken as getToken } from "../portal/gnome-wm";
-
-// ── GNOME extension availability cache ──────────────────────────────
-
-let _gnomeAvail: boolean | undefined;
-async function hasGnomeExt(): Promise<boolean> {
-  if (_gnomeAvail !== undefined) return _gnomeAvail;
-  try {
-    _gnomeAvail = await gnomeWmAvailable();
-  } catch {
-    _gnomeAvail = false;
-  }
-  return _gnomeAvail;
-}
-
-// ── Window handle encoding ──────────────────────────────────────────
-// GNOME extension uses Meta.Window.get_stable_sequence() as handle (positive u32).
-// AT-SPI2 fallback encodes bus+path as an FNV-1a hash with high bit set to avoid collision.
-
+// AT-SPI handles encode bus+path as an FNV-1a hash with the high bit set
+// so they can't collide with future numeric handle schemes.
 function atspiWindowHash(bus: string, path: string): number {
   let h = 0x811c9dc5;
   const s = bus + path;
@@ -50,127 +33,10 @@ function atspiWindowHash(bus: string, path: string): number {
   return (h >>> 0) | 0x80000000;
 }
 
-// ── Exports ─────────────────────────────────────────────────────────
-
-export async function window_isValid(handle: number): Promise<boolean> {
-  if (await hasGnomeExt()) {
-    const windows = await gnomeWmList();
-    return windows.some(w => w.id === handle);
-  }
-  return false;
-}
-
-export async function window_close(handle: number): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmClose(handle);
-  }
-}
-
-export async function window_isTopMost(handle: number): Promise<boolean> {
-  if (await hasGnomeExt()) return gnomeWmIsAbove(handle);
-  return false;
-}
-
-export async function window_isBorderless(_handle: number): Promise<boolean> {
-  return false;
-}
-
-export async function window_isMinimized(handle: number): Promise<boolean> {
-  if (await hasGnomeExt()) return gnomeWmIsMinimized(handle);
-  return false;
-}
-
-export async function window_isMaximized(handle: number): Promise<boolean> {
-  if (await hasGnomeExt()) return gnomeWmIsMaximized(handle);
-  return false;
-}
-
-export async function window_setTopMost(handle: number, topMost: boolean): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmSetAbove(handle, topMost);
-  }
-}
-
-export async function window_setBorderless(_handle: number, _borderless: boolean): Promise<void> {
-}
-
-export async function window_setMinimized(handle: number, minimized: boolean): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmSetMinimized(handle, minimized);
-  }
-}
-
-export async function window_setMaximized(handle: number, maximized: boolean): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmSetMaximized(handle, maximized);
-  }
-}
-
-export async function window_getProcess(handle: number): Promise<number> {
-  return window_getPID(handle);
-}
-
-export async function window_getPID(handle: number): Promise<number> {
-  if (await hasGnomeExt()) return gnomeWmGetPID(handle);
-  return 0;
-}
-
-export function window_getHandle(handle: number): number { return handle; }
-
-export async function window_setHandle(_handle: number, newHandle: number): Promise<boolean> {
-  if (newHandle === 0) return true;
-  return window_isValid(newHandle);
-}
-
-export async function window_getTitle(handle: number): Promise<string> {
-  if (await hasGnomeExt()) return gnomeWmGetTitle(handle);
-  return "";
-}
-
-export async function window_setTitle(_handle: number, _title: string): Promise<void> {
-}
-
-export async function window_getBounds(handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
-  if (await hasGnomeExt()) return gnomeWmGetBounds(handle);
-  return { x: 0, y: 0, w: 0, h: 0 };
-}
-
-export async function window_setBounds(handle: number, x: number, y: number, w: number, h: number): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmSetBounds(handle, x, y, w, h);
-  }
-}
-
-export async function window_getClient(handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
-  if (await hasGnomeExt()) return gnomeWmGetClient(handle);
-  return { x: 0, y: 0, w: 0, h: 0 };
-}
-
-export async function window_setClient(handle: number, x: number, y: number, w: number, h: number): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmSetBounds(handle, x, y, w, h);
-  }
-}
-
-export async function window_mapToClient(handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
-  const client = await window_getClient(handle);
-  return { x: x - client.x, y: y - client.y };
-}
-
-export async function window_mapToScreen(handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
-  const client = await window_getClient(handle);
-  return { x: x + client.x, y: y + client.y };
-}
+// ── Read-only exports ──────────────────────────────────────────────
 
 export async function window_getList(regexStr?: string): Promise<number[]> {
   const pattern = regexStr ? new RegExp(regexStr) : null;
-
-  if (await hasGnomeExt()) {
-    const windows = await gnomeWmList();
-    const filtered = pattern ? windows.filter(w => pattern.test(w.title)) : windows;
-    return filtered.map(w => w.id);
-  }
-
   try {
     const windows = await atspiListWindows();
     const filtered = pattern ? windows.filter(w => pattern.test(w.name)) : windows;
@@ -180,17 +46,49 @@ export async function window_getList(regexStr?: string): Promise<number[]> {
   }
 }
 
-export async function window_getActive(): Promise<number> {
-  if (await hasGnomeExt()) return gnomeWmGetActive();
-  return 0;
+export async function window_isValid(handle: number): Promise<boolean> {
+  if (!handle) return false;
+  const list = await window_getList();
+  return list.includes(handle);
 }
 
-export async function window_setActive(handle: number): Promise<void> {
-  if (await hasGnomeExt()) {
-    await gnomeWmActivate(handle);
-  }
-}
+// AT-SPI2 doesn't expose any of the state queries / mutations below —
+// these are deliberate stubs that match the public API shape so callers
+// don't need a separate code path.
 
-export function window_isAxEnabled(_prompt?: boolean): boolean {
-  return true;
+export async function window_isTopMost(_handle: number): Promise<boolean> { return false; }
+export async function window_isBorderless(_handle: number): Promise<boolean> { return false; }
+export async function window_isMinimized(_handle: number): Promise<boolean> { return false; }
+export async function window_isMaximized(_handle: number): Promise<boolean> { return false; }
+export async function window_setTopMost(_handle: number, _topMost: boolean): Promise<void> {}
+export async function window_setBorderless(_handle: number, _borderless: boolean): Promise<void> {}
+export async function window_setMinimized(_handle: number, _minimized: boolean): Promise<void> {}
+export async function window_setMaximized(_handle: number, _maximized: boolean): Promise<void> {}
+export async function window_close(_handle: number): Promise<void> {}
+export async function window_setActive(_handle: number): Promise<void> {}
+export async function window_setTitle(_handle: number, _title: string): Promise<void> {}
+export async function window_setBounds(_handle: number, _x: number, _y: number, _w: number, _h: number): Promise<void> {}
+export async function window_setClient(_handle: number, _x: number, _y: number, _w: number, _h: number): Promise<void> {}
+
+export async function window_getProcess(_handle: number): Promise<number> { return 0; }
+export async function window_getPID(_handle: number): Promise<number> { return 0; }
+export function window_getHandle(handle: number): number { return handle; }
+export async function window_setHandle(_handle: number, newHandle: number): Promise<boolean> {
+  if (newHandle === 0) return true;
+  return window_isValid(newHandle);
 }
+export async function window_getTitle(_handle: number): Promise<string> { return ""; }
+export async function window_getBounds(_handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
+  return { x: 0, y: 0, w: 0, h: 0 };
+}
+export async function window_getClient(_handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
+  return { x: 0, y: 0, w: 0, h: 0 };
+}
+export async function window_mapToClient(_handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
+  return { x, y };
+}
+export async function window_mapToScreen(_handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
+  return { x, y };
+}
+export async function window_getActive(): Promise<number> { return 0; }
+export function window_isAxEnabled(_prompt?: boolean): boolean { return true; }

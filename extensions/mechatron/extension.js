@@ -1,13 +1,18 @@
 /**
- * Mechatron Window Manager Bridge — GNOME Shell Extension
+ * Mechatron Shell Bridge — GNOME Shell Extension
  *
- * Exposes a D-Bus interface for window management operations, giving
- * mechatron full window control on Wayland/GNOME without X11.
+ * Exposes a privileged D-Bus surface for mechatron, complementing the
+ * standard xdg-desktop-portal API. The portal grants a constrained,
+ * permission-gated set of operations (with permission popups); this
+ * extension grants a fuller, popup-free set of operations to apps that
+ * present a valid bearer token. Currently exposes window management;
+ * future features (e.g. screencap without portal popups) will land here
+ * too as additional D-Bus interfaces on the same root object.
  *
- * All methods except Ping require a bearer token. Valid tokens are
- * read from /etc/mechatron-wm/tokens (one per line, # comments). The
- * path can be overridden by setting MECHATRON_TOKENS_FILE in the env
- * that launches gnome-shell (used by CI to point at a tmpfile).
+ * All methods except Ping require a bearer token. Valid tokens are read
+ * from /etc/mechatron/tokens (one per line, # comments). The path can
+ * be overridden via MECHATRON_TOKENS_FILE in the env that launches
+ * gnome-shell (used by CI to point at a tmpfile).
  *
  * Targets GNOME 45+ (ES module format).
  */
@@ -18,13 +23,14 @@ import Meta from "gi://Meta";
 import Shell from "gi://Shell";
 import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 
-const BUS_NAME = "dev.mechatronic.WindowManager";
-const OBJECT_PATH = "/dev/mechatronic/WindowManager";
-const TOKEN_FILE = GLib.getenv("MECHATRON_TOKENS_FILE") || "/etc/mechatron-wm/tokens";
+const BUS_NAME = "dev.mechatronic.Shell";
+const OBJECT_PATH = "/dev/mechatronic/Shell";
+const IFACE_NAME = "dev.mechatronic.Shell.Window";
+const TOKEN_FILE = GLib.getenv("MECHATRON_TOKENS_FILE") || "/etc/mechatron/tokens";
 
 const IFACE_XML = `
 <node>
-  <interface name="dev.mechatronic.WindowManager">
+  <interface name="dev.mechatronic.Shell.Window">
     <method name="List">
       <arg type="s" direction="in" name="token"/>
       <arg type="s" direction="out" name="json"/>

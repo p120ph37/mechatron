@@ -32,9 +32,9 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		process.env.MECHATRON_TOKENS_FILE = tokensFile;
 
 		// Force re-load by deleting from require cache.
-		var modPath = require.resolve("../lib/portal/gnome-ext-installer");
+		var modPath = require.resolve("../lib/gext/installer");
 		delete require.cache[modPath];
-		var inst = require("../lib/portal/gnome-ext-installer");
+		var inst = require("../lib/gext/installer");
 		assert(inst.TOKENS_FILE === tokensFile, "TOKENS_FILE picked up env override");
 
 		// generateToken returns RFC 4122 UUIDv4
@@ -101,34 +101,34 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
-	async function testGnomeWmTokenAccessors() {
-		log("  gnome-wm token... ");
-		// The gnome-wm module is portal-only and only loaded under the
+	async function testGextWindowAccessors() {
+		log("  gext token... ");
+		// The gext window module is portal/gext-only and only loaded under the
 		// nolib backend — but its token accessors are pure setters/getters
 		// and safe to require directly.  Skip on Bun-only platforms where
 		// require can't resolve .ts files (Node ia32).
 		var IS_BUN = typeof globalThis.Bun !== "undefined";
 		if (!IS_BUN) { log("(skip: node)\n"); return true; }
 
-		var wm = require("../lib/portal/gnome-wm");
-		var initial = wm.gnomeWmGetToken();
-		wm.gnomeWmSetToken("test-token-abc");
-		assert(wm.gnomeWmGetToken() === "test-token-abc", "set/get round-trips");
-		wm.gnomeWmSetToken("");
-		assert(wm.gnomeWmGetToken() === "", "empty token round-trips");
-		wm.gnomeWmSetToken(initial);
+		var wm = require("../lib/gext/window");
+		var initial = wm.gextWinGetToken();
+		wm.gextWinSetToken("test-token-abc");
+		assert(wm.gextWinGetToken() === "test-token-abc", "set/get round-trips");
+		wm.gextWinSetToken("");
+		assert(wm.gextWinGetToken() === "", "empty token round-trips");
+		wm.gextWinSetToken(initial);
 
-		// gnomeWmAvailable: in CI without a real GNOME shell extension, the
+		// gextWinAvailable: in CI without a real GNOME shell extension, the
 		// Ping call should fail and the function returns false.  Exercises
 		// the connect→catch path (getConn + Ping failure).
-		var avail = await wm.gnomeWmAvailable();
-		assert(typeof avail === "boolean", "gnomeWmAvailable returns boolean");
+		var avail = await wm.gextWinAvailable();
+		assert(typeof avail === "boolean", "gextWinAvailable returns boolean");
 		// Cached on second call.
-		var avail2 = await wm.gnomeWmAvailable();
-		assert(avail2 === avail, "gnomeWmAvailable cached");
+		var avail2 = await wm.gextWinAvailable();
+		assert(avail2 === avail, "gextWinAvailable cached");
 
-		// resetGnomeWm clears the cache and closes the connection.
-		wm.resetGnomeWm();
+		// resetGextWindow clears the cache and closes the connection.
+		wm.resetGextWindow();
 		log("OK\n");
 		return true;
 	}
@@ -380,7 +380,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	return [
 		{ name: "tokens", functions: [], test: testTokens },
-		{ name: "gnome-wm token", functions: [], test: testGnomeWmTokenAccessors },
+		{ name: "gext token", functions: [], test: testGextWindowAccessors },
 		{ name: "atspi avail", functions: [], test: testAtSpiAvailability },
 		{ name: "atspi hash", functions: [], test: testWindowPortalHash },
 		{ name: "dbus wire", functions: [], test: testDbusWire },

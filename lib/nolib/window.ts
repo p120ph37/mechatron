@@ -3,7 +3,11 @@
  *
  * Dispatches to variant-specific implementations:
  *   - x11:    X11 wire protocol (xproto) over Unix/TCP socket.
- *   - portal: GNOME Shell extension D-Bus + AT-SPI2 read-only fallback.
+ *   - portal: AT-SPI2 read-only window enumeration. Universal but
+ *             cannot activate / close / move / resize.
+ *   - gext:   Mechatron GNOME Shell extension over D-Bus. Full window
+ *             management on Wayland/GNOME without permission popups.
+ *             Requires the dev.mechatronic.Shell extension installed.
  */
 
 import { getNolibVariant } from "../backend";
@@ -11,9 +15,9 @@ import { getNolibVariant } from "../backend";
 const VARIANT = getNolibVariant();
 
 const impl: typeof import("./window-x11") =
-  VARIANT === "portal"
-    ? require("./window-portal")
-    : require("./window-x11");
+  VARIANT === "gext"   ? require("./window-gext") :
+  VARIANT === "portal" ? require("./window-portal") :
+                         require("./window-x11");
 
 export const window_isValid     = impl.window_isValid;
 export const window_close       = impl.window_close;
@@ -42,11 +46,15 @@ export const window_getActive   = impl.window_getActive;
 export const window_setActive   = impl.window_setActive;
 export const window_isAxEnabled = impl.window_isAxEnabled;
 
+// ── GNOME Shell extension installer + token mgmt re-exports ──────
+// These are independent of the active window variant — apps can install
+// the extension and provision tokens regardless of which variant they
+// happen to be using right now.
 export {
   installExtension, isExtensionInstalled, isExtensionEnabled,
   generateToken, installToken, revokeToken, provisionToken,
   getInstalledTokens, TOKENS_FILE,
   type InstallResult,
-} from "../portal/gnome-ext-installer";
+} from "../gext/installer";
 
-export { gnomeWmSetToken as setToken, gnomeWmGetToken as getToken } from "../portal/gnome-wm";
+export { gextWinSetToken as setToken, gextWinGetToken as getToken } from "../gext/window";

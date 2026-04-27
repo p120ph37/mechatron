@@ -339,21 +339,21 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
   echo ">>> nolib-portal exited with rc=$BE_RC (non-blocking)"
 fi
 
-# ── Linux-only: full GNOME Shell + mechatron-wm extension ────────
+# ── Linux-only: full GNOME Shell + Mechatron extension ──────────
 # Boots a real gnome-shell process on Xvfb so the shell loads our
-# extension (mechatron-wm@mechatronic.dev) and answers the
-# dev.mechatronic.WindowManager D-Bus interface. This exercises
-# lib/portal/gnome-wm.ts (D-Bus client) + lib/portal/gnome-ext-installer.ts
-# (extension lifecycle) end-to-end, raising portal coverage substantially
-# beyond what AT-SPI / mutter --headless alone can reach.
+# extension (mechatron@mechatronic.dev) and answers the
+# dev.mechatronic.Shell D-Bus interface. This exercises lib/gext/window.ts
+# (D-Bus client) + lib/gext/installer.ts (extension lifecycle) +
+# lib/nolib/window-gext.ts (variant impl) end-to-end. Distinct from the
+# nolib[portal] cell which only exercises the read-only AT-SPI fallback.
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-shell.xml"
-  BE_COV_DIR="$COV_DIR/nolib-shell"
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-gext.xml"
+  BE_COV_DIR="$COV_DIR/nolib-gext"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
 
   TOKENS_FILE="$RUNNER_TEMP/mechatron-tokens"
-  EXT_UUID="mechatron-wm@mechatronic.dev"
+  EXT_UUID="mechatron@mechatronic.dev"
 
   export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID
   dbus-run-session -- bash -c '
@@ -367,11 +367,11 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     chmod 600 "$TOKENS_FILE"
     export MECHATRON_GNOME_TOKEN="$EXT_TOKEN"
 
-    # Install the mechatron-wm extension into the user-local GNOME Shell
-    # extensions directory (no system install needed).
+    # Install the extension into the user-local GNOME Shell extensions
+    # directory (no system install needed).
     EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
     mkdir -p "$EXT_DIR"
-    cp -r extensions/gnome-wm/* "$EXT_DIR/"
+    cp -r extensions/mechatron/* "$EXT_DIR/"
 
     # Pre-enable via gsettings (gnome-shell reads this list on startup;
     # gnome-extensions CLI would need a running shell).
@@ -390,27 +390,27 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     # Wait for the extension to register its D-Bus name (up to 60s —
     # gnome-shell startup is not fast in CI).
     for i in $(seq 1 120); do
-      if busctl --user list 2>/dev/null | grep -q "dev.mechatronic.WindowManager"; then
-        echo ">>> mechatron-wm extension registered on D-Bus after ${i}*0.5s"
+      if busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
+        echo ">>> mechatron extension registered on D-Bus after ${i}*0.5s"
         break
       fi
       sleep 0.5
       [ $((i % 20)) -eq 0 ] && echo ">>> still waiting for extension... ($i/120)"
     done
 
-    if ! busctl --user list 2>/dev/null | grep -q "dev.mechatronic.WindowManager"; then
-      echo ">>> warning: extension never registered; gnome-shell log:"
+    if ! busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
+      echo ">>> warning: extension never registered; current bus state:"
       busctl --user list 2>/dev/null | head -50 || true
       kill "$SHELL_PID" 2>/dev/null || true
       exit 1
     fi
 
     # Smoke-test the bus interface before running the full suite.
-    busctl --user call dev.mechatronic.WindowManager \
-      /dev/mechatronic/WindowManager dev.mechatronic.WindowManager \
+    busctl --user call dev.mechatronic.Shell \
+      /dev/mechatronic/Shell dev.mechatronic.Shell.Window \
       Ping || echo ">>> Ping failed"
 
-    MECHATRON_BACKEND="nolib[portal]" \
+    MECHATRON_BACKEND="nolib[gext]" \
       "$BUN" test test/bun.test.ts \
         --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
@@ -419,9 +419,9 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     kill "$SHELL_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-shell" \
-    "nolib-shell test (gnome-shell + mechatron-wm extension) exited ${BE_RC} without producing a JUnit report."
-  echo ">>> nolib-shell exited with rc=$BE_RC (non-blocking)"
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-gext" \
+    "nolib-gext test (gnome-shell + mechatron extension) exited ${BE_RC} without producing a JUnit report."
+  echo ">>> nolib-gext exited with rc=$BE_RC (non-blocking)"
 fi
 
 if [ "$RUNNER_OS" = "macOS" ]; then
