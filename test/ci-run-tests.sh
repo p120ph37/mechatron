@@ -221,6 +221,47 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   done
 fi
 
+# ── Linux-only: nolib[sh] clipboard (xclip subprocess path) ──────
+if [ "$RUNNER_OS" = "Linux" ] && command -v xclip >/dev/null 2>&1; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-sh-clipboard.xml"
+  BE_COV_DIR="$COV_DIR/nolib-sh-clipboard"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
+    run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-sh-clipboard" \
+    "bun test for nolib-sh-clipboard (xclip subprocess) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── Linux-only: AT-SPI2 portal coverage ──────────────────────────
+# Boot the AT-SPI2 registry so atspiAvailable() / atspiListWindows()
+# can complete without throwing. With the registry up, the unit-test
+# path in test/portal.js exercises the full bus-discovery + connection
+# path (lib/portal/atspi.ts coverage rises ~30%).
+if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-atspi.xml"
+  BE_COV_DIR="$COV_DIR/ffi-atspi"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  /usr/libexec/at-spi-bus-launcher --launch-immediately &
+  ATSPI_PID=$!
+  sleep 1
+  MECHATRON_BACKEND=ffi \
+    run_bun "ffi-atspi" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  kill "$ATSPI_PID" 2>/dev/null || true
+  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-atspi" \
+    "bun test for ffi-atspi exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
 # ── Linux-only: nolib[portal] via Wayland (mutter --headless) ─────
 if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"

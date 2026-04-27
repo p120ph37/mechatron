@@ -81,8 +81,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+          # Clipboard tools for nolib[sh] subprocess clipboard variant
+          # (xclip for X11, wl-clipboard for Wayland).
+          sudo apt-get install -y xclip wl-clipboard
           # Wayland/portal packages for nolib[portal] tests (ubuntu-24.04+)
           sudo apt-get install -y mutter xdg-desktop-portal xdg-desktop-portal-gnome 2>/dev/null || true
+          # AT-SPI bus for portal/atspi.ts coverage when GNOME extension
+          # isn't available (the xdg-desktop-portal-gnome package installs
+          # at-spi2-core but doesn't auto-launch it; we start it lazily
+          # in test/ci-run-tests.sh).
+          sudo apt-get install -y at-spi2-core 2>/dev/null || true
 
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
