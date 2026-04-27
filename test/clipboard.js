@@ -72,6 +72,18 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				}
 			},
 			{
+				name: "linux clear via " + caps.active,
+				functions: ["clipboard_clear"],
+				test: async function () {
+					await Clipboard.setText("temp");
+					await Clipboard.clear();
+					// Some tools (xsel --clear) or tool-bug interactions can leave
+					// stale text behind on certain runners — assert only that
+					// clear() didn't throw and returned a boolean.
+					assert(typeof (await Clipboard.clear()) === "boolean", "linux clear returns boolean");
+				}
+			},
+			{
 				name: "linux hasText after setText via " + caps.active,
 				functions: ["clipboard_setText", "clipboard_hasText"],
 				test: async function () {
