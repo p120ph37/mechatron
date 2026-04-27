@@ -1,167 +1,25 @@
 /**
  * nolib mouse backend — pure TypeScript, no native libraries.
  *
- * Three variants:
- *   - x11:    XTest FakeButtonEvent / WarpPointer via xproto. Requires $DISPLAY.
- *   - portal: RemoteDesktop D-Bus NotifyPointerButton/Motion/Axis. Requires Wayland + portal.
- *   - vt:     uinput via ioctl bridge. Requires /dev/uinput + interpreter.
- *     setPos uses EV_ABS (emulated digitizer, 0–65535 range) with screen
- *     dimensions from the framebuffer.  getPos/getButtonState are unavailable
- *     (uinput is write-only).
+ * Dispatches to variant-specific implementations:
+ *   - x11:    XTest FakeButtonEvent / WarpPointer over xproto. Requires $DISPLAY.
+ *   - portal: RemoteDesktop D-Bus. Requires Wayland + portal.
+ *   - vt:     /dev/uinput via ioctl bridge.
  */
 
 import { getNolibVariant } from "../backend";
-import { getXConnection } from "../x11proto/xconn";
-import {
-  xprotoMousePress, xprotoMouseRelease,
-  xprotoScrollV, xprotoScrollH, xprotoSetPos,
-} from "../x11proto/xproto";
-import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2, evdevButton } from "../mouse/constants";
-import {
-  nolibUinputAvailable,
-  injectMouseButton, injectScrollV, injectScrollH,
-  injectAbsMotion, UINPUT_ABS_MAX,
-} from "./uinput";
-import { ioctlSync, ioctlBridgeAvailable } from "./ioctl";
-import {
-  FRAMEBUFFER_DEV, FBIOGET_VSCREENINFO,
-  framebufferAvailable, parseFbVarScreenInfo,
-} from "../screen/framebuffer";
-import {
-  remoteDesktopAvailable,
-  notifyPointerButton, notifyPointerAxisDiscrete,
-} from "../portal/remote-desktop";
 
-const IS_LINUX = process.platform === "linux";
-const HAS_DISPLAY = !!process.env.DISPLAY;
 const VARIANT = getNolibVariant();
 
-const USE_X11 = HAS_DISPLAY && (VARIANT === "x11" || VARIANT === undefined);
-const USE_PORTAL = VARIANT === "portal";
+const impl: typeof import("./mouse-x11") =
+  VARIANT === "portal" ? require("./mouse-portal") :
+  VARIANT === "vt"     ? require("./mouse-vt") :
+                         require("./mouse-x11");
 
-let _hasUinput: boolean | undefined;
-function hasUinput(): boolean {
-  if (_hasUinput === undefined) _hasUinput = IS_LINUX && nolibUinputAvailable();
-  return _hasUinput;
-}
-
-let _fbScreenDims: { w: number; h: number } | null | undefined;
-function getFbScreenDims(): { w: number; h: number } | null {
-  if (_fbScreenDims !== undefined) return _fbScreenDims;
-  if (!ioctlBridgeAvailable() || !framebufferAvailable()) {
-    _fbScreenDims = null;
-    return null;
-  }
-  const result = ioctlSync(FRAMEBUFFER_DEV, [
-    { request: FBIOGET_VSCREENINFO, data: Buffer.alloc(160) },
-  ]);
-  if (!result || result.outputs.length < 1) { _fbScreenDims = null; return null; }
-  const geom = parseFbVarScreenInfo(result.outputs[0]);
-  if (geom.width === 0 || geom.height === 0) { _fbScreenDims = null; return null; }
-  _fbScreenDims = { w: geom.width, h: geom.height };
-  return _fbScreenDims;
-}
-
-const Button1Mask = 1 << 8;
-const Button2Mask = 1 << 9;
-const Button3Mask = 1 << 10;
-
-// Portal scroll axes: 0 = vertical, 1 = horizontal
-const AXIS_VERTICAL = 0;
-const AXIS_HORIZONTAL = 1;
-
-async function linux_mouse_press(button: number): Promise<void> {
-  if (USE_X11) return xprotoMousePress(button);
-  if (USE_PORTAL) {
-    const code = evdevButton(button);
-    if (code !== null) await notifyPointerButton(code, true);
-    return;
-  }
-  injectMouseButton(button, true);
-}
-
-async function linux_mouse_release(button: number): Promise<void> {
-  if (USE_X11) return xprotoMouseRelease(button);
-  if (USE_PORTAL) {
-    const code = evdevButton(button);
-    if (code !== null) await notifyPointerButton(code, false);
-    return;
-  }
-  injectMouseButton(button, false);
-}
-
-async function linux_mouse_scrollH(amount: number): Promise<void> {
-  if (USE_X11) return xprotoScrollH(amount);
-  if (USE_PORTAL) return notifyPointerAxisDiscrete(AXIS_HORIZONTAL, amount);
-  injectScrollH(amount);
-}
-
-async function linux_mouse_scrollV(amount: number): Promise<void> {
-  if (USE_X11) return xprotoScrollV(amount);
-  if (USE_PORTAL) return notifyPointerAxisDiscrete(AXIS_VERTICAL, amount);
-  injectScrollV(amount);
-}
-
-async function linux_mouse_getPos(): Promise<{ x: number; y: number }> {
-  if (USE_PORTAL) return { x: 0, y: 0 };
-  if (!USE_X11) return { x: 0, y: 0 };
-  const c = await getXConnection();
-  if (!c) return { x: 0, y: 0 };
-  const qp = await c.queryPointer();
-  return { x: qp.rootX, y: qp.rootY };
-}
-
-async function linux_mouse_setPos(x: number, y: number): Promise<void> {
-  if (USE_PORTAL) return;
-  if (USE_X11) return xprotoSetPos(x, y);
-  if (hasUinput()) {
-    const dims = getFbScreenDims();
-    if (dims && dims.w > 0 && dims.h > 0) {
-      const absX = Math.round((x * UINPUT_ABS_MAX) / dims.w);
-      const absY = Math.round((y * UINPUT_ABS_MAX) / dims.h);
-      injectAbsMotion(absX, absY);
-    }
-  }
-}
-
-async function linux_mouse_getButtonState(button: number): Promise<boolean> {
-  if (USE_PORTAL) return false;
-  if (!USE_X11) return false;
-  if (button === BUTTON_X1 || button === BUTTON_X2) return false;
-  const c = await getXConnection();
-  if (!c) return false;
-  const qp = await c.queryPointer();
-  const m = qp.mask;
-  switch (button) {
-    case BUTTON_LEFT:  return ((m & Button1Mask) >>> 8) !== 0;
-    case BUTTON_MID:   return ((m & Button2Mask) >>> 8) !== 0;
-    case BUTTON_RIGHT: return ((m & Button3Mask) >>> 8) !== 0;
-    default: return false;
-  }
-}
-
-const SUPPORTED = IS_LINUX || HAS_DISPLAY;
-
-export const mouse_press = SUPPORTED ? linux_mouse_press : null;
-export const mouse_release = SUPPORTED ? linux_mouse_release : null;
-export const mouse_scrollH = SUPPORTED ? linux_mouse_scrollH : null;
-export const mouse_scrollV = SUPPORTED ? linux_mouse_scrollV : null;
-export const mouse_getPos = SUPPORTED ? linux_mouse_getPos : null;
-export const mouse_setPos = SUPPORTED ? linux_mouse_setPos : null;
-export const mouse_getButtonState = SUPPORTED ? linux_mouse_getButtonState : null;
-
-if (!SUPPORTED) {
-  throw new Error("nolib/mouse: requires Linux or $DISPLAY");
-}
-if (VARIANT === "portal" && !remoteDesktopAvailable()) {
-  throw new Error("nolib/mouse[portal]: requires Wayland session + D-Bus session bus");
-}
-if (VARIANT === "x11" && !HAS_DISPLAY) {
-  throw new Error("nolib/mouse[x11]: requires $DISPLAY");
-}
-if (VARIANT === "vt" && !hasUinput()) {
-  throw new Error("nolib/mouse[vt]: requires /dev/uinput");
-}
-if (!HAS_DISPLAY && !remoteDesktopAvailable() && !hasUinput()) {
-  throw new Error("nolib/mouse: requires $DISPLAY, Wayland portal, or /dev/uinput");
-}
+export const mouse_press          = impl.mouse_press;
+export const mouse_release        = impl.mouse_release;
+export const mouse_scrollH        = impl.mouse_scrollH;
+export const mouse_scrollV        = impl.mouse_scrollV;
+export const mouse_getPos         = impl.mouse_getPos;
+export const mouse_setPos         = impl.mouse_setPos;
+export const mouse_getButtonState = impl.mouse_getButtonState;
