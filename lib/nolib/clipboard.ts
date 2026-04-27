@@ -178,71 +178,21 @@ async function x11Clear(): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════
 // sh variant — subprocess bridge
 // ═══════════════════════════════════════════════════════════════════════
+//
+// Linux: defer to the canonical wl-clipboard/xclip/xsel subprocess
+// implementation in lib/clipboard/linux.ts (shared with the ffi backend's
+// Linux fallback). macOS keeps a tiny pbcopy/pbpaste wrapper inline.
 
 import { execFileSync, execSync } from "child_process";
+import {
+  linux_clipboard_clear, linux_clipboard_hasText,
+  linux_clipboard_getText, linux_clipboard_setText,
+} from "../clipboard/linux";
 
-function which(cmd: string): boolean {
-  try {
-    execFileSync("/bin/sh", ["-c", `command -v ${cmd}`], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ── Linux: xclip / xsel / wl-copy+wl-paste ─────────────────────────
-
-type LinuxTool = "xclip" | "xsel" | "wl" | null;
-let _linuxTool: LinuxTool | undefined;
-
-function linuxTool(): LinuxTool {
-  if (_linuxTool !== undefined) return _linuxTool;
-  if (process.env.WAYLAND_DISPLAY) {
-    if (which("wl-copy") && which("wl-paste")) { _linuxTool = "wl"; return _linuxTool; }
-  }
-  if (which("xclip")) { _linuxTool = "xclip"; return _linuxTool; }
-  if (which("xsel"))  { _linuxTool = "xsel";  return _linuxTool; }
-  _linuxTool = null;
-  return null;
-}
-
-function shLinuxGetText(): string {
-  const tool = linuxTool();
-  try {
-    switch (tool) {
-      case "xclip": return execFileSync("xclip", ["-selection", "clipboard", "-o"], { encoding: "utf8", timeout: 2000 });
-      case "xsel":  return execFileSync("xsel", ["--clipboard", "--output"], { encoding: "utf8", timeout: 2000 });
-      case "wl":    return execFileSync("wl-paste", ["--no-newline"], { encoding: "utf8", timeout: 2000 });
-      default: return "";
-    }
-  } catch { return ""; }
-}
-
-function shLinuxSetText(text: string): void {
-  const tool = linuxTool();
-  try {
-    switch (tool) {
-      case "xclip": execSync(`echo -n ${JSON.stringify(text)} | xclip -selection clipboard`, { timeout: 2000 }); break;
-      case "xsel":  execSync(`echo -n ${JSON.stringify(text)} | xsel --clipboard --input`, { timeout: 2000 }); break;
-      case "wl":    execSync(`echo -n ${JSON.stringify(text)} | wl-copy`, { timeout: 2000 }); break;
-    }
-  } catch {}
-}
-
-function shLinuxHasText(): boolean {
-  return shLinuxGetText().length > 0;
-}
-
-function shLinuxClear(): void {
-  const tool = linuxTool();
-  try {
-    switch (tool) {
-      case "xclip": execSync("echo -n '' | xclip -selection clipboard", { timeout: 2000 }); break;
-      case "xsel":  execFileSync("xsel", ["--clipboard", "--clear"], { timeout: 2000 }); break;
-      case "wl":    execSync("echo -n '' | wl-copy", { timeout: 2000 }); break;
-    }
-  } catch {}
-}
+const shLinuxGetText = linux_clipboard_getText;
+const shLinuxSetText = linux_clipboard_setText;  // returns boolean
+const shLinuxHasText = linux_clipboard_hasText;
+const shLinuxClear = linux_clipboard_clear;       // returns boolean
 
 // ── macOS: pbcopy / pbpaste ─────────────────────────────────────────
 
@@ -274,10 +224,11 @@ function shMacClear(): void {
 
 const useX11 = variant === "x11";
 
-export function clipboard_clear(): void {
-  if (useX11) { x11Clear(); return; }
-  if (IS_LINUX) shLinuxClear();
-  else if (IS_MAC) shMacClear();
+export function clipboard_clear(): boolean | Promise<boolean> {
+  if (useX11) return x11Clear().then(() => true).catch(() => false);
+  if (IS_LINUX) return shLinuxClear();
+  if (IS_MAC) { shMacClear(); return true; }
+  return false;
 }
 
 export function clipboard_hasText(): boolean {
@@ -294,10 +245,11 @@ export function clipboard_getText(): string {
   return "";
 }
 
-export function clipboard_setText(text: string): void {
-  if (useX11) { x11SetText(text); return; }
-  if (IS_LINUX) shLinuxSetText(text);
-  else if (IS_MAC) shMacSetText(text);
+export function clipboard_setText(text: string): boolean | Promise<boolean> {
+  if (useX11) return x11SetText(text).then(() => true).catch(() => false);
+  if (IS_LINUX) return shLinuxSetText(text);
+  if (IS_MAC) { shMacSetText(text); return true; }
+  return false;
 }
 
 export function clipboard_hasImage(): boolean {

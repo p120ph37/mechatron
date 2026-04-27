@@ -35,28 +35,20 @@ const GMEM_MOVEABLE  = 0x0002;
 
 const BITMAPINFOHEADER_SIZE = 40;
 
-// ── Linux: delegate to the subprocess bridge ──────────────────────────
-// FFI has no portable clipboard primitives on Linux (XFixes/XGetProperty
-// against a long-lived selection owner is too much surface to maintain
-// against the ICCCM spec). Instead, route through the wl-clipboard /
-// xclip / xsel subprocess wrappers in lib/clipboard/linux.ts. Users who
-// want pure-TS X11 selections instead of subprocess can pin
-// MECHATRON_BACKEND_CLIPBOARD='nolib[x11]'.
+// ── Linux stubs ───────────────────────────────────────────────────────
+// FFI mirrors napi's surface: native-library clipboard (XFixes / Wayland
+// data-control via dlopen). Until the Linux FFI clipboard impl lands,
+// these are stubs and users get clipboard via nolib[x11] (xproto
+// selections) or nolib[sh] (xclip/wl-copy subprocess).
 
-import {
-  linux_clipboard_clear, linux_clipboard_hasText, linux_clipboard_getText,
-  linux_clipboard_setText, linux_clipboard_hasImage, linux_clipboard_getImage,
-  linux_clipboard_setImage, linux_clipboard_getSequence,
-} from "../clipboard/linux";
-
-const linuxClear = linux_clipboard_clear;
-const linuxHasText = linux_clipboard_hasText;
-const linuxGetText = linux_clipboard_getText;
-const linuxSetText = linux_clipboard_setText;
-const linuxHasImage = linux_clipboard_hasImage;
-const linuxGetImage = linux_clipboard_getImage;
-const linuxSetImage = linux_clipboard_setImage;
-const linuxSequence = linux_clipboard_getSequence;
+function linuxClear(): boolean { return false; }
+function linuxHasText(): boolean { return false; }
+function linuxGetText(): string { return ""; }
+function linuxSetText(_: string): boolean { return false; }
+function linuxHasImage(): boolean { return false; }
+function linuxGetImage(): { width: number; height: number; data: Uint32Array } | null { return null; }
+function linuxSetImage(_w: number, _h: number, _d: Uint32Array): boolean { return false; }
+function linuxSequence(): number { return 0; }
 
 // ── Windows helpers ───────────────────────────────────────────────────
 

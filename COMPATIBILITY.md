@@ -124,14 +124,14 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
 |----------|------|------|------|------|------|------|------|------|------|------|
 | clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_clear | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_getText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_setText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_clear | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_getText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_setText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_hasImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
 | clipboard_getImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
 | clipboard_setImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getSequence | ok | ok | ok | skip | skip | ok | ok | ok | ok | skip |
+| clipboard_getSequence | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
 
 ## Memory
 

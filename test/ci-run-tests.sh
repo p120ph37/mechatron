@@ -238,6 +238,27 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v xclip >/dev/null 2>&1; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
+# ── Linux-only: nolib[x11] clipboard (xproto selections protocol) ─
+# Pin clipboard to nolib[x11] so the xproto-based ICCCM SELECTION
+# protocol path in lib/nolib/clipboard.ts is exercised under Xvfb,
+# rather than the subprocess fallback. Verifies the architectural
+# guarantee that explicit backend preference is honored.
+if [ "$RUNNER_OS" = "Linux" ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-x11-clipboard.xml"
+  BE_COV_DIR="$COV_DIR/nolib-x11-clipboard"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_CLIPBOARD='nolib[x11]' \
+    run_bun "nolib-x11-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-x11-clipboard" \
+    "bun test for nolib-x11-clipboard (xproto selections) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
 # ── Linux-only: AT-SPI2 portal coverage ──────────────────────────
 # Boot the AT-SPI2 registry so atspiAvailable() / atspiListWindows()
 # can complete without throwing. With the registry up, the unit-test
