@@ -583,7 +583,19 @@ caching semantics; same `restore_token` idea.
 | Portal+libei input (6g) | **Complete** | napi: RemoteDesktop portal + libei dlopen (ei.rs, ei_input.rs, dbus_portal.rs); keyboard + mouse press/release/scroll |
 | napi clipboard X11+portal (6g′) | **Complete** | Rust X11 selection protocol + wl-clipboard subprocess fallback in napi/src/clipboard.rs |
 | nolib memory (6g″) | **Complete** | Pure-TS /proc/pid/mem + /proc/pid/maps; pattern search with wildcards; AT_PAGESZ from auxv |
+| nolib window[portal] (6g‴) | **Complete** | GNOME Shell extension D-Bus bridge + AT-SPI2 read-only fallback; installExtension helper |
 | CI expansion (6h) | **Planned** | Job definitions TBD |
+
+### Future: GNOME Shell Extension for No-Prompt Screen Capture
+
+**Status: Noted — do NOT implement yet.**
+
+The same GNOME Shell extension mechanism used for window management could also
+provide no-prompt screen capture by using Mutter's internal `Shell.Screenshot`
+API or `Meta.CursorTracker` + `Clutter.Stage.paint_to_buffer_rect()`.  This
+would bypass the portal permission dialog entirely for apps running on GNOME
+with the extension installed.  Worth exploring once the window management
+extension is battle-tested and user adoption is validated.
 
 ---
 
