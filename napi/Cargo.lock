@@ -257,6 +257,7 @@ version = "0.0.0"
 dependencies = [
  "core-graphics",
  "foreign-types",
+ "libc",
  "mechatron-shared",
  "napi",
  "napi-build",

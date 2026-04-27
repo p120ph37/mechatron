@@ -32,6 +32,22 @@ fn intersect_bounds(a: Rect, b: Rect) -> Rect {
 #[cfg(target_os = "linux")]
 #[napi(js_name = "screen_synchronize")]
 pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
+    if let Some(monitors) = crate::screencast::get_monitors() {
+        let mut arr = env.create_array(monitors.len() as u32)?;
+        for (i, &(mx, my, mw, mh)) in monitors.iter().enumerate() {
+            let mut obj = env.create_object()?;
+            let mut bo = env.create_object()?;
+            bo.set("x", mx)?; bo.set("y", my)?;
+            bo.set("w", mw as i32)?; bo.set("h", mh as i32)?;
+            let mut uo = env.create_object()?;
+            uo.set("x", mx)?; uo.set("y", my)?;
+            uo.set("w", mw as i32)?; uo.set("h", mh as i32)?;
+            obj.set("bounds", bo)?; obj.set("usable", uo)?;
+            arr.set(i as u32, obj)?;
+        }
+        return Ok(Either::A(arr.coerce_to_object()?));
+    }
+
     let mut screens: Vec<(Rect, Rect)> = Vec::new();
 
     unsafe {
@@ -285,9 +301,18 @@ pub fn screen_grab_screen(
     x: i32, y: i32, w: i32, h: i32,
     window_handle: Option<f64>,
 ) -> Result<Either<Uint32Array, napi::JsNull>> {
+    if w <= 0 || h <= 0 {
+        return Ok(Either::B(env.get_null()?));
+    }
+    if window_handle.is_none() || window_handle == Some(0.0) {
+        if let Some(pixels) = crate::screencast::grab_frame(x, y, w, h) {
+            return Ok(Either::A(Uint32Array::new(pixels)));
+        }
+    }
+
     unsafe {
         let display = get_display();
-        if display.is_null() || w <= 0 || h <= 0 {
+        if display.is_null() {
             return Ok(Either::B(env.get_null()?));
         }
         let _xe = XDismissErrors::new();
@@ -503,4 +528,31 @@ pub fn screen_grab_screen(
     }
 
     Ok(Either::A(Uint32Array::new(pixels)))
+}
+
+// =============================================================================
+// Portal token management (Linux only, no-op stubs on other platforms)
+// =============================================================================
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "screen_getPortalToken")]
+pub fn screen_get_portal_token() -> Option<String> {
+    crate::screencast::get_token()
+}
+
+#[cfg(target_os = "linux")]
+#[napi(js_name = "screen_setPortalToken")]
+pub fn screen_set_portal_token(token: String) {
+    crate::screencast::set_token(token);
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_getPortalToken")]
+pub fn screen_get_portal_token() -> Option<String> {
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi(js_name = "screen_setPortalToken")]
+pub fn screen_set_portal_token(_token: String) {
 }

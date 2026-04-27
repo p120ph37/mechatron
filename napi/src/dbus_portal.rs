@@ -14,13 +14,13 @@ fn dbus_u32(buf: &mut Vec<u8>, v: u32) {
     buf.extend_from_slice(&v.to_le_bytes());
 }
 
-fn dbus_string(buf: &mut Vec<u8>, s: &str) {
+pub(crate) fn dbus_string(buf: &mut Vec<u8>, s: &str) {
     dbus_u32(buf, s.len() as u32);
     buf.extend_from_slice(s.as_bytes());
     buf.push(0);
 }
 
-fn dbus_object_path(buf: &mut Vec<u8>, s: &str) {
+pub(crate) fn dbus_object_path(buf: &mut Vec<u8>, s: &str) {
     dbus_string(buf, s);
 }
 
@@ -41,25 +41,25 @@ fn dbus_variant_u32(buf: &mut Vec<u8>, v: u32) {
 }
 
 // Read helpers
-fn rd_align(pos: &mut usize, n: usize) {
+pub(crate) fn rd_align(pos: &mut usize, n: usize) {
     while *pos % n != 0 { *pos += 1; }
 }
 
-fn rd_u32(buf: &[u8], pos: &mut usize) -> u32 {
+pub(crate) fn rd_u32(buf: &[u8], pos: &mut usize) -> u32 {
     rd_align(pos, 4);
     let v = u32::from_le_bytes([buf[*pos], buf[*pos+1], buf[*pos+2], buf[*pos+3]]);
     *pos += 4;
     v
 }
 
-fn rd_string(buf: &[u8], pos: &mut usize) -> String {
+pub(crate) fn rd_string(buf: &[u8], pos: &mut usize) -> String {
     let len = rd_u32(buf, pos) as usize;
     let s = String::from_utf8_lossy(&buf[*pos..*pos + len]).into_owned();
     *pos += len + 1; // skip NUL
     s
 }
 
-fn rd_signature(buf: &[u8], pos: &mut usize) -> String {
+pub(crate) fn rd_signature(buf: &[u8], pos: &mut usize) -> String {
     let len = buf[*pos] as usize;
     *pos += 1;
     let s = String::from_utf8_lossy(&buf[*pos..*pos + len]).into_owned();
@@ -131,7 +131,7 @@ fn dbus_build_msg(
     msg
 }
 
-fn build_method_call(
+pub(crate) fn build_method_call(
     serial: u32, dest: &str, path: &str, iface: &str, member: &str,
     body_sig: &str, body: &[u8], n_fds: u32,
 ) -> Vec<u8> {
@@ -146,7 +146,7 @@ fn build_method_call(
 
 // ── a{sv} dict builder ────────────────────────────────────────────────
 
-fn build_asv(entries: &[(&str, &[u8])]) -> Vec<u8> {
+pub(crate) fn build_asv(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut inner = Vec::new();
     for &(key, variant_bytes) in entries {
         dbus_align(&mut inner, 8); // dict entry alignment
@@ -159,13 +159,13 @@ fn build_asv(entries: &[(&str, &[u8])]) -> Vec<u8> {
     buf
 }
 
-fn variant_string_bytes(s: &str) -> Vec<u8> {
+pub(crate) fn variant_string_bytes(s: &str) -> Vec<u8> {
     let mut v = Vec::new();
     dbus_variant_string(&mut v, s);
     v
 }
 
-fn variant_u32_bytes(val: u32) -> Vec<u8> {
+pub(crate) fn variant_u32_bytes(val: u32) -> Vec<u8> {
     let mut v = Vec::new();
     dbus_variant_u32(&mut v, val);
     v
@@ -173,14 +173,14 @@ fn variant_u32_bytes(val: u32) -> Vec<u8> {
 
 // ── D-Bus connection ──────────────────────────────────────────────────
 
-struct DBusConn {
-    fd: RawFd,
-    serial: u32,
-    unique_name: String,
+pub(crate) struct DBusConn {
+    pub(crate) fd: RawFd,
+    pub(crate) serial: u32,
+    pub(crate) unique_name: String,
 }
 
 impl DBusConn {
-    fn next_serial(&mut self) -> u32 {
+    pub(crate) fn next_serial(&mut self) -> u32 {
         self.serial += 1;
         self.serial
     }
@@ -207,7 +207,7 @@ fn session_bus_path() -> Option<String> {
     None
 }
 
-unsafe fn sock_write_all(fd: RawFd, data: &[u8]) -> bool {
+pub(crate) unsafe fn sock_write_all(fd: RawFd, data: &[u8]) -> bool {
     let mut written = 0;
     while written < data.len() {
         let n = libc::write(fd, data[written..].as_ptr() as *const c_void,
@@ -233,7 +233,7 @@ unsafe fn sock_read_exact(fd: RawFd, buf: &mut [u8]) -> bool {
     true
 }
 
-unsafe fn dbus_connect() -> Option<DBusConn> {
+pub(crate) unsafe fn dbus_connect() -> Option<DBusConn> {
     let bus_path = session_bus_path()?;
 
     let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0);
@@ -326,7 +326,7 @@ unsafe fn dbus_connect() -> Option<DBusConn> {
 
 // ── Message receiving (with fd passing) ───────────────────────────────
 
-unsafe fn recv_dbus_msg(fd: RawFd) -> Option<(Vec<u8>, Vec<RawFd>)> {
+pub(crate) unsafe fn recv_dbus_msg(fd: RawFd) -> Option<(Vec<u8>, Vec<RawFd>)> {
     // Read fixed header (16 bytes: endian, type, flags, ver, body_len, serial, fields_array_len)
     let mut hdr = [0u8; 16];
     if !sock_read_exact(fd, &mut hdr) { return None; }
@@ -386,7 +386,7 @@ unsafe fn recv_dbus_msg(fd: RawFd) -> Option<(Vec<u8>, Vec<RawFd>)> {
     Some((full, fds))
 }
 
-fn parse_msg_header(msg: &[u8]) -> Option<(u8, usize, usize)> {
+pub(crate) fn parse_msg_header(msg: &[u8]) -> Option<(u8, usize, usize)> {
     if msg.len() < 16 { return None; }
     let msg_type = msg[1];
     let body_len = u32::from_le_bytes([msg[4], msg[5], msg[6], msg[7]]) as usize;
@@ -416,7 +416,7 @@ fn get_header_field_string(msg: &[u8], field_code: u8) -> Option<String> {
     None
 }
 
-fn skip_dbus_value(buf: &[u8], pos: &mut usize, sig: &str) {
+pub(crate) fn skip_dbus_value(buf: &[u8], pos: &mut usize, sig: &str) {
     for ch in sig.chars() {
         match ch {
             's' | 'o' => { rd_string(buf, pos); }
@@ -433,12 +433,12 @@ const PORTAL_DEST: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const RD_IFACE: &str = "org.freedesktop.portal.RemoteDesktop";
 
-fn request_path(unique_name: &str, token: &str) -> String {
+pub(crate) fn request_path(unique_name: &str, token: &str) -> String {
     let sender = unique_name.replace('.', "_").replace(':', "");
     format!("/org/freedesktop/portal/desktop/request/{}/{}", sender, token)
 }
 
-unsafe fn add_match(conn: &mut DBusConn, rule: &str) {
+pub(crate) unsafe fn add_match(conn: &mut DBusConn, rule: &str) {
     let mut body = Vec::new();
     dbus_string(&mut body, rule);
     let serial = conn.next_serial();
@@ -449,7 +449,7 @@ unsafe fn add_match(conn: &mut DBusConn, rule: &str) {
     sock_write_all(conn.fd, &msg);
 }
 
-unsafe fn wait_for_response(conn: &mut DBusConn, req_path: &str) -> Option<Vec<u8>> {
+pub(crate) unsafe fn wait_for_response(conn: &mut DBusConn, req_path: &str) -> Option<Vec<u8>> {
     // Loop receiving messages until we get a Response signal on req_path
     for _ in 0..200 {
         let (msg, _fds) = recv_dbus_msg(conn.fd)?;
@@ -467,7 +467,7 @@ unsafe fn wait_for_response(conn: &mut DBusConn, req_path: &str) -> Option<Vec<u
     None
 }
 
-fn extract_session_handle(response_body: &[u8]) -> Option<String> {
+pub(crate) fn extract_session_handle(response_body: &[u8]) -> Option<String> {
     let mut pos = 0;
     let response_code = rd_u32(response_body, &mut pos);
     if response_code != 0 { return None; }

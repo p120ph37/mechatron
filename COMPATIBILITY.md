@@ -111,11 +111,13 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Screen
 
-| Function | linux-napi[x11] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|
-| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|
+| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_getPortalToken | skip | ok | skip | skip | skip | skip | skip | skip | skip | skip |
+| screen_setPortalToken | skip | ok | skip | skip | skip | skip | skip | skip | skip | skip |
 
 ## Clipboard
 
