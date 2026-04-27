@@ -135,18 +135,18 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Memory
 
-| Function | linux-napi | linux-ffi | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|
-| memory_ctor | ok | ok | ok | ok | ok | ok |
-| memory_isValid | ok | ok | ok | ok | ok | ok |
-| memory_getRegions | ok | ok | ok | ok | ok | ok |
-| memory_getRegion | ok | ok | ok | ok | ok | ok |
-| memory_getPageSize | ok | ok | ok | ok | ok | ok |
-| memory_getMinAddress | ok | ok | ok | ok | ok | ok |
-| memory_getMaxAddress | ok | ok | ok | ok | ok | ok |
-| memory_getPtrSize | ok | ok | ok | ok | ok | ok |
-| memory_readData | ok | ok | ok | ok | ok | ok |
-| memory_writeData | ok | ok | ok | ok | ok | ok |
-| memory_find | ok | ok | ok | ok | ok | ok |
-| memory_setAccess | skip | skip | ok | ok | ok | ok |
-| memory_setAccessFlags | skip | skip | ok | ok | ok | ok |
+| Function | linux-napi | linux-ffi | linux-nolib | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|
+| memory_ctor | ok | ok | ok | ok | ok | ok | ok |
+| memory_isValid | ok | ok | ok | ok | ok | ok | ok |
+| memory_getRegions | ok | ok | ok | ok | ok | ok | ok |
+| memory_getRegion | ok | ok | ok | ok | ok | ok | ok |
+| memory_getPageSize | ok | ok | ok | ok | ok | ok | ok |
+| memory_getMinAddress | ok | ok | ok | ok | ok | ok | ok |
+| memory_getMaxAddress | ok | ok | ok | ok | ok | ok | ok |
+| memory_getPtrSize | ok | ok | ok | ok | ok | ok | ok |
+| memory_readData | ok | ok | ok | ok | ok | ok | ok |
+| memory_writeData | ok | ok | ok | ok | ok | ok | ok |
+| memory_find | ok | ok | ok | ok | ok | ok | ok |
+| memory_setAccess | skip | skip | skip | ok | ok | ok | ok |
+| memory_setAccessFlags | skip | skip | skip | ok | ok | ok | ok |
