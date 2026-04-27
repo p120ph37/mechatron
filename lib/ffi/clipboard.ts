@@ -1,18 +1,15 @@
 /**
  * Clipboard subsystem — pure FFI implementation.
  *
- * Linux X11/Wayland: TODO. napi/clipboard.rs ships a real ICCCM
- * SELECTION owner (X11) and zwlr_data_control_v1 client (Wayland) via
- * the x11 + smithay-client-toolkit Rust crates. The ffi-side equivalent
- * would need:
- *   - dlopen libX11.so for XOpenDisplay / XCreateSimpleWindow /
- *     XSetSelectionOwner / XConvertSelection / XGetWindowProperty plus
- *     a long-lived event loop to answer SelectionRequest and forward
- *     UTF8_STRING / image/png as TARGETS dictate; OR
- *   - dlopen libwayland-client.so + protocol scanner output for
- *     wlr-data-control-unstable-v1 to talk to wlroots-based compositors.
- * Until that lands, Linux callers get clipboard via:
- *   - `nolib[x11]` — pure-TS xproto SELECTION protocol (lib/nolib/clipboard.ts)
+ * Linux: TODO. ffi[x11] should imitate napi[x11] — dlopen libX11.so and
+ * own the ICCCM CLIPBOARD selection from a dedicated invisible window,
+ * answering SelectionRequest events for UTF8_STRING / image/png / TARGETS
+ * via XSetSelectionOwner / XConvertSelection / XGetWindowProperty in an
+ * event loop. Wayland support is a separate ffi[portal] variant (a future
+ * lib/ffi/clipboard-portal.ts that dlopens libwayland-client.so and
+ * speaks wlr-data-control-unstable-v1).  Until those land, Linux callers
+ * get clipboard via:
+ *   - `nolib[x11]` — pure-TS xproto SELECTION protocol
  *   - `nolib[sh]`  — wl-copy / xclip / xsel subprocess wrappers
  *
  * Windows uses CF_UNICODETEXT (UTF-16LE NUL-terminated) and CF_DIB
