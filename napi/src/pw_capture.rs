@@ -16,7 +16,7 @@ struct GrabCtx {
 }
 
 unsafe extern "C" fn on_param_changed(data: *mut c_void, id: u32, param: *const c_void) {
-    if param.is_null() || id != SPA_PARAM_EnumFormat { return; }
+    if param.is_null() || id != SPA_PARAM_Format { return; }
     let ctx = &mut *(data as *mut GrabCtx);
     // Read the format from the pod: skip object header (8 bytes + 8 body header),
     // find the VIDEO_format property. For simplicity, just scan for the first Id value
@@ -73,6 +73,11 @@ unsafe extern "C" fn on_process(data: *mut c_void) {
         return;
     }
 
+    let needed = w * h * 4;
+    if chunk.offset as usize + needed > d.maxsize as usize {
+        (ctx.fns.pw_stream_queue_buffer)(ctx.stream, buf);
+        return;
+    }
     let src = std::slice::from_raw_parts(data_ptr as *const u32, w * h);
     let pixels = convert_to_argb(src, w, h, ctx.negotiated_format);
     ctx.frame = Some((pixels, w as u32, h as u32));
@@ -90,15 +95,24 @@ unsafe extern "C" fn on_state_changed(data: *mut c_void, _old: i32, state: i32, 
 
 fn convert_to_argb(src: &[u32], w: usize, h: usize, format: u32) -> Vec<u32> {
     let len = w * h;
-    let mut out = vec![0u32; len];
     match format {
         SPA_VIDEO_FORMAT_BGRx => {
+            let mut out = vec![0u32; len];
             for i in 0..len { out[i] = src[i] | 0xFF000000; }
+            out
         }
-        SPA_VIDEO_FORMAT_BGRA | SPA_VIDEO_FORMAT_ARGB => {
-            out.copy_from_slice(&src[..len]);
+        SPA_VIDEO_FORMAT_BGRA => {
+            src[..len].to_vec()
+        }
+        SPA_VIDEO_FORMAT_ARGB => {
+            // SPA ARGB = DRM BGRA8888: memory [A,R,G,B], LE u32 = 0xBBGGRRAA
+            let mut out = vec![0u32; len];
+            for i in 0..len { out[i] = src[i].swap_bytes(); }
+            out
         }
         SPA_VIDEO_FORMAT_RGBx | SPA_VIDEO_FORMAT_RGBA => {
+            // SPA RGBx/RGBA = DRM XBGR/ABGR: LE u32 = 0xXXBBGGRR / 0xAABBGGRR
+            let mut out = vec![0u32; len];
             for i in 0..len {
                 let p = src[i];
                 let r = p & 0xFF;
@@ -107,25 +121,38 @@ fn convert_to_argb(src: &[u32], w: usize, h: usize, format: u32) -> Vec<u32> {
                 let a = if format == SPA_VIDEO_FORMAT_RGBx { 0xFF } else { (p >> 24) & 0xFF };
                 out[i] = (a << 24) | (r << 16) | (g << 8) | b;
             }
+            out
         }
-        SPA_VIDEO_FORMAT_xRGB | SPA_VIDEO_FORMAT_xBGR => {
+        SPA_VIDEO_FORMAT_xRGB => {
+            // SPA xRGB = DRM BGRX8888: memory [x,R,G,B], LE u32 = 0xBBGGRRxx
+            let mut out = vec![0u32; len];
             for i in 0..len {
                 let p = src[i];
-                if format == SPA_VIDEO_FORMAT_xRGB {
-                    out[i] = p | 0xFF000000;
-                } else {
-                    let r = (p >> 16) & 0xFF;
-                    let b = p & 0xFF;
-                    out[i] = (p & 0xFF00FF00) | (b << 16) | r | 0xFF000000;
-                }
+                let r = (p >> 8) & 0xFF;
+                let g = (p >> 16) & 0xFF;
+                let b = (p >> 24) & 0xFF;
+                out[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
             }
+            out
+        }
+        SPA_VIDEO_FORMAT_xBGR => {
+            // SPA xBGR = DRM RGBX8888: memory [x,B,G,R], LE u32 = 0xRRGGBBxx
+            let mut out = vec![0u32; len];
+            for i in 0..len {
+                let p = src[i];
+                let r = (p >> 24) & 0xFF;
+                let g = (p >> 16) & 0xFF;
+                let b = (p >> 8) & 0xFF;
+                out[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+            }
+            out
         }
         _ => {
-            // Unknown format — treat as BGRx
+            let mut out = vec![0u32; len];
             for i in 0..len { out[i] = src[i] | 0xFF000000; }
+            out
         }
     }
-    out
 }
 
 /// Grab a single frame from a PipeWire node.
@@ -147,8 +174,10 @@ pub unsafe fn pw_grab_frame(pw_fd: RawFd, node_id: u32) -> Option<(Vec<u32>, u32
         return None;
     }
 
+    // pw_context_connect_fd takes ownership of the fd on success but not on failure
     let core = (fns.pw_context_connect_fd)(context, dup_fd, std::ptr::null(), 0);
     if core.is_null() {
+        libc::close(dup_fd);
         (fns.pw_context_destroy)(context);
         (fns.pw_main_loop_destroy)(loop_);
         return None;

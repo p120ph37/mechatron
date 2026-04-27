@@ -14,6 +14,7 @@ pub const SPA_TYPE_Choice: u32 = 19;
 
 pub const SPA_TYPE_OBJECT_Format: u32 = 0x40003;
 
+pub const SPA_PARAM_Format: u32 = 2;
 pub const SPA_PARAM_EnumFormat: u32 = 3;
 
 pub const SPA_FORMAT_mediaType: u32 = 1;
@@ -267,9 +268,10 @@ pub unsafe fn load_pw() -> Option<&'static PwFns> {
             }};
         }
 
-        // Call pw_init once
+        let pw_init_ptr = libc::dlsym(lib, b"pw_init\0".as_ptr() as *const c_char);
+        if pw_init_ptr.is_null() { return; }
         let pw_init_fn: unsafe extern "C" fn(*mut c_int, *mut *mut *mut c_char) =
-            std::mem::transmute(libc::dlsym(lib, b"pw_init\0".as_ptr() as *const c_char));
+            std::mem::transmute(pw_init_ptr);
         pw_init_fn(std::ptr::null_mut(), std::ptr::null_mut());
 
         PW_PTR = Box::into_raw(Box::new(PwFns {

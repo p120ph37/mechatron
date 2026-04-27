@@ -6,8 +6,6 @@ use std::os::unix::io::RawFd;
 mod dbus_portal;
 
 const SC_IFACE: &str = "org.freedesktop.portal.ScreenCast";
-const PORTAL_DEST: &str = "org.freedesktop.portal.Desktop";
-const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 
 pub struct ScreenCastSession {
     pub pw_fd: RawFd,
@@ -15,22 +13,6 @@ pub struct ScreenCastSession {
     pub width: u32,
     pub height: u32,
     pub restore_token: Option<String>,
-}
-
-unsafe fn sc_portal_call(
-    conn: &mut dbus_portal::DBusConn, method: &str, sig: &str, body: &[u8], token: &str,
-) -> Option<Vec<u8>> {
-    let req = dbus_portal::request_path(&conn.unique_name, token);
-    let rule = format!(
-        "type='signal',sender='{}',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
-        PORTAL_DEST, req
-    );
-    dbus_portal::add_match(conn, &rule);
-    let serial = conn.next_serial();
-    let msg = dbus_portal::build_method_call(serial, PORTAL_DEST, PORTAL_PATH, SC_IFACE, method, sig, body, 0);
-    dbus_portal::sock_write_all(conn.fd, &msg);
-    dbus_portal::recv_dbus_msg(conn.fd);
-    dbus_portal::wait_for_response(conn, &req)
 }
 
 fn parse_start_response(body: &[u8]) -> Option<(u32, u32, u32, Option<String>)> {
@@ -93,7 +75,7 @@ pub unsafe fn portal_screencast_start(restore_token: Option<&str>) -> Option<Scr
     let ht1 = dbus_portal::variant_string_bytes(&tok1);
     let st1 = dbus_portal::variant_string_bytes(&sess_tok);
     let body1 = dbus_portal::build_asv(&[("handle_token", &ht1), ("session_handle_token", &st1)]);
-    let resp1 = sc_portal_call(&mut conn, "CreateSession", "a{sv}", &body1, &tok1)?;
+    let resp1 = dbus_portal::portal_call(&mut conn, SC_IFACE, "CreateSession", "a{sv}", &body1, &tok1)?;
     let session_path = dbus_portal::extract_session_handle(&resp1)?;
 
     // SelectSources (types=1 MONITOR, persist_mode=2)
@@ -112,7 +94,7 @@ pub unsafe fn portal_screencast_start(restore_token: Option<&str>) -> Option<Scr
     let mut body2 = Vec::new();
     dbus_portal::dbus_object_path(&mut body2, &session_path);
     body2.extend_from_slice(&dbus_portal::build_asv(&entries));
-    let resp2 = sc_portal_call(&mut conn, "SelectSources", "oa{sv}", &body2, &tok2)?;
+    let resp2 = dbus_portal::portal_call(&mut conn, SC_IFACE, "SelectSources", "oa{sv}", &body2, &tok2)?;
     let mut p2 = 0;
     if dbus_portal::rd_u32(&resp2, &mut p2) != 0 { return None; }
 
@@ -123,7 +105,7 @@ pub unsafe fn portal_screencast_start(restore_token: Option<&str>) -> Option<Scr
     dbus_portal::dbus_object_path(&mut body3, &session_path);
     dbus_portal::dbus_string(&mut body3, "");
     body3.extend_from_slice(&dbus_portal::build_asv(&[("handle_token", &ht3)]));
-    let resp3 = sc_portal_call(&mut conn, "Start", "osa{sv}", &body3, &tok3)?;
+    let resp3 = dbus_portal::portal_call(&mut conn, SC_IFACE, "Start", "osa{sv}", &body3, &tok3)?;
     let (node_id, width, height, restore_token) = parse_start_response(&resp3)?;
 
     // OpenPipeWireRemote — direct method return with fd via SCM_RIGHTS
@@ -132,7 +114,7 @@ pub unsafe fn portal_screencast_start(restore_token: Option<&str>) -> Option<Scr
     body4.extend_from_slice(&dbus_portal::build_asv(&[]));
     let serial4 = conn.next_serial();
     let msg4 = dbus_portal::build_method_call(
-        serial4, PORTAL_DEST, PORTAL_PATH, SC_IFACE, "OpenPipeWireRemote", "oa{sv}", &body4, 0,
+        serial4, dbus_portal::PORTAL_DEST, dbus_portal::PORTAL_PATH, SC_IFACE, "OpenPipeWireRemote", "oa{sv}", &body4, 0,
     );
     dbus_portal::sock_write_all(conn.fd, &msg4);
     let (reply, fds) = dbus_portal::recv_dbus_msg(conn.fd)?;

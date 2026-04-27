@@ -54,9 +54,9 @@ pub fn is_available() -> bool {
 pub fn grab_frame(x: i32, y: i32, w: i32, h: i32) -> Option<Vec<u32>> {
     if !ensure_session() { return None; }
 
-    let (pw_fd, node_id, _src_w, _src_h) = with_state(|state| {
+    let (pw_fd, node_id) = with_state(|state| {
         let s = state.session.as_ref()?;
-        Some((s.pw_fd, s.node_id, s.width, s.height))
+        Some((s.pw_fd, s.node_id))
     })?;
 
     let (full_pixels, fw, fh) = unsafe { pw_capture::pw_grab_frame(pw_fd, node_id)? };

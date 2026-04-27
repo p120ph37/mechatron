@@ -429,8 +429,8 @@ pub(crate) fn skip_dbus_value(buf: &[u8], pos: &mut usize, sig: &str) {
 
 // ── Portal session negotiation ────────────────────────────────────────
 
-const PORTAL_DEST: &str = "org.freedesktop.portal.Desktop";
-const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+pub(crate) const PORTAL_DEST: &str = "org.freedesktop.portal.Desktop";
+pub(crate) const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const RD_IFACE: &str = "org.freedesktop.portal.RemoteDesktop";
 
 pub(crate) fn request_path(unique_name: &str, token: &str) -> String {
@@ -486,8 +486,8 @@ pub(crate) fn extract_session_handle(response_body: &[u8]) -> Option<String> {
     None
 }
 
-unsafe fn portal_call(
-    conn: &mut DBusConn, method: &str, sig: &str, body: &[u8], token: &str,
+pub(crate) unsafe fn portal_call(
+    conn: &mut DBusConn, iface: &str, method: &str, sig: &str, body: &[u8], token: &str,
 ) -> Option<Vec<u8>> {
     let req = request_path(&conn.unique_name, token);
     let rule = format!(
@@ -496,7 +496,7 @@ unsafe fn portal_call(
     );
     add_match(conn, &rule);
     let serial = conn.next_serial();
-    let msg = build_method_call(serial, PORTAL_DEST, PORTAL_PATH, RD_IFACE, method, sig, body, 0);
+    let msg = build_method_call(serial, PORTAL_DEST, PORTAL_PATH, iface, method, sig, body, 0);
     sock_write_all(conn.fd, &msg);
     recv_dbus_msg(conn.fd);
     wait_for_response(conn, &req)
@@ -516,7 +516,7 @@ pub unsafe fn portal_get_eis_fd() -> Option<RawFd> {
     let ht = variant_string_bytes(&token1);
     let st = variant_string_bytes(&session_token);
     let body1 = build_asv(&[("handle_token", &ht), ("session_handle_token", &st)]);
-    let resp1 = portal_call(&mut conn, "CreateSession", "a{sv}", &body1, &token1)?;
+    let resp1 = portal_call(&mut conn, RD_IFACE, "CreateSession", "a{sv}", &body1, &token1)?;
     let session_path = extract_session_handle(&resp1)?;
 
     // SelectDevices (types: 3 = keyboard + pointer)
@@ -527,7 +527,7 @@ pub unsafe fn portal_get_eis_fd() -> Option<RawFd> {
     dbus_object_path(&mut body2, &session_path);
     let opts2 = build_asv(&[("handle_token", &ht2), ("types", &types_v)]);
     body2.extend_from_slice(&opts2);
-    let resp2 = portal_call(&mut conn, "SelectDevices", "oa{sv}", &body2, &token2)?;
+    let resp2 = portal_call(&mut conn, RD_IFACE, "SelectDevices", "oa{sv}", &body2, &token2)?;
     let mut p2 = 0;
     if rd_u32(&resp2, &mut p2) != 0 { return None; }
 
@@ -539,7 +539,7 @@ pub unsafe fn portal_get_eis_fd() -> Option<RawFd> {
     dbus_string(&mut body3, "");
     let opts3 = build_asv(&[("handle_token", &ht3)]);
     body3.extend_from_slice(&opts3);
-    let resp3 = portal_call(&mut conn, "Start", "osa{sv}", &body3, &token3)?;
+    let resp3 = portal_call(&mut conn, RD_IFACE, "Start", "osa{sv}", &body3, &token3)?;
     let mut p3 = 0;
     if rd_u32(&resp3, &mut p3) != 0 { return None; }
 
