@@ -283,7 +283,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 		// ── Valid window tests (require getList to find a window) ──
 		{
 			name: "valid window getters",
-			functions: ["window_getList", "window_isValid", "window_getBounds", "window_isTopMost", "window_isBorderless", "window_isMinimized", "window_isMaximized", "window_getPID", "window_getHandle", "window_getProcess", "window_getClient"],
+			functions: ["window_getList", "window_isValid", "window_getBounds", "window_isTopMost", "window_isMinimized", "window_isMaximized", "window_getPID", "window_getHandle", "window_getProcess", "window_getClient"],
 			test: async function () {
 				var list = await Window.getList();
 				if (list.length === 0) return;
@@ -292,7 +292,6 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				assert(origBounds instanceof Bounds, "valid getBounds");
 				assert(typeof await vw.isValid() === "boolean", "valid isValid");
 				assert(typeof await vw.isTopMost() === "boolean", "valid isTopMost");
-				assert(typeof await vw.isBorderless() === "boolean", "valid isBorderless");
 				assert(typeof await vw.isMinimized() === "boolean", "valid isMinimized");
 				assert(typeof await vw.isMaximized() === "boolean", "valid isMaximized");
 				assert(typeof await vw.getPID() === "number", "valid getPID");
@@ -304,20 +303,38 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			}
 		},
 		{
+			name: "valid window isBorderless",
+			functions: ["window_getList", "window_isBorderless"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				assert(typeof await list[0].isBorderless() === "boolean", "valid isBorderless");
+			}
+		},
+		{
 			name: "valid window setters",
-			functions: ["window_getList", "window_isValid", "window_setTopMost", "window_setBorderless", "window_setMinimized", "window_setMaximized", "window_setTitle"],
+			functions: ["window_getList", "window_isValid", "window_setTopMost", "window_setMinimized", "window_setMaximized"],
 			test: async function () {
 				var list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				await vw.setTopMost(false);
+				await vw.setMinimized(false);
+				await vw.setMaximized(false);
+			}
+		},
+		{
+			name: "valid window setBorderless + setTitle",
+			functions: ["window_getList", "window_setBorderless", "window_setTitle"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
 				await vw.setBorderless(false);
 				var origTitle = await vw.getTitle();
 				if (origTitle) {
 					await vw.setTitle(origTitle);
 				}
-				await vw.setMinimized(false);
-				await vw.setMaximized(false);
 			}
 		},
 		{

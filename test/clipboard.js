@@ -57,6 +57,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// Linux with a clipboard tool available.
 		return [
 			{
+				name: "linux clipboard constructor via " + caps.active,
+				functions: ["clipboard_ctor"],
+				test: async function () {
+					assert(typeof Clipboard === "function", "Clipboard is a constructor");
+				}
+			},
+			{
 				name: "linux setText + getText round-trip via " + caps.active,
 				functions: ["clipboard_setText", "clipboard_getText"],
 				test: async function () {
@@ -95,6 +102,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	// Non-Linux platforms.
 	return [
+		{
+			name: "clipboard constructor",
+			functions: ["clipboard_ctor"],
+			test: async function () {
+				assert(typeof Clipboard === "function", "Clipboard is a constructor");
+			}
+		},
 		{
 			name: "setText + getText round-trip",
 			functions: ["clipboard_setText", "clipboard_getText"],

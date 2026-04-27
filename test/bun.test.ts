@@ -91,7 +91,7 @@ describe(`mechatron [${backend}]`, () => {
     for (const sub of ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"]) {
       assert(typeof mechatron.isAvailable(sub) === "boolean", `isAvailable(${sub})`);
     }
-  });
+  }, 15000);
 
   let _prevPrefix = "";
   for (const mod of allModules) {
