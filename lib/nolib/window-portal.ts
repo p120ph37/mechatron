@@ -14,9 +14,14 @@ import {
   gnomeWmGetClient, gnomeWmSetMinimized, gnomeWmSetMaximized,
   gnomeWmSetAbove, gnomeWmIsMinimized, gnomeWmIsMaximized,
   gnomeWmIsAbove, gnomeWmGetPID,
+  gnomeWmSetToken, gnomeWmGetToken,
 } from "../portal/gnome-wm";
 
 import { atspiListWindows } from "../portal/atspi";
+
+// ── Token management re-exports ─────────────────────────────────────
+
+export { gnomeWmSetToken as setToken, gnomeWmGetToken as getToken } from "../portal/gnome-wm";
 
 // ── GNOME extension availability cache ──────────────────────────────
 

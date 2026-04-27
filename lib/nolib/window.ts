@@ -42,4 +42,11 @@ export const window_getActive   = impl.window_getActive;
 export const window_setActive   = impl.window_setActive;
 export const window_isAxEnabled = impl.window_isAxEnabled;
 
-export { installExtension, isExtensionInstalled, isExtensionEnabled } from "../portal/gnome-ext-installer";
+export {
+  installExtension, isExtensionInstalled, isExtensionEnabled,
+  generateToken, installToken, revokeToken, provisionToken,
+  getInstalledTokens, TOKENS_FILE,
+  type InstallResult,
+} from "../portal/gnome-ext-installer";
+
+export { gnomeWmSetToken as setToken, gnomeWmGetToken as getToken } from "../portal/gnome-wm";

@@ -4,6 +4,9 @@
  *
  * Provides full window management on Wayland/GNOME: list, activate,
  * close, move/resize, minimize/maximize/above, get PID, etc.
+ *
+ * All methods except Ping require a bearer token. Set the token via
+ * gnomeWmSetToken() before calling any other method.
  */
 
 import { DBusConnection, DBusError } from "../dbus/connection";
@@ -28,6 +31,15 @@ export interface GnomeWindowInfo {
 let _conn: DBusConnection | null = null;
 let _connPromise: Promise<DBusConnection> | null = null;
 let _available: boolean | undefined;
+let _token: string = "";
+
+export function gnomeWmSetToken(token: string): void {
+  _token = token;
+}
+
+export function gnomeWmGetToken(): string {
+  return _token;
+}
 
 async function getConn(): Promise<DBusConnection> {
   if (_conn) return _conn;
@@ -53,6 +65,12 @@ function call(member: string, signature?: string, body?: any[]): Promise<any[]> 
   })).then(msg => msg.body);
 }
 
+function authedCall(member: string, signature?: string, body?: any[]): Promise<any[]> {
+  const sig = signature ? "s" + signature : "s";
+  const args = body ? [_token, ...body] : [_token];
+  return call(member, sig, args);
+}
+
 export async function gnomeWmAvailable(): Promise<boolean> {
   if (_available !== undefined) return _available;
   try {
@@ -65,77 +83,77 @@ export async function gnomeWmAvailable(): Promise<boolean> {
 }
 
 export async function gnomeWmList(): Promise<GnomeWindowInfo[]> {
-  const result = await call("List");
+  const result = await authedCall("List");
   return JSON.parse(result[0] as string);
 }
 
 export async function gnomeWmGetActive(): Promise<number> {
-  const result = await call("GetActive");
+  const result = await authedCall("GetActive");
   return result[0] as number;
 }
 
 export async function gnomeWmActivate(id: number): Promise<boolean> {
-  const result = await call("Activate", "u", [id]);
+  const result = await authedCall("Activate", "u", [id]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmClose(id: number): Promise<boolean> {
-  const result = await call("Close", "u", [id]);
+  const result = await authedCall("Close", "u", [id]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmGetTitle(id: number): Promise<string> {
-  const result = await call("GetTitle", "u", [id]);
+  const result = await authedCall("GetTitle", "u", [id]);
   return result[0] as string;
 }
 
 export async function gnomeWmGetBounds(id: number): Promise<{ x: number; y: number; w: number; h: number }> {
-  const result = await call("GetBounds", "u", [id]);
+  const result = await authedCall("GetBounds", "u", [id]);
   return JSON.parse(result[0] as string);
 }
 
 export async function gnomeWmSetBounds(id: number, x: number, y: number, w: number, h: number): Promise<boolean> {
-  const result = await call("SetBounds", "uiiii", [id, x, y, w, h]);
+  const result = await authedCall("SetBounds", "uiiii", [id, x, y, w, h]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmGetClient(id: number): Promise<{ x: number; y: number; w: number; h: number }> {
-  const result = await call("GetClient", "u", [id]);
+  const result = await authedCall("GetClient", "u", [id]);
   return JSON.parse(result[0] as string);
 }
 
 export async function gnomeWmSetMinimized(id: number, minimized: boolean): Promise<boolean> {
-  const result = await call("SetMinimized", "ub", [id, minimized]);
+  const result = await authedCall("SetMinimized", "ub", [id, minimized]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmSetMaximized(id: number, maximized: boolean): Promise<boolean> {
-  const result = await call("SetMaximized", "ub", [id, maximized]);
+  const result = await authedCall("SetMaximized", "ub", [id, maximized]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmSetAbove(id: number, above: boolean): Promise<boolean> {
-  const result = await call("SetAbove", "ub", [id, above]);
+  const result = await authedCall("SetAbove", "ub", [id, above]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmIsMinimized(id: number): Promise<boolean> {
-  const result = await call("IsMinimized", "u", [id]);
+  const result = await authedCall("IsMinimized", "u", [id]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmIsMaximized(id: number): Promise<boolean> {
-  const result = await call("IsMaximized", "u", [id]);
+  const result = await authedCall("IsMaximized", "u", [id]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmIsAbove(id: number): Promise<boolean> {
-  const result = await call("IsAbove", "u", [id]);
+  const result = await authedCall("IsAbove", "u", [id]);
   return result[0] as boolean;
 }
 
 export async function gnomeWmGetPID(id: number): Promise<number> {
-  const result = await call("GetPID", "u", [id]);
+  const result = await authedCall("GetPID", "u", [id]);
   return result[0] as number;
 }
 
