@@ -330,6 +330,8 @@ check("Window.prototype.getClient", typeof robot.Window.prototype.getClient === 
 check("Window.prototype.setClient", typeof robot.Window.prototype.setClient === "function");
 check("Window.prototype.mapToClient", typeof robot.Window.prototype.mapToClient === "function");
 check("Window.prototype.mapToScreen", typeof robot.Window.prototype.mapToScreen === "function");
+check("Window.prototype.eq",    typeof robot.Window.prototype.eq === "function");
+check("Window.prototype.ne",    typeof robot.Window.prototype.ne === "function");
 check("Window.prototype.clone",  typeof robot.Window.prototype.clone === "function");
 check("Window.getList",          typeof robot.Window.getList === "function");
 check("Window.getActive",        typeof robot.Window.getActive === "function");
@@ -360,6 +362,8 @@ check("Process.prototype.kill",  typeof robot.Process.prototype.kill === "functi
 check("Process.prototype.hasExited", typeof robot.Process.prototype.hasExited === "function");
 check("Process.prototype.getModules", typeof robot.Process.prototype.getModules === "function");
 check("Process.prototype.getWindows", typeof robot.Process.prototype.getWindows === "function");
+check("Process.prototype.eq",   typeof robot.Process.prototype.eq === "function");
+check("Process.prototype.ne",   typeof robot.Process.prototype.ne === "function");
 check("Process.prototype.clone", typeof robot.Process.prototype.clone === "function");
 check("Process.getList",         typeof robot.Process.getList === "function");
 check("Process.getCurrent",      typeof robot.Process.getCurrent === "function");
@@ -427,6 +431,8 @@ check("Stats.systemWrites === 0", stats.systemWrites === 0);
 check("Stats.accessWrites === 0", stats.accessWrites === 0);
 check("Stats.readErrors === 0",   stats.readErrors === 0);
 check("Stats.writeErrors === 0",  stats.writeErrors === 0);
+check("Stats.prototype.eq",      typeof robot.Memory.Stats.prototype.eq === "function");
+check("Stats.prototype.ne",      typeof robot.Memory.Stats.prototype.ne === "function");
 check("Stats.prototype.clone",   typeof robot.Memory.Stats.prototype.clone === "function");
 
 // Memory.Region
@@ -435,6 +441,12 @@ var region = robot.Memory.Region();
 check("Region.valid === false",   region.valid === false);
 check("Region.start === 0",      region.start === 0);
 check("Region.prototype.contains", typeof robot.Memory.Region.prototype.contains === "function");
+check("Region.prototype.lt",    typeof robot.Memory.Region.prototype.lt === "function");
+check("Region.prototype.gt",    typeof robot.Memory.Region.prototype.gt === "function");
+check("Region.prototype.le",    typeof robot.Memory.Region.prototype.le === "function");
+check("Region.prototype.ge",    typeof robot.Memory.Region.prototype.ge === "function");
+check("Region.prototype.eq",    typeof robot.Memory.Region.prototype.eq === "function");
+check("Region.prototype.ne",    typeof robot.Memory.Region.prototype.ne === "function");
 check("Region.prototype.clone",  typeof robot.Memory.Region.prototype.clone === "function");
 check("Region.compare",          typeof robot.Memory.Region.compare === "function");
 
@@ -455,12 +467,24 @@ check("Module.prototype.getSize", typeof robot.Module.prototype.getSize === "fun
 check("Module.prototype.getProcess", typeof robot.Module.prototype.getProcess === "function");
 check("Module.prototype.contains", typeof robot.Module.prototype.contains === "function");
 check("Module.prototype.getSegments", typeof robot.Module.prototype.getSegments === "function");
+check("Module.prototype.lt",    typeof robot.Module.prototype.lt === "function");
+check("Module.prototype.gt",    typeof robot.Module.prototype.gt === "function");
+check("Module.prototype.le",    typeof robot.Module.prototype.le === "function");
+check("Module.prototype.ge",    typeof robot.Module.prototype.ge === "function");
+check("Module.prototype.eq",    typeof robot.Module.prototype.eq === "function");
+check("Module.prototype.ne",    typeof robot.Module.prototype.ne === "function");
 check("Module.prototype.clone",  typeof robot.Module.prototype.clone === "function");
 check("Module.compare",          typeof robot.Module.compare === "function");
 
 // Module.Segment
 check("Segment() without new",   robot.Module.Segment() != null);
 check("Segment.prototype.contains", typeof robot.Module.Segment.prototype.contains === "function");
+check("Segment.prototype.lt",   typeof robot.Module.Segment.prototype.lt === "function");
+check("Segment.prototype.gt",   typeof robot.Module.Segment.prototype.gt === "function");
+check("Segment.prototype.le",   typeof robot.Module.Segment.prototype.le === "function");
+check("Segment.prototype.ge",   typeof robot.Module.Segment.prototype.ge === "function");
+check("Segment.prototype.eq",   typeof robot.Module.Segment.prototype.eq === "function");
+check("Segment.prototype.ne",   typeof robot.Module.Segment.prototype.ne === "function");
 check("Segment.prototype.clone", typeof robot.Module.Segment.prototype.clone === "function");
 check("Segment.compare",         typeof robot.Module.Segment.compare === "function");
 
