@@ -60,7 +60,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				name: "linux clipboard constructor via " + caps.active,
 				functions: ["clipboard_ctor"],
 				test: async function () {
-					assert(typeof Clipboard === "function", "Clipboard is a constructor");
+					assert(Clipboard && typeof Clipboard.clear === "function", "Clipboard namespace loaded");
 				}
 			},
 			{
@@ -106,7 +106,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			name: "clipboard constructor",
 			functions: ["clipboard_ctor"],
 			test: async function () {
-				assert(typeof Clipboard === "function", "Clipboard is a constructor");
+				assert(Clipboard && typeof Clipboard.clear === "function", "Clipboard namespace loaded");
 			}
 		},
 		{

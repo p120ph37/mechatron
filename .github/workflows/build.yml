@@ -56,10 +56,20 @@ jobs:
               const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith(".xml"));
               for (const xf of xmlFiles) {
                 const xml = fs.readFileSync(path.join(junitDir, xf), "utf8");
-                const re = /<testcase name="([^"]+)"[^>]*time="([^"]+)"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
+                // Match testcase as either self-closing or with body. Body
+                // capture must be non-greedy AND blocked from spanning into
+                // the next <testcase ...> opening tag (otherwise a self-
+                // closing testcase's body would extend up to the next
+                // </testcase>, dragging in failure/skipped markers from
+                // unrelated tests).
+                const re = /<testcase\s+([^>]*?)\s*(?:\/>|>((?:(?!<testcase\b)[\s\S])*?)<\/testcase>)/g;
                 let m;
                 while ((m = re.exec(xml)) !== null) {
-                  const name = m[1], time = m[2], body = m[3];
+                  const attrs = m[1], body = m[2] || "";
+                  const nameMatch = attrs.match(/name="([^"]*)"/);
+                  const timeMatch = attrs.match(/time="([^"]*)"/);
+                  const name = nameMatch ? nameMatch[1] : "?";
+                  const time = timeMatch ? timeMatch[1] : "0";
                   const skipped = body.includes("<skipped");
                   const failed = body.includes("<failure");
                   if (failed) { fail++; allPassed = false; }
