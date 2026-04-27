@@ -1,9 +1,19 @@
 /**
  * Clipboard subsystem — pure FFI implementation.
  *
- * Linux X11 has no clipboard manager — text/image survive only as long as
- * the owning client is alive — so the napi backend ships a complete set of
- * stubs returning false/empty.  We mirror that here.
+ * Linux X11/Wayland: TODO. napi/clipboard.rs ships a real ICCCM
+ * SELECTION owner (X11) and zwlr_data_control_v1 client (Wayland) via
+ * the x11 + smithay-client-toolkit Rust crates. The ffi-side equivalent
+ * would need:
+ *   - dlopen libX11.so for XOpenDisplay / XCreateSimpleWindow /
+ *     XSetSelectionOwner / XConvertSelection / XGetWindowProperty plus
+ *     a long-lived event loop to answer SelectionRequest and forward
+ *     UTF8_STRING / image/png as TARGETS dictate; OR
+ *   - dlopen libwayland-client.so + protocol scanner output for
+ *     wlr-data-control-unstable-v1 to talk to wlroots-based compositors.
+ * Until that lands, Linux callers get clipboard via:
+ *   - `nolib[x11]` — pure-TS xproto SELECTION protocol (lib/nolib/clipboard.ts)
+ *   - `nolib[sh]`  — wl-copy / xclip / xsel subprocess wrappers
  *
  * Windows uses CF_UNICODETEXT (UTF-16LE NUL-terminated) and CF_DIB
  * (BITMAPINFOHEADER + pixel rows).  Memory is allocated with GMEM_MOVEABLE

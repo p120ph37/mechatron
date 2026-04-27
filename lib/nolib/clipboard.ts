@@ -4,6 +4,12 @@
  * Variant dispatch:
  *   x11 — X11 selections protocol over the wire (requires $DISPLAY)
  *   sh  — subprocess bridge (xclip/xsel/wl-copy on Linux, pbcopy on macOS)
+ *
+ * Architectural intent: nolib[x11] should reach feature parity with the
+ * napi backend's Linux clipboard (lib calls → xproto wire protocol).
+ * Currently text + sequence are implemented; image clipboard is TODO and
+ * needs a tiny PNG encoder/decoder for ARGB ↔ image/png round-trips
+ * against TARGETS atom advertising. See PLAN.md for the follow-up.
  */
 
 import { getRequestedVariant } from "../backend";
@@ -180,19 +186,21 @@ async function x11Clear(): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════
 //
 // Linux: defer to the canonical wl-clipboard/xclip/xsel subprocess
-// implementation in lib/clipboard/linux.ts (shared with the ffi backend's
-// Linux fallback). macOS keeps a tiny pbcopy/pbpaste wrapper inline.
+// implementation in lib/clipboard/linux.ts. macOS keeps a tiny
+// pbcopy/pbpaste wrapper inline.
 
 import { execFileSync, execSync } from "child_process";
 import {
   linux_clipboard_clear, linux_clipboard_hasText,
   linux_clipboard_getText, linux_clipboard_setText,
+  linux_clipboard_getSequence,
 } from "../clipboard/linux";
 
 const shLinuxGetText = linux_clipboard_getText;
 const shLinuxSetText = linux_clipboard_setText;  // returns boolean
 const shLinuxHasText = linux_clipboard_hasText;
 const shLinuxClear = linux_clipboard_clear;       // returns boolean
+const shLinuxSeq = linux_clipboard_getSequence;
 
 // ── macOS: pbcopy / pbpaste ─────────────────────────────────────────
 
@@ -246,7 +254,7 @@ export function clipboard_getText(): string {
 }
 
 export function clipboard_setText(text: string): boolean | Promise<boolean> {
-  if (useX11) return x11SetText(text).then(() => true).catch(() => false);
+  if (useX11) return x11SetText(text).then(() => { bumpX11Seq(); return true; }).catch(() => false);
   if (IS_LINUX) return shLinuxSetText(text);
   if (IS_MAC) { shMacSetText(text); return true; }
   return false;
@@ -262,7 +270,16 @@ export function clipboard_getImage(): { width: number; height: number; data: Uin
 
 export function clipboard_setImage(_width: number, _height: number, _data: Uint32Array): void {}
 
+// Sequence counter — bumped on every successful setText/setImage. Lets
+// callers detect "did something else change the clipboard since I last
+// looked?" within this process. X11 / Wayland don't expose a global
+// counter; this is process-local, matching napi/clipboard's behavior.
+let _x11Seq = 0;
+function bumpX11Seq(): void { _x11Seq++; }
+
 export function clipboard_getSequence(): number {
+  if (useX11) return _x11Seq;
+  if (IS_LINUX) return shLinuxSeq();
   return 0;
 }
 
