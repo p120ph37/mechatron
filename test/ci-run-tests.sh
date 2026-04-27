@@ -410,7 +410,11 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       /dev/mechatronic/Shell dev.mechatronic.Shell.Window \
       Ping || echo ">>> Ping failed"
 
-    MECHATRON_BACKEND="nolib[gext]" \
+    # Only the window subsystem has a gext variant — pin it explicitly
+    # while leaving every other subsystem on the default ffi backend so
+    # keyboard/mouse/clipboard/etc. tests still load successfully.
+    MECHATRON_BACKEND=ffi \
+    MECHATRON_BACKEND_WINDOW="nolib[gext]" \
       "$BUN" test test/bun.test.ts \
         --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
