@@ -40,6 +40,7 @@ function emptyRegion(): RegionInfo {
 
 const FLAG_DEFAULT     = 0;
 const FLAG_SKIP_ERRORS = 1;
+const FLAG_AUTO_ACCESS = 2;
 
 // ── Internal helpers ─────────────────────────────────────────────────
 
@@ -88,10 +89,19 @@ function procRead(pid: number, addr: number, buf: Uint8Array): number {
   }
 }
 
+function procReadFd(fd: number, addr: number, buf: Uint8Array): number {
+  if (buf.length === 0) return 0;
+  try {
+    return readSync(fd, buf, 0, buf.length, addr);
+  } catch {
+    return 0;
+  }
+}
+
 function procWrite(pid: number, addr: number, buf: Uint8Array): number {
   if (buf.length === 0) return 0;
   let fd: number;
-  try { fd = openSync(`/proc/${pid}/mem`, "w"); }
+  try { fd = openSync(`/proc/${pid}/mem`, "r+"); }
   catch { return 0; }
   try {
     return writeSync(fd, buf, 0, buf.length, addr);
@@ -99,6 +109,15 @@ function procWrite(pid: number, addr: number, buf: Uint8Array): number {
     return 0;
   } finally {
     closeSync(fd);
+  }
+}
+
+function procWriteFd(fd: number, addr: number, buf: Uint8Array): number {
+  if (buf.length === 0) return 0;
+  try {
+    return writeSync(fd, buf, 0, buf.length, addr);
+  } catch {
+    return 0;
   }
 }
 
@@ -181,13 +200,17 @@ export function memory_setAccessFlags(_pid: number, _regionStart: number, _flags
 }
 
 export function memory_getPtrSize(pid: number): number {
+  if (!memory_isValid(pid)) return 0;
   try {
     const fd = openSync(`/proc/${pid}/exe`, "r");
-    const hdr = Buffer.alloc(5);
-    readSync(fd, hdr, 0, 5, 0);
-    closeSync(fd);
-    if (hdr[0] === 0x7F && hdr[1] === 0x45 && hdr[2] === 0x4C && hdr[3] === 0x46) {
-      return hdr[4] === 2 ? 8 : 4;
+    try {
+      const hdr = Buffer.alloc(5);
+      readSync(fd, hdr, 0, 5, 0);
+      if (hdr[0] === 0x7F && hdr[1] === 0x45 && hdr[2] === 0x4C && hdr[3] === 0x46) {
+        return hdr[4] === 2 ? 8 : 4;
+      }
+    } finally {
+      closeSync(fd);
     }
   } catch {}
   return process.arch === "x64" || process.arch === "arm64" ? 8 : 4;
@@ -219,36 +242,43 @@ export function memory_readData(pid: number, address: number, length: number, fl
   }
 
   // FLAG_SKIP_ERRORS / FLAG_AUTO_ACCESS (auto_access degrades to skip on Linux)
-  const buf = new Uint8Array(len);
-  const stop = address + len;
-  const regions = parseMaps(pid);
-  let bytes = 0;
-  let a = address;
-  let idx = 0;
-  while (a < stop && idx < regions.length) {
-    while (idx < regions.length && regions[idx].stop <= a) idx++;
-    if (idx >= regions.length) break;
-    const region = regions[idx];
-    if (region.start > a) {
-      const gapEnd = Math.min(region.start, stop);
-      bytes += gapEnd - a;
-      a = gapEnd;
-      continue;
+  let fd: number;
+  try { fd = openSync(`/proc/${pid}/mem`, "r"); }
+  catch { return null; }
+  try {
+    const buf = new Uint8Array(len);
+    const stop = address + len;
+    const regions = parseMaps(pid);
+    let bytes = 0;
+    let a = address;
+    let idx = 0;
+    while (a < stop && idx < regions.length) {
+      while (idx < regions.length && regions[idx].stop <= a) idx++;
+      if (idx >= regions.length) break;
+      const region = regions[idx];
+      if (region.start > a) {
+        const gapEnd = Math.min(region.start, stop);
+        bytes += gapEnd - a;
+        a = gapEnd;
+        continue;
+      }
+      const end = Math.min(region.stop, stop);
+      const regionLen = end - a;
+      const offset = a - address;
+      if (region.readable) {
+        const slice = new Uint8Array(regionLen);
+        const n = procReadFd(fd, a, slice);
+        if (n > 0) buf.set(slice.subarray(0, n), offset);
+      }
+      bytes += regionLen;
+      a = end;
+      idx++;
     }
-    const end = Math.min(region.stop, stop);
-    const regionLen = end - a;
-    const offset = a - address;
-    if (region.readable) {
-      const slice = new Uint8Array(regionLen);
-      const n = procRead(pid, a, slice);
-      if (n > 0) buf.set(slice.subarray(0, n), offset);
-    }
-    bytes += regionLen;
-    a = end;
-    idx++;
+    bytes += Math.max(0, stop - a);
+    return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
+  } finally {
+    closeSync(fd);
   }
-  bytes += Math.max(0, stop - a);
-  return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
 }
 
 export function memory_writeData(pid: number, address: number, data: Buffer | Uint8Array, flags?: number): number {
@@ -259,30 +289,37 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
 
   if (f === FLAG_DEFAULT) return procWrite(pid, address, buf);
 
-  const stop = address + len;
-  const regions = parseMaps(pid);
-  let bytes = 0;
-  let a = address;
-  for (const region of regions) {
-    if (a >= stop) break;
-    if (region.stop <= a) continue;
-    if (region.start > a) {
-      const gapEnd = Math.min(region.start, stop);
-      bytes += gapEnd - a;
-      a = gapEnd;
+  let fd: number;
+  try { fd = openSync(`/proc/${pid}/mem`, "r+"); }
+  catch { return 0; }
+  try {
+    const stop = address + len;
+    const regions = parseMaps(pid);
+    let bytes = 0;
+    let a = address;
+    for (const region of regions) {
+      if (a >= stop) break;
+      if (region.stop <= a) continue;
+      if (region.start > a) {
+        const gapEnd = Math.min(region.start, stop);
+        bytes += gapEnd - a;
+        a = gapEnd;
+      }
+      if (a >= stop) break;
+      const end = Math.min(region.stop, stop);
+      const regionLen = end - a;
+      const offset = a - address;
+      if (region.writable) {
+        procWriteFd(fd, a, buf.subarray(offset, offset + regionLen));
+      }
+      bytes += regionLen;
+      a = end;
     }
-    if (a >= stop) break;
-    const end = Math.min(region.stop, stop);
-    const regionLen = end - a;
-    const offset = a - address;
-    if (region.writable) {
-      procWrite(pid, a, buf.subarray(offset, offset + regionLen));
-    }
-    bytes += regionLen;
-    a = end;
+    bytes += Math.max(0, stop - a);
+    return bytes;
+  } finally {
+    closeSync(fd);
   }
-  bytes += Math.max(0, stop - a);
-  return bytes;
 }
 
 export function memory_find(
@@ -300,22 +337,29 @@ export function memory_find(
   const regions = parseMaps(pid);
   const CHUNK_CAP = 256 * 1024 * 1024;
 
-  for (const region of regions) {
-    if (out.length >= max) break;
-    if (!region.readable) continue;
-    if (region.stop <= startAddr || region.start >= stopAddr) continue;
-    const readStart = Math.max(region.start, startAddr);
-    const readEnd = Math.min(region.stop, stopAddr);
-    const readSize = readEnd - readStart;
-    if (readSize <= 0 || readSize > CHUNK_CAP) continue;
-    const buf = new Uint8Array(readSize);
-    const got = procRead(pid, readStart, buf);
-    if (got <= 0) continue;
-    const hits = findInBuffer(buf, got, pat);
-    for (const off of hits) {
+  let fd: number;
+  try { fd = openSync(`/proc/${pid}/mem`, "r"); }
+  catch { return out; }
+  try {
+    for (const region of regions) {
       if (out.length >= max) break;
-      out.push(readStart + off);
+      if (!region.readable) continue;
+      if (region.stop <= startAddr || region.start >= stopAddr) continue;
+      const readStart = Math.max(region.start, startAddr);
+      const readEnd = Math.min(region.stop, stopAddr);
+      const readSize = readEnd - readStart;
+      if (readSize <= 0 || readSize > CHUNK_CAP) continue;
+      const buf = new Uint8Array(readSize);
+      const got = procReadFd(fd, readStart, buf);
+      if (got <= 0) continue;
+      const hits = findInBuffer(buf, got, pat);
+      for (const off of hits) {
+        if (out.length >= max) break;
+        out.push(readStart + off);
+      }
     }
+  } finally {
+    closeSync(fd);
   }
   return out;
 }

@@ -579,8 +579,10 @@ caching semantics; same `restore_token` idea.
 | uinput fallback (6c) | Complete | Pure-TS encoding + bun:ffi ioctl layer + Keyboard/Mouse dispatch routing + CI coverage via `MECHATRON_INPUT_MECHANISM=uinput` on Linux runners |
 | Pure X protocol (6d) | **Complete** | lib/x11proto: wire + request + conn; mechanism probe wired; live smoke test against Xvfb in CI |
 | Framebuffer / DRM capture (6e) | **Skeleton** | /dev/fb0 probe + mmap path; DRM TBD |
-| Portal+PipeWire screen capture (6f) | **Planned** | D-Bus portal detection landed; capture thread TBD |
-| Portal+libei input (6g) | **Planned** | Detection landed; sendinput TBD |
+| Portal+PipeWire screen capture (6f) | **Complete** | napi: ScreenCast portal + PipeWire single-frame capture (pw.rs, pw_capture.rs, screencast_portal.rs, screencast.rs); token persistence via screen_getPortalToken/screen_setPortalToken |
+| Portal+libei input (6g) | **Complete** | napi: RemoteDesktop portal + libei dlopen (ei.rs, ei_input.rs, dbus_portal.rs); keyboard + mouse press/release/scroll |
+| napi clipboard X11+portal (6g′) | **Complete** | Rust X11 selection protocol + wl-clipboard subprocess fallback in napi/src/clipboard.rs |
+| nolib memory (6g″) | **Complete** | Pure-TS /proc/pid/mem + /proc/pid/maps; pattern search with wildcards; AT_PAGESZ from auxv |
 | CI expansion (6h) | **Planned** | Job definitions TBD |
 
 ---
