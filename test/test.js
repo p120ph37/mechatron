@@ -93,7 +93,8 @@ var allModules = [
 	{ prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor, waitForAsync) },
 	{ prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor, waitForAsync) },
 	{ prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor, waitForAsync) },
-	{ prefix: "portal",    entries: require("./portal")(mechatron, log, assert, waitFor, waitForAsync) },
+	// portal tests are intentionally bun-only — they require .ts files
+	// from lib/portal/ to land coverage on the source rather than dist/.
 ];
 
 // Flatten into a single list of [displayName, testFn] pairs.

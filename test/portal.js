@@ -20,6 +20,10 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	function testTokens() {
 		log("  portal tokens... ");
+		// Bun resolves .ts imports natively; Node ia32 can't.  Skip on
+		// node so the legacy Windows ia32 runner doesn't blow up.
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
 
 		// Use a per-process temp file.  Set MECHATRON_TOKENS_FILE *before*
 		// requiring the installer so its module-level constant picks it up.
