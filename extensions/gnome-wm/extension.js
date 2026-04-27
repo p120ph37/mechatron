@@ -5,7 +5,9 @@
  * mechatron full window control on Wayland/GNOME without X11.
  *
  * All methods except Ping require a bearer token. Valid tokens are
- * read from /etc/mechatron-wm/tokens (one per line, # comments).
+ * read from /etc/mechatron-wm/tokens (one per line, # comments). The
+ * path can be overridden by setting MECHATRON_TOKENS_FILE in the env
+ * that launches gnome-shell (used by CI to point at a tmpfile).
  *
  * Targets GNOME 45+ (ES module format).
  */
@@ -18,7 +20,7 @@ import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 
 const BUS_NAME = "dev.mechatronic.WindowManager";
 const OBJECT_PATH = "/dev/mechatronic/WindowManager";
-const TOKEN_FILE = "/etc/mechatron-wm/tokens";
+const TOKEN_FILE = GLib.getenv("MECHATRON_TOKENS_FILE") || "/etc/mechatron-wm/tokens";
 
 const IFACE_XML = `
 <node>

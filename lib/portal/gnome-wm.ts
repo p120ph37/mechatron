@@ -31,7 +31,10 @@ export interface GnomeWindowInfo {
 let _conn: DBusConnection | null = null;
 let _connPromise: Promise<DBusConnection> | null = null;
 let _available: boolean | undefined;
-let _token: string = "";
+// Default to MECHATRON_GNOME_TOKEN env if set — convenient for CI / tests
+// where the bearer token is provisioned outside the app and threaded in
+// via the environment. Explicit gnomeWmSetToken() always wins.
+let _token: string = process.env.MECHATRON_GNOME_TOKEN || "";
 
 export function gnomeWmSetToken(token: string): void {
   _token = token;
