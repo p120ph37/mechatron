@@ -1,5 +1,5 @@
 /**
- * Linux clipboard bridge.
+ * nolib[sh] clipboard backend — Linux subprocess bridge.
  *
  * The classic X11 clipboard lives entirely in the owning client's memory —
  * whoever called `XSetSelectionOwner` answers `SelectionRequest` events at
@@ -21,15 +21,17 @@
  *
  * Auto-selection prefers wl-clipboard under Wayland sessions and xclip /
  * xsel under X11; override with `MECHATRON_CLIPBOARD_MECHANISM=...`.  When
- * no supported tool is installed, all operations no-op and return false —
- * matching the long-standing napi-side stub behaviour so dependent code
- * keeps working (just with no clipboard).
+ * no supported tool is installed, all operations no-op and return false.
  *
  * Image support is straightforward PNG piping: `wl-copy --type image/png`
  * and `xclip -selection clipboard -t image/png -i` both accept a PNG byte
  * stream on stdin.  We encode / decode using mechatron's ARGB `Image`
  * buffers through a tiny minimal-PNG writer and a simple PNG reader
  * (IDAT inflate via zlib) rather than pulling in a full PNG codec crate.
+ *
+ * Loaded only by lib/nolib/clipboard.ts under the [sh] variant; no other
+ * backend should consume this file (napi/ffi must use direct lib calls,
+ * nolib[x11]/[portal] must use direct protocols).
  */
 
 import { spawnSync } from "child_process";

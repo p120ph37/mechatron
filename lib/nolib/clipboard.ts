@@ -185,16 +185,15 @@ async function x11Clear(): Promise<void> {
 // sh variant — subprocess bridge
 // ═══════════════════════════════════════════════════════════════════════
 //
-// Linux: defer to the canonical wl-clipboard/xclip/xsel subprocess
-// implementation in lib/clipboard/linux.ts. macOS keeps a tiny
-// pbcopy/pbpaste wrapper inline.
+// Linux: defer to ./clipboard-sh.ts which wraps wl-copy / xclip / xsel.
+// macOS keeps a tiny pbcopy/pbpaste wrapper inline below.
 
 import { execFileSync, execSync } from "child_process";
 import {
   linux_clipboard_clear, linux_clipboard_hasText,
   linux_clipboard_getText, linux_clipboard_setText,
   linux_clipboard_getSequence,
-} from "../clipboard/linux";
+} from "./clipboard-sh";
 
 const shLinuxGetText = linux_clipboard_getText;
 const shLinuxSetText = linux_clipboard_setText;  // returns boolean
