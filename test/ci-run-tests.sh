@@ -373,10 +373,15 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     mkdir -p "$EXT_DIR"
     cp -r extensions/gnome-wm/* "$EXT_DIR/"
 
-    # Pre-enable the extension so gnome-shell loads it on startup.
-    gnome-extensions enable "$EXT_UUID" 2>/dev/null || \
-      mkdir -p "$HOME/.config/dconf" && \
-      gsettings set org.gnome.shell enabled-extensions "[\"$EXT_UUID\"]" 2>/dev/null || true
+    # Pre-enable via gsettings (gnome-shell reads this list on startup;
+    # gnome-extensions CLI would need a running shell).
+    mkdir -p "$HOME/.config/dconf"
+    gsettings set org.gnome.shell enabled-extensions "['$EXT_UUID']" 2>/dev/null \
+      || dconf write /org/gnome/shell/enabled-extensions "['$EXT_UUID']" 2>/dev/null \
+      || echo ">>> warning: could not pre-enable extension via gsettings/dconf"
+    # Also disable user-extensions safety lock that some Shell versions
+    # ship with (extensions silently fail to load otherwise).
+    gsettings set org.gnome.shell disable-user-extensions false 2>/dev/null || true
 
     # Start gnome-shell on the Xvfb display.
     gnome-shell --x11 &
