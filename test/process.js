@@ -28,14 +28,14 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(await p.getName() === "", "empty name empty");
 				assert(await p.getPath() === "", "empty path empty");
 
-				p = new Process(8888);
+				p = new Process(2147483646);
 				assert(!await p.isValid(), "bogus pid invalid");
-				assert(p.getPID() === 8888, "bogus pid stored");
+				assert(p.getPID() === 2147483646, "bogus pid stored");
 
 				// Equality on invalid
 				var p2 = new Process();
 				assert(p2.eq(0), "empty eq 0");
-				assert(p2.ne(8888), "empty ne 8888");
+				assert(p2.ne(2147483646), "empty ne 2147483646");
 			}
 		},
 

@@ -358,7 +358,18 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID
   dbus-run-session -- bash -c '
     set -x
-    export DISPLAY=:99
+
+    # The outer ci-run-tests.sh setup puts openbox on DISPLAY=:99 so EWMH
+    # window tests have a window manager. gnome-shell needs to BE the
+    # window manager, so it cannot share that display. Start a fresh
+    # Xvfb on :199 dedicated to gnome-shell.
+    Xvfb :199 -screen 0 1920x1080x24 -nolisten tcp &
+    GEXT_XVFB_PID=$!
+    for _ in $(seq 1 50); do
+      xdpyinfo -display :199 >/dev/null 2>&1 && break
+      sleep 0.1
+    done
+    export DISPLAY=:199
     export MECHATRON_TOKENS_FILE="$TOKENS_FILE"
 
     # Provision a token for the extension to validate against.
@@ -374,16 +385,19 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     cp -r extensions/mechatron/* "$EXT_DIR/"
 
     # Pre-enable via gsettings (gnome-shell reads this list on startup;
-    # gnome-extensions CLI would need a running shell).
+    # gnome-extensions CLI would need a running shell). GVariant accepts
+    # double-quoted strings inside arrays which sidesteps the bash -c
+    # outer-single-quote escaping headache entirely.
     mkdir -p "$HOME/.config/dconf"
-    gsettings set org.gnome.shell enabled-extensions "['$EXT_UUID']" 2>/dev/null \
-      || dconf write /org/gnome/shell/enabled-extensions "['$EXT_UUID']" 2>/dev/null \
+    EXT_LIST="[\"$EXT_UUID\"]"
+    gsettings set org.gnome.shell enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || dconf write /org/gnome/shell/enabled-extensions "$EXT_LIST" 2>/dev/null \
       || echo ">>> warning: could not pre-enable extension via gsettings/dconf"
     # Also disable user-extensions safety lock that some Shell versions
     # ship with (extensions silently fail to load otherwise).
     gsettings set org.gnome.shell disable-user-extensions false 2>/dev/null || true
 
-    # Start gnome-shell on the Xvfb display.
+    # Start gnome-shell on the dedicated Xvfb display.
     gnome-shell --x11 &
     SHELL_PID=$!
 
@@ -401,7 +415,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     if ! busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
       echo ">>> warning: extension never registered; current bus state:"
       busctl --user list 2>/dev/null | head -50 || true
-      kill "$SHELL_PID" 2>/dev/null || true
+      kill "$SHELL_PID" "$GEXT_XVFB_PID" 2>/dev/null || true
       exit 1
     fi
 
@@ -420,7 +434,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$SHELL_PID" 2>/dev/null || true
+    kill "$SHELL_PID" "$GEXT_XVFB_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-gext" \
