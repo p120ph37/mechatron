@@ -102,29 +102,29 @@ jobs:
             const failStr = fail > 0 ? `, ${fail} failed` : "";
             comment += `<details>\n`;
             comment += `<summary>${status} <b>${platform}</b> — ${pass}/${total} passed${failStr}${skipStr}${covStr}</summary>\n\n`;
-            comment += `| Test | Status | Time |\n|------|--------|------|\n`;
-            comment += rows.join("\n") + "\n";
+            // Only list failed/skipped tests to keep the comment within
+            // GitHub's 65536-char limit.  Passing tests are just counted.
+            const notable = rows.filter(r => !r.includes(":white_check_mark:"));
+            if (notable.length > 0) {
+              comment += `| Test | Status | Time |\n|------|--------|------|\n`;
+              comment += notable.join("\n") + "\n";
+            } else {
+              comment += `All ${pass} tests passed.\n`;
+            }
 
             // Per-file coverage table; also feed into the combined aggregate.
             if (covPct) {
               try {
                 const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
-                const files = {};
                 let cur = null, curNorm = null;
                 for (const line of lcov.split("\n")) {
                   if (line.startsWith("SF:")) {
                     curNorm = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
                     cur = curNorm;
-                    files[cur] = { hit: 0, total: 0 };
                     if (!combined[curNorm]) combined[curNorm] = { lines: {}, parsers: new Set() };
-                    // Remember which platform parsed this file — used below to
-                    // filter out "phantom uncovered" lines (see comment in
-                    // combined aggregation block).
                     combined[curNorm].parsers.add(platform);
                   } else if (line.startsWith("DA:") && cur) {
                     const [ln, hits] = line.slice(3).split(",").map(Number);
-                    files[cur].total++;
-                    if (hits > 0) files[cur].hit++;
                     const rec = combined[curNorm].lines[ln]
                       || (combined[curNorm].lines[ln] = { hits: 0, emitters: new Set() });
                     rec.hits += (hits || 0);
@@ -133,14 +133,6 @@ jobs:
                     cur = null; curNorm = null;
                   }
                 }
-                comment += `\n| File | Lines | Coverage |\n|------|------:|----------|\n`;
-                let tH = 0, tL = 0;
-                for (const [f, s] of Object.entries(files).sort()) {
-                  if (s.total === 0) continue;
-                  comment += `| ${f} | ${s.hit}/${s.total} | ${(100*s.hit/s.total).toFixed(1)}% |\n`;
-                  tH += s.hit; tL += s.total;
-                }
-                comment += `| **Total** | **${tH}/${tL}** | **${tL > 0 ? (100*tH/tL).toFixed(1) : "0"}%** |\n`;
               } catch (_) {}
             }
 

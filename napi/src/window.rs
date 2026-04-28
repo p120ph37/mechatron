@@ -312,8 +312,11 @@ unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: 
     }
 }
 
-// Public helper for process.rs (Linux only)
+// Public helper for process.rs (Linux only).  Allow dead_code because
+// this is only called when window.rs is compiled as part of mechatron-process;
+// in mechatron-window it's unreferenced.
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub unsafe fn enum_windows_with_pid(root: Window, pattern: Option<&regex::Regex>, pid: i32, results: &mut Vec<u64>) {
     load_atoms();
     enum_windows(root, pattern, pid, results);
