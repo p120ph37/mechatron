@@ -22,7 +22,7 @@ import { libc, libcFFI, PROT_READ, MAP_SHARED, MAP_FAILED, O_RDONLY, O_RDWR } fr
 import { getMechanism } from "../platform";
 import {
   type FbGeometry, rowToArgb,
-  FRAMEBUFFER_DEV, DRM_DEV, parseFbGeometryEnv,
+  FRAMEBUFFER_DEV, DRM_DEV,
   FBIOGET_VSCREENINFO, FBIOGET_FSCREENINFO,
   parseFbVarScreenInfo, parseFbFixLineLength, parseFbFixSmemLen,
   DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_GETCRTC,
@@ -67,27 +67,18 @@ export function captureFbdev(x: number, y: number, w: number, h: number): Uint32
     try { fd = openSync(FRAMEBUFFER_DEV, O_RDONLY); }
     catch { return null; }
 
-    let geom: FbGeometry;
-    let smemLen: number;
+    const vinfo = new Uint8Array(160);
+    const vptr = ioctlArgPtr(vinfo);
+    if (vptr == null || c.ioctl(fd, BigInt(FBIOGET_VSCREENINFO), vptr) < 0) return null;
+    const geom: FbGeometry = parseFbVarScreenInfo(vinfo);
+    if (geom.width <= 0 || geom.height <= 0) return null;
 
-    const envGeom = parseFbGeometryEnv();
-    if (envGeom) {
-      geom = envGeom;
-      smemLen = geom.lineLength * geom.height;
-    } else {
-      const vinfo = new Uint8Array(160);
-      const vptr = ioctlArgPtr(vinfo);
-      if (vptr == null || c.ioctl(fd, BigInt(FBIOGET_VSCREENINFO), vptr) < 0) return null;
-      geom = parseFbVarScreenInfo(vinfo);
-      if (geom.width <= 0 || geom.height <= 0) return null;
-
-      const finfo = new Uint8Array(68);
-      const fptr = ioctlArgPtr(finfo);
-      if (fptr == null || c.ioctl(fd, BigInt(FBIOGET_FSCREENINFO), fptr) < 0) return null;
-      geom.lineLength = parseFbFixLineLength(finfo);
-      smemLen = parseFbFixSmemLen(finfo);
-      if (geom.lineLength <= 0 || smemLen <= 0) return null;
-    }
+    const finfo = new Uint8Array(68);
+    const fptr = ioctlArgPtr(finfo);
+    if (fptr == null || c.ioctl(fd, BigInt(FBIOGET_FSCREENINFO), fptr) < 0) return null;
+    geom.lineLength = parseFbFixLineLength(finfo);
+    const smemLen = parseFbFixSmemLen(finfo);
+    if (geom.lineLength <= 0 || smemLen <= 0) return null;
 
     const clip = clipRect(x, y, w, h, geom.width, geom.height);
     if (!clip) return null;

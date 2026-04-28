@@ -243,15 +243,16 @@ jobs:
             lsmod | grep -i uinput || true
           fi
 
-      - name: Build dlopen-block LD_PRELOAD shim
+      - name: Build LD_PRELOAD shims
         if: runner.os == 'Linux'
-        # Compile the selective dlopen-interception shim used to force the
-        # FFI backend's "library unavailable" catch arms (lib/ffi/x11.ts
-        # :220, :234, :245) to fire without uninstalling libXtst /
-        # libXrandr from the runner.  See test/dlopen-block.c.
+        # dlopen-block: force FFI loader "library unavailable" catch arms
+        # to fire without uninstalling libXtst / libXrandr.
+        # fb-stub: fake /dev/fb0 ioctl responses so the framebuffer
+        # capture path can be tested against a synthetic pixel file.
         run: |
           clang -shared -fPIC -ldl -o test/dlopen-block.so test/dlopen-block.c
-          ls -la test/dlopen-block.so
+          clang -shared -fPIC -ldl -o test/fb-stub.so test/fb-stub.c
+          ls -la test/dlopen-block.so test/fb-stub.so
 
       - name: Run tests
         run: bash test/ci-run-tests.sh

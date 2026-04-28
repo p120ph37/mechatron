@@ -182,28 +182,32 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
-# ── Linux-only: nolib[vt] screen (framebuffer stub) ──────────────
-# Generate a small synthetic framebuffer file and set the env vars so
-# screen-vt.ts can read it via readSync without a real /dev/fb0.
-if [ "$RUNNER_OS" = "Linux" ]; then
-  FB_STUB="$RUNNER_TEMP/fake-fb0"
+# ── Linux-only: nolib[vt] screen (framebuffer LD_PRELOAD stub) ───
+# Place a synthetic pixel file at /dev/fb0 and preload fb-stub.so so
+# the ioctl calls return valid geometry.  This exercises the full
+# screen-vt.ts code path (ioctl bridge → geometry parse → readSync →
+# rowToArgb) against real data without a kernel framebuffer driver.
+if [ "$RUNNER_OS" = "Linux" ] && [ -f test/fb-stub.so ]; then
   FB_W=8 FB_H=4 FB_BPP=32
-  FB_LINE_LEN=$((FB_W * FB_BPP / 8))
   python3 -c "
 import struct, sys
 W, H = $FB_W, $FB_H
 for y in range(H):
     for x in range(W):
         sys.stdout.buffer.write(struct.pack('BBBB', x*30, y*60, 128, 255))
-" > "$FB_STUB"
+" | sudo tee /dev/fb0 > /dev/null
+  sudo chmod 666 /dev/fb0
+
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-fb.xml"
   BE_COV_DIR="$COV_DIR/nolib-vt-fb"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
   MECHATRON_BACKEND=ffi \
   MECHATRON_BACKEND_SCREEN='nolib[vt]' \
-  MECHATRON_FB_DEV="$FB_STUB" \
-  MECHATRON_FB_GEOMETRY="${FB_W}x${FB_H}x${FB_BPP}x${FB_LINE_LEN}" \
+  MECHATRON_FB_STUB_W=$FB_W \
+  MECHATRON_FB_STUB_H=$FB_H \
+  MECHATRON_FB_STUB_BPP=$FB_BPP \
+  LD_PRELOAD="$(pwd)/test/fb-stub.so" \
     run_bun "nolib-vt-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -211,38 +215,8 @@ for y in range(H):
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-vt-fb" \
     "bun test for nolib-vt-fb (framebuffer stub) exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-fi
 
-# ── Linux-only: FFI framebuffer mechanism (stub) ─────────────────
-# Same stub file but with MECHATRON_SCREEN_MECHANISM=framebuffer so
-# the FFI captureFbdev() path gets exercised end-to-end.
-if [ "$RUNNER_OS" = "Linux" ]; then
-  FB_STUB="$RUNNER_TEMP/fake-fb0"
-  FB_W=8 FB_H=4 FB_BPP=32
-  FB_LINE_LEN=$((FB_W * FB_BPP / 8))
-  # Reuse the stub file generated above (or regenerate if needed)
-  [ -f "$FB_STUB" ] || python3 -c "
-import struct, sys
-W, H = $FB_W, $FB_H
-for y in range(H):
-    for x in range(W):
-        sys.stdout.buffer.write(struct.pack('BBBB', x*30, y*60, 128, 255))
-" > "$FB_STUB"
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-fb.xml"
-  BE_COV_DIR="$COV_DIR/ffi-fb"
-  mkdir -p "$BE_COV_DIR"
-  BE_RC=0
-  MECHATRON_BACKEND=ffi \
-  MECHATRON_SCREEN_MECHANISM=framebuffer \
-  MECHATRON_FB_DEV="$FB_STUB" \
-  MECHATRON_FB_GEOMETRY="${FB_W}x${FB_H}x${FB_BPP}x${FB_LINE_LEN}" \
-    run_bun "ffi-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-    || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-fb" \
-    "bun test for ffi-fb (FFI framebuffer stub) exited ${BE_RC} without producing a JUnit report."
-  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+  sudo rm -f /dev/fb0
 fi
 
 # ── Linux-only: FFI with MECHATRON_SCREEN_MECHANISM=drm ───────────

@@ -53,27 +53,8 @@ export interface FbGeometry {
   aOffset: number; aLength: number;
 }
 
-export const FRAMEBUFFER_DEV = process.env.MECHATRON_FB_DEV || "/dev/fb0";
-export const DRM_DEV = process.env.MECHATRON_DRM_DEV || "/dev/dri/card0";
-
-/**
- * Parse framebuffer geometry from MECHATRON_FB_GEOMETRY env var.
- * Format: WIDTHxHEIGHTxBPPxLINELENGTH (e.g. "640x480x32x2560").
- * Assumes standard BGRA little-endian layout for 32bpp.
- */
-export function parseFbGeometryEnv(): FbGeometry | null {
-  const env = process.env.MECHATRON_FB_GEOMETRY;
-  if (!env) return null;
-  const parts = env.split("x").map(Number);
-  if (parts.length < 4 || parts.some(isNaN)) return null;
-  const [width, height, bpp, lineLength] = parts;
-  if (width <= 0 || height <= 0 || bpp <= 0 || lineLength <= 0) return null;
-  return {
-    width, height, bitsPerPixel: bpp, lineLength,
-    rOffset: 16, rLength: 8, gOffset: 8, gLength: 8,
-    bOffset: 0, bLength: 8, aOffset: 24, aLength: 8,
-  };
-}
+export const FRAMEBUFFER_DEV = "/dev/fb0";
+export const DRM_DEV = "/dev/dri/card0";
 
 export function framebufferAvailable(): boolean {
   if (!existsSync(FRAMEBUFFER_DEV)) return false;

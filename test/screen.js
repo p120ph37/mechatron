@@ -299,49 +299,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			}
 		},
 
-		// --- parseFbGeometryEnv (env-based geometry for stub testing) ---
-		{
-			name: "Framebuffer parseFbGeometryEnv",
-			functions: ["screen_ctor"],
-			test: async function () {
-				var IS_BUN = typeof globalThis.Bun !== "undefined";
-				var fb = IS_BUN
-					? require("../lib/screen/framebuffer")
-					: require("../dist/screen/framebuffer");
-
-				var origEnv = process.env.MECHATRON_FB_GEOMETRY;
-				try {
-					// Valid geometry
-					process.env.MECHATRON_FB_GEOMETRY = "640x480x32x2560";
-					var geom = fb.parseFbGeometryEnv();
-					assert(geom !== null, "parseFbGeometryEnv valid");
-					assert(geom.width === 640, "env geom width");
-					assert(geom.height === 480, "env geom height");
-					assert(geom.bitsPerPixel === 32, "env geom bpp");
-					assert(geom.lineLength === 2560, "env geom lineLength");
-					assert(geom.rOffset === 16 && geom.rLength === 8, "env geom R");
-					assert(geom.bOffset === 0 && geom.bLength === 8, "env geom B");
-
-					// Missing env
-					delete process.env.MECHATRON_FB_GEOMETRY;
-					assert(fb.parseFbGeometryEnv() === null, "parseFbGeometryEnv null when unset");
-
-					// Invalid formats
-					process.env.MECHATRON_FB_GEOMETRY = "bad";
-					assert(fb.parseFbGeometryEnv() === null, "parseFbGeometryEnv bad string");
-
-					process.env.MECHATRON_FB_GEOMETRY = "0x0x32x0";
-					assert(fb.parseFbGeometryEnv() === null, "parseFbGeometryEnv zero dims");
-
-					process.env.MECHATRON_FB_GEOMETRY = "640x480x32";
-					assert(fb.parseFbGeometryEnv() === null, "parseFbGeometryEnv too few parts");
-				} finally {
-					if (origEnv !== undefined) process.env.MECHATRON_FB_GEOMETRY = origEnv;
-					else delete process.env.MECHATRON_FB_GEOMETRY;
-				}
-			}
-		},
-
 		// --- FFI framebuffer layer (gated on ffi backend) ---
 		{
 			name: "FFI framebuffer layer",
