@@ -1145,19 +1145,3 @@ pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32
     bytes as f64
 }
 
-// ── Cache operations (stubs on all platforms) ───────────────────────────
-
-#[napi(js_name = "memory_createCache")]
-pub fn memory_create_cache(_pid: i32, _address: f64, _size: f64, _block_size: f64, _max_blocks: Option<f64>, _flags: Option<f64>) -> bool { false }
-
-#[napi(js_name = "memory_clearCache")]
-pub fn memory_clear_cache(_pid: i32) {}
-
-#[napi(js_name = "memory_deleteCache")]
-pub fn memory_delete_cache(_pid: i32) {}
-
-#[napi(js_name = "memory_isCaching")]
-pub fn memory_is_caching(_pid: i32) -> bool { false }
-
-#[napi(js_name = "memory_getCacheSize")]
-pub fn memory_get_cache_size(_pid: i32) -> f64 { 0.0 }
