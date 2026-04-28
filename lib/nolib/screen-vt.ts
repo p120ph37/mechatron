@@ -11,8 +11,8 @@ import { openSync, readSync, closeSync } from "fs";
 import { ioctlSync, ioctlBridgeAvailable } from "./ioctl";
 import {
   FRAMEBUFFER_DEV, FBIOGET_VSCREENINFO, FBIOGET_FSCREENINFO,
-  framebufferAvailable, parseFbVarScreenInfo, parseFbFixLineLength,
-  rowToArgb, type FbGeometry,
+  framebufferAvailable, parseFbGeometryEnv, parseFbVarScreenInfo,
+  parseFbFixLineLength, rowToArgb, type FbGeometry,
 } from "../screen/framebuffer";
 
 if (!framebufferAvailable()) {
@@ -26,6 +26,10 @@ let _fbGeom: FbGeometry | null | undefined;
 
 function getFbGeometry(): FbGeometry | null {
   if (_fbGeom !== undefined) return _fbGeom;
+
+  const envGeom = parseFbGeometryEnv();
+  if (envGeom) { _fbGeom = envGeom; return envGeom; }
+
   if (!ioctlBridgeAvailable() || !framebufferAvailable()) {
     _fbGeom = null;
     return null;

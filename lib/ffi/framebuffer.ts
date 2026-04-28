@@ -22,6 +22,7 @@ import { libc, libcFFI, PROT_READ, MAP_SHARED, MAP_FAILED, O_RDONLY, O_RDWR } fr
 import { getMechanism } from "../platform";
 import {
   type FbGeometry, rowToArgb,
+  FRAMEBUFFER_DEV, DRM_DEV, parseFbGeometryEnv,
   FBIOGET_VSCREENINFO, FBIOGET_FSCREENINFO,
   parseFbVarScreenInfo, parseFbFixLineLength, parseFbFixSmemLen,
   DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_GETCRTC,
@@ -63,24 +64,30 @@ export function captureFbdev(x: number, y: number, w: number, h: number): Uint32
   let mapped = 0n;
   let mappedLen = 0n;
   try {
-    try { fd = openSync("/dev/fb0", O_RDONLY); }
+    try { fd = openSync(FRAMEBUFFER_DEV, O_RDONLY); }
     catch { return null; }
 
-    // FBIOGET_VSCREENINFO (160 bytes is more than we need; 80 bytes covers
-    // width/height/bpp/bitfield offsets which is all rowToArgb consumes).
-    const vinfo = new Uint8Array(160);
-    const vptr = ioctlArgPtr(vinfo);
-    if (vptr == null || c.ioctl(fd, BigInt(FBIOGET_VSCREENINFO), vptr) < 0) return null;
-    const geom: FbGeometry = parseFbVarScreenInfo(vinfo);
-    if (geom.width <= 0 || geom.height <= 0) return null;
+    let geom: FbGeometry;
+    let smemLen: number;
 
-    // FBIOGET_FSCREENINFO — line_length + smem_len
-    const finfo = new Uint8Array(68);
-    const fptr = ioctlArgPtr(finfo);
-    if (fptr == null || c.ioctl(fd, BigInt(FBIOGET_FSCREENINFO), fptr) < 0) return null;
-    geom.lineLength = parseFbFixLineLength(finfo);
-    const smemLen = parseFbFixSmemLen(finfo);
-    if (geom.lineLength <= 0 || smemLen <= 0) return null;
+    const envGeom = parseFbGeometryEnv();
+    if (envGeom) {
+      geom = envGeom;
+      smemLen = geom.lineLength * geom.height;
+    } else {
+      const vinfo = new Uint8Array(160);
+      const vptr = ioctlArgPtr(vinfo);
+      if (vptr == null || c.ioctl(fd, BigInt(FBIOGET_VSCREENINFO), vptr) < 0) return null;
+      geom = parseFbVarScreenInfo(vinfo);
+      if (geom.width <= 0 || geom.height <= 0) return null;
+
+      const finfo = new Uint8Array(68);
+      const fptr = ioctlArgPtr(finfo);
+      if (fptr == null || c.ioctl(fd, BigInt(FBIOGET_FSCREENINFO), fptr) < 0) return null;
+      geom.lineLength = parseFbFixLineLength(finfo);
+      smemLen = parseFbFixSmemLen(finfo);
+      if (geom.lineLength <= 0 || smemLen <= 0) return null;
+    }
 
     const clip = clipRect(x, y, w, h, geom.width, geom.height);
     if (!clip) return null;
@@ -123,7 +130,7 @@ export function captureDrm(x: number, y: number, w: number, h: number): Uint32Ar
   let mapped = 0n;
   let mappedLen = 0n;
   try {
-    try { fd = openSync("/dev/dri/card0", O_RDWR); }
+    try { fd = openSync(DRM_DEV, O_RDWR); }
     catch { return null; }
 
     // Step 1: count CRTCs.
