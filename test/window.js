@@ -282,6 +282,15 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 		},
 		// ── Valid window tests (require getList to find a window) ──
 		{
+			name: "valid window getHandle",
+			functions: ["window_getList", "window_getHandle"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				assert(typeof list[0].getHandle() === "number", "valid getHandle returns number");
+			}
+		},
+		{
 			name: "valid window getters",
 			functions: ["window_getList", "window_isValid", "window_getBounds", "window_isTopMost", "window_isMinimized", "window_isMaximized", "window_getPID", "window_getHandle", "window_getProcess", "window_getClient"],
 			test: async function () {
