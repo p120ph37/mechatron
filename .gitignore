@@ -16,4 +16,5 @@ coverage/
 test/memory-child
 test/memory-child.exe
 test/dlopen-block.so
+test/fb-stub.so
 
