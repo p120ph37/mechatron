@@ -211,7 +211,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "press standalone",
-			functions: ["keyboard_press"],
+			functions: ["keyboard_press", "keyboard_release"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.press(KEYS.KEY_SHIFT);
@@ -221,7 +221,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "release standalone",
-			functions: ["keyboard_release"],
+			functions: ["keyboard_press", "keyboard_release"],
 			test: async function () {
 				var k = new Keyboard();
 				await k.press(KEYS.KEY_SHIFT);

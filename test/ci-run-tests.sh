@@ -392,7 +392,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
     "nolib-portal test (mutter --headless + portal) exited ${BE_RC} without producing a JUnit report."
-  echo ">>> nolib-portal exited with rc=$BE_RC (non-blocking)"
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
 # ── Linux-only: full GNOME Shell + Mechatron extension ──────────
@@ -495,7 +495,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-gext" \
     "nolib-gext test (gnome-shell + mechatron extension) exited ${BE_RC} without producing a JUnit report."
-  echo ">>> nolib-gext exited with rc=$BE_RC (non-blocking)"
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
 if [ "$RUNNER_OS" = "macOS" ]; then

@@ -73,7 +73,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			},
 			{
 				name: "linux clear via " + caps.active,
-				functions: ["clipboard_clear"],
+				functions: ["clipboard_clear", "clipboard_setText"],
 				test: async function () {
 					await Clipboard.setText("temp");
 					await Clipboard.clear();
@@ -151,7 +151,10 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "clear + verify empty",
-			functions: ["clipboard_clear", "clipboard_hasText"],
+			functions: [
+				"clipboard_clear", "clipboard_hasText", "clipboard_setText",
+				"clipboard_getText", "clipboard_getSequence",
+			],
 			test: async function () {
 				assert(await Clipboard.setText("temp"), "setText temp for clear test");
 				var s1 = await Clipboard.getSequence();
@@ -173,7 +176,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "setImage + hasImage",
-			functions: ["clipboard_setImage", "clipboard_hasImage"],
+			functions: ["clipboard_setImage", "clipboard_hasImage", "clipboard_hasText"],
 			test: async function () {
 				var src = new Image(4, 4);
 				src.fill(128, 64, 32);
@@ -184,7 +187,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		},
 		{
 			name: "setImage + getImage round-trip",
-			functions: ["clipboard_setImage", "clipboard_getImage"],
+			functions: ["clipboard_setImage", "clipboard_getImage", "clipboard_clear"],
 			test: async function () {
 				var src = new Image(4, 4);
 				src.fill(128, 64, 32);

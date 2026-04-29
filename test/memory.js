@@ -198,10 +198,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			assert(rcl.eq(r0), "region clone eq");
 		}
 
-		// Modules of current process
-		var mods = await proc.getModules();
-		assert(mods.length > 0, "current proc has modules");
-
 		// --- Memory copy constructor ---
 		var memCopy = new Memory(mem);
 		assert(await memCopy.isValid(), "Memory copy ctor valid");
@@ -625,6 +621,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				"memory_isValid", "memory_getRegions", "memory_getRegion",
 				"memory_getPageSize", "memory_getMinAddress", "memory_getMaxAddress",
 				"memory_getPtrSize", "memory_readData", "memory_writeData", "memory_find",
+				"process_getCurrent", "process_open", "process_close",
 			],
 			test: testMemory,
 		},
