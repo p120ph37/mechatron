@@ -38,11 +38,45 @@ synth_junit_failure() {
   printf '</testsuites>\n' >> "$JUNIT_FILE"
 }
 
-# Guard: check a backend exit code and synthesize JUnit on crash.
+# Append a synthetic <testcase><failure/></testcase> to an existing JUnit
+# file. Used when a cell exited non-zero but its JUnit only records passes —
+# e.g. the test process crashed during shutdown after writing the report.
+# Without this the failure stays invisible in the PR summary comment, which
+# only reads JUnit XML.
+append_junit_failure() {
+  local JUNIT_FILE="$1" LABEL="$2" MSG="$3"
+  node -e '
+    const fs = require("fs");
+    const [file, label, msg] = process.argv.slice(1);
+    let xml = fs.readFileSync(file, "utf8");
+    const esc = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const tc = "    <testcase name=\"" + esc(label + " process exit") + "\" classname=\"backend\" time=\"0\">\n" +
+               "      <failure message=\"" + esc(msg) + "\"/>\n" +
+               "    </testcase>\n";
+    // Insert before the LAST </testsuite> in the document.
+    const idx = xml.lastIndexOf("</testsuite>");
+    if (idx < 0) {
+      // No testsuite to inject into — overwrite with a minimal failing report.
+      xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n  <testsuite name=\"" + esc(label) + "\">\n" + tc + "  </testsuite>\n</testsuites>\n";
+    } else {
+      xml = xml.slice(0, idx) + tc + xml.slice(idx);
+    }
+    fs.writeFileSync(file, xml);
+  ' "$JUNIT_FILE" "$LABEL" "$MSG"
+}
+
+# Guard: check a backend exit code and surface failure in JUnit.
+#   - No testcases at all → synthesize a single failing testcase
+#   - Has testcases but no failures → tests passed but the process died
+#     non-zero afterward; append a synthetic failure so the PR comment
+#     reflects what the CI step status already shows.
 guard_junit() {
   local BE_RC="$1" JUNIT_FILE="$2" LABEL="$3" MSG="$4"
-  if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+  if [ "$BE_RC" = 0 ]; then return; fi
+  if ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
     synth_junit_failure "$JUNIT_FILE" "$LABEL" "$MSG"
+  elif ! grep -q "<failure" "$JUNIT_FILE" 2>/dev/null; then
+    append_junit_failure "$JUNIT_FILE" "$LABEL" "$MSG"
   fi
 }
 
@@ -68,6 +102,8 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
       cat "$rpt"
     done
   fi
+  guard_junit "$RC" "$JUNIT_FILE" "ia32" \
+    "node exited rc=$RC after writing JUnit (likely a shutdown crash; see test-output.txt and node-reports)."
   exit "$RC"
 fi
 
