@@ -379,6 +379,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	}
 
 	return [
-		{ name: "uinput", functions: [], test: testUinput },
+		{ name: "uinput", functions: ["keyboard_ctor"], test: testUinput },
 	];
 };

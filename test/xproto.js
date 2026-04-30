@@ -925,6 +925,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	}
 
 	return [
-		{ name: "xproto", functions: [], test: testXproto },
+		{ name: "xproto", functions: ["keyboard_ctor"], test: testXproto },
 	];
 };

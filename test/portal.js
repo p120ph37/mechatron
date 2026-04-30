@@ -378,11 +378,126 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
+	async function testPlatformApi() {
+		log("  platform api... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+
+		var plat = require("../lib/platform");
+		var Platform = plat.Platform;
+
+		// --- listMechanisms / getMechanism / getCapabilities ---
+		var caps = ["input", "screen", "clipboard"];
+		for (var i = 0; i < caps.length; i++) {
+			var list = Platform.listMechanisms(caps[i]);
+			assert(Array.isArray(list), "listMechanisms(" + caps[i] + ") array");
+			var mech = Platform.getMechanism(caps[i]);
+			assert(mech === null || typeof mech === "string",
+				"getMechanism(" + caps[i] + ") string|null");
+			var capInfo = Platform.getCapabilities(caps[i]);
+			assert(typeof capInfo === "object", "getCapabilities(" + caps[i] + ") object");
+			assert(typeof capInfo.requiresElevatedPrivileges === "boolean",
+				"getCapabilities(" + caps[i] + ").requiresElevatedPrivileges");
+			assert(typeof capInfo.supportsOffScreen === "boolean",
+				"getCapabilities(" + caps[i] + ").supportsOffScreen");
+			assert(Array.isArray(capInfo.mechanisms),
+				"getCapabilities(" + caps[i] + ").mechanisms");
+		}
+
+		// --- getPreferredMechanisms when no override set ---
+		Platform.resetMechanism("clipboard");
+		var pref = Platform.getPreferredMechanisms("clipboard");
+		// null when no env override and no setMechanism call
+		if (!process.env.MECHATRON_CLIPBOARD_MECHANISM) {
+			assert(pref === null, "getPreferredMechanisms null when auto");
+		}
+
+		// --- setMechanism + getPreferredMechanisms round-trip ---
+		var origMech = Platform.getMechanism("clipboard");
+		var clipList = Platform.listMechanisms("clipboard");
+		if (clipList.length > 0) {
+			var validName = clipList[0].name;
+			Platform.setMechanism("clipboard", validName);
+			pref = Platform.getPreferredMechanisms("clipboard");
+			assert(pref !== null && pref[0] === validName,
+				"setMechanism + getPreferredMechanisms round-trip");
+
+			// setMechanism with array
+			Platform.setMechanism("clipboard", [validName]);
+			pref = Platform.getPreferredMechanisms("clipboard");
+			assert(pref !== null && pref[0] === validName,
+				"setMechanism array + getPreferred");
+		}
+
+		// --- setMechanism("none") ---
+		Platform.setMechanism("clipboard", "none");
+		assert(Platform.getMechanism("clipboard") === "none",
+			"setMechanism none");
+
+		// --- setMechanism with unknown name throws ---
+		var threw = false;
+		try { Platform.setMechanism("clipboard", "not-a-real-mechanism"); }
+		catch (_) { threw = true; }
+		assert(threw, "setMechanism unknown throws");
+
+		// --- setMechanism with empty list throws ---
+		threw = false;
+		try { Platform.setMechanism("clipboard", []); }
+		catch (_) { threw = true; }
+		assert(threw, "setMechanism empty array throws");
+
+		// --- resetMechanism ---
+		Platform.resetMechanism("clipboard");
+		assert(Platform.getMechanism("clipboard") !== "none" || clipList.length === 0,
+			"resetMechanism clears none");
+
+		// --- saveScreenPermission / loadScreenPermission round-trip ---
+		var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mechatron-perm-"));
+		var permFile = path.join(tmpDir, "screen-perm.json");
+
+		// saveScreenPermission returns false when no handle set
+		assert(await Platform.saveScreenPermission(permFile) === false,
+			"saveScreenPermission false when no handle");
+
+		// Set a handle, save, clear, load
+		plat._setSavedScreenHandle({ token: "test-perm-123", fd: 42 });
+		assert(await Platform.saveScreenPermission(permFile) === true,
+			"saveScreenPermission true");
+		assert(fs.existsSync(permFile), "perm file created");
+
+		plat._setSavedScreenHandle(null);
+		assert(await Platform.loadScreenPermission(permFile) === true,
+			"loadScreenPermission true");
+		var loaded = plat._getSavedScreenHandle();
+		assert(loaded && loaded.token === "test-perm-123" && loaded.fd === 42,
+			"loadScreenPermission round-trip");
+
+		// loadScreenPermission on missing file returns false
+		fs.unlinkSync(permFile);
+		plat._setSavedScreenHandle(null);
+		assert(await Platform.loadScreenPermission(permFile) === false,
+			"loadScreenPermission missing file false");
+
+		// loadScreenPermission on invalid JSON returns false
+		fs.writeFileSync(path.join(tmpDir, "bad.json"), "not json {{{");
+		assert(await Platform.loadScreenPermission(path.join(tmpDir, "bad.json")) === false,
+			"loadScreenPermission bad JSON false");
+
+		// Cleanup
+		try { fs.unlinkSync(path.join(tmpDir, "bad.json")); } catch (_) {}
+		try { fs.rmdirSync(tmpDir); } catch (_) {}
+		plat._setSavedScreenHandle(null);
+
+		log("OK\n");
+		return true;
+	}
+
 	return [
-		{ name: "tokens", functions: [], test: testTokens },
-		{ name: "gext token", functions: [], test: testGextWindowAccessors },
-		{ name: "atspi avail", functions: [], test: testAtSpiAvailability },
-		{ name: "atspi hash", functions: [], test: testWindowPortalHash },
-		{ name: "dbus wire", functions: [], test: testDbusWire },
+		{ name: "tokens", functions: ["window_ctor"], test: testTokens },
+		{ name: "gext token", functions: ["window_ctor"], test: testGextWindowAccessors },
+		{ name: "atspi avail", functions: ["window_ctor"], test: testAtSpiAvailability },
+		{ name: "atspi hash", functions: ["window_ctor"], test: testWindowPortalHash },
+		{ name: "dbus wire", functions: ["window_ctor"], test: testDbusWire },
+		{ name: "platform api", functions: ["screen_ctor"], test: testPlatformApi },
 	];
 };

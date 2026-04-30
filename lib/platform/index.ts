@@ -13,9 +13,8 @@
  *
  *   - **Permission gating**: know in advance whether we'll require
  *     elevated privileges or a runtime prompt.
- *   - **Skip the prompt**: call `setMechanism("screen", "drm")` when
- *     the process is already running with CAP_SYS_ADMIN to avoid the
- *     portal ScreenCast prompt entirely.
+ *   - **Skip the prompt**: call `setMechanism("screen", "framebuffer")`
+ *     on a TTY/headless system to avoid the portal ScreenCast prompt.
  *   - **Virtual-display support**: branch on `supportsOffScreen` to
  *     decide whether to warn that the selected screen mechanism can't
  *     see Xvfb / headless scanout targets.

@@ -268,30 +268,6 @@ function probePortalPipewire(): MechanismInfo {
   };
 }
 
-function probeDrm(): MechanismInfo {
-  if (!IS_LINUX) {
-    return {
-      name: "drm", description: "DRM/KMS dumb-buffer scanout",
-      available: false, requiresElevatedPrivileges: false,
-      requiresUserApproval: false, supportsOffScreen: true,
-      reason: "not Linux",
-    };
-  }
-  const card = "/dev/dri/card0";
-  const exists = existsSync(card);
-  const readable = exists && isReadable(card);
-  return {
-    name: "drm",
-    description: "DRM/KMS scanout via /dev/dri/card0 — no display server needed",
-    available: readable,
-    requiresElevatedPrivileges: exists && !readable,
-    requiresUserApproval: false,
-    supportsOffScreen: true,
-    reason: !exists
-      ? "/dev/dri/card0 not present"
-      : readable ? undefined : "/dev/dri/card0 not readable (need `video` group)",
-  };
-}
 
 function probeFramebuffer(): MechanismInfo {
   if (!IS_LINUX) {
@@ -464,10 +440,10 @@ export const CAPABILITY_MECHANISMS: Record<PlatformCapability, Array<() => Mecha
     : IS_MAC ? [probeCGEvent, probeXproto]
     : [probeXtest, probeUinput, probeXproto, probeLibei, probeSendInput, probeCGEvent],
   screen: IS_LINUX
-    ? [probeXrandr, probePortalPipewire, probeDrm, probeFramebuffer]
+    ? [probeXrandr, probePortalPipewire, probeFramebuffer]
     : IS_WIN ? [probeGdi]
     : IS_MAC ? [probeCoreGraphics]
-    : [probeXrandr, probePortalPipewire, probeDrm, probeFramebuffer, probeGdi, probeCoreGraphics],
+    : [probeXrandr, probePortalPipewire, probeFramebuffer, probeGdi, probeCoreGraphics],
   clipboard: IS_LINUX
     ? [probeWlClipboard, probeXclip, probeXsel]
     : IS_WIN ? [probeWin32Clipboard]

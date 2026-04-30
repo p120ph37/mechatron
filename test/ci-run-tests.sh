@@ -274,22 +274,6 @@ for y in range(H):
   fi
 fi
 
-# ── Linux-only: FFI with MECHATRON_SCREEN_MECHANISM=drm ───────────
-if [ "$RUNNER_OS" = "Linux" ]; then
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-drm.xml"
-  BE_COV_DIR="$COV_DIR/ffi-drm"
-  mkdir -p "$BE_COV_DIR"
-  BE_RC=0
-  MECHATRON_BACKEND=ffi \
-  MECHATRON_SCREEN_MECHANISM=drm \
-    run_bun "ffi-drm" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-    || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-drm" \
-    "bun test for ffi-drm exited ${BE_RC} without producing a JUnit report."
-  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-fi
 
 # ── Linux-only: FFI with dlopen-block LD_PRELOAD shim ─────────────
 if [ "$RUNNER_OS" = "Linux" ]; then

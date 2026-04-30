@@ -253,74 +253,20 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(((dstPix[0] >>> 16) & 0xFF) === 0xF8, "rowToArgb 16bpp red");
 				assert(((dstPix[1] >>> 8) & 0xFF) === 0xFC, "rowToArgb 16bpp green");
 
-				// DRM mode FB reply decode
-				var fbCmd = new Uint8Array(28);
-				var fbDv = new DataView(fbCmd.buffer);
-				fbDv.setUint32(0, 0x11, true);
-				fbDv.setUint32(4, 2560, true);
-				fbDv.setUint32(8, 1440, true);
-				fbDv.setUint32(12, 10240, true);
-				fbDv.setUint32(16, 32, true);
-				fbDv.setUint32(20, 24, true);
-				fbDv.setUint32(24, 0xABCD, true);
-				var parsed = fb.parseDrmModeFbCmd(fbCmd);
-				assert(parsed.fbId === 0x11 && parsed.handle === 0xABCD, "drm fb cmd decode");
-				assert(parsed.pitch === 10240 && parsed.bpp === 32, "drm fb pitch/bpp");
-
-				// DRM MAP_DUMB round-trip
-				var mapBuf = fb.encodeDrmModeMapDumb(0xABCD);
-				assert(mapBuf.length === 16, "MAP_DUMB buffer is 16 bytes");
-				assert(new DataView(mapBuf.buffer).getUint32(0, true) === 0xABCD, "MAP_DUMB handle");
-				var mapReply = new Uint8Array(16);
-				new DataView(mapReply.buffer).setBigUint64(8, 0x1000n, true);
-				assert(fb.parseDrmModeMapDumbOffset(mapReply) === 0x1000n, "MAP_DUMB offset");
-
-				// DRM mode CRTC decode
-				var crtcBuf = fb.encodeDrmModeCrtcGet(42);
-				assert(crtcBuf.length === 104, "CRTC buf length");
-				new DataView(crtcBuf.buffer).setUint32(16, 99, true);
-				var crtcGet = fb.parseDrmModeCrtcGet(crtcBuf);
-				assert(crtcGet.crtcId === 42 && crtcGet.fbId === 99, "CRTC get decode");
-
-				// DRM mode card_res counts
-				var cardRes = fb.encodeDrmModeCardRes();
-				assert(cardRes.length === 56, "card_res size");
-				fb.patchDrmModeCardResCrtcs(cardRes, 0xDEADBEEFn, 4);
-				assert(new DataView(cardRes.buffer).getUint32(36, true) === 4, "count_crtcs patched");
-				var counts = fb.parseDrmModeCardResCounts(cardRes);
-				assert(counts.countCrtcs === 4, "countCrtcs readback");
-
-				// Availability probes
+				// Availability probe
 				assert(typeof fb.framebufferAvailable() === "boolean", "framebufferAvailable bool");
-				assert(typeof fb.drmAvailable() === "boolean", "drmAvailable bool");
+
+				// rowToArgb unsupported bpp (8-bit) — emits opaque black
+				geom.bitsPerPixel = 8;
+				var src8 = new Uint8Array([0xAA, 0xBB]);
+				fb.rowToArgb(src8, 0, dstPix, 0, 2, geom);
+				assert(dstPix[0] === 0xFF000000, "rowToArgb 8bpp pixel 0 = black");
+				assert(dstPix[1] === 0xFF000000, "rowToArgb 8bpp pixel 1 = black");
 
 				// captureFramebuffer stub
 				assert(fb.captureFramebuffer(0, 0, 100, 100) === null, "pure stub returns null");
 			}
 		},
-
-		// --- FFI framebuffer layer (gated on ffi backend) ---
-		{
-			name: "FFI framebuffer layer",
-			functions: ["screen_ctor"],
-			test: async function () {
-				var be = (process.env.MECHATRON_BACKEND || "").toLowerCase();
-				if (be !== "ffi" || process.platform !== "linux") {
-					log("(skipped: not ffi+linux) ");
-					return;
-				}
-				var ffiFb = require("../lib/ffi/framebuffer");
-				var libcMod = require("../lib/ffi/libc");
-				assert(libcMod.libc() !== null || libcMod.libcOpenReason() !== null,
-					"libc() resolves or reports a reason");
-				assert(ffiFb.framebufferSelected() === null || typeof ffiFb.framebufferSelected() === "string",
-					"framebufferSelected returns null or mechanism name");
-				assert(ffiFb.captureFbdev(0, 0, 100, 100) === null || ffiFb.captureFbdev(0, 0, 100, 100) instanceof Uint32Array,
-					"captureFbdev returns null or Uint32Array");
-				assert(ffiFb.captureDrm(0, 0, 100, 100) === null || ffiFb.captureDrm(0, 0, 100, 100) instanceof Uint32Array,
-					"captureDrm returns null or Uint32Array");
-			}
-		}
 
 	];
 };

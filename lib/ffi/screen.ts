@@ -20,7 +20,6 @@ import {
   x11, ffi as x11ffi, xrandr, isXrandrAvailable, getDisplay,
   ZPixmap, AllPlanes, XA_CARDINAL, AnyPropertyType, True, False,
 } from "./x11";
-import { framebufferSelected, captureSelected } from "./framebuffer";
 import { user32, kernel32, gdi32, winFFI } from "./win";
 import { cg, macFFI, BITMAP_INFO_BGRA_PMA } from "./mac";
 import { cstr, bp } from "./bun";
@@ -167,12 +166,6 @@ function linuxSynchronize(): ScreenInfo[] | null {
 // ── Linux: grabScreen via XGetImage + XGetPixel ──────────────────────
 
 function linuxGrabScreen(x: number, y: number, w: number, h: number, windowHandle?: number): Uint32Array | null {
-  // When the caller has pinned framebuffer/drm, skip the X11 path.  The
-  // null return on failure triggers the usual fallback in Screen.grabScreen.
-  if (framebufferSelected()) {
-    const out = captureSelected(x, y, w, h);
-    if (out) return out;
-  }
   const X = x11();
   const F = x11ffi();
   const d = getDisplay();

@@ -1,43 +1,19 @@
 /**
- * Linux framebuffer / DRM screen-capture fallback.
+ * Linux framebuffer screen-capture fallback — struct layouts and pixel
+ * conversion for the `/dev/fb0` (fbdev) interface.
  *
  * When there's no X server and no Wayland compositor to ask (TTY,
  * containers, some embedded boards), the only way to read pixels is
- * straight out of the kernel's scanout buffer.  Two paths exist:
- *
- * **Legacy `/dev/fb0`** — the `fbdev` interface.  Still present on
- * many boards but deprecated upstream; on most modern desktop Linux
- * installs it's unpopulated or points at a dumb 1024x768 console
- * framebuffer, not the real GPU scanout.  Good enough for TTY or
- * kiosk systems.  Read path:
+ * straight out of the kernel's scanout buffer via `/dev/fb0`.  Read path:
  *
  *   1. `ioctl(fb, FBIOGET_VSCREENINFO, &vinfo)` → width/height/bpp.
  *   2. `ioctl(fb, FBIOGET_FSCREENINFO, &finfo)` → line_length.
- *   3. `mmap(NULL, finfo.smem_len, PROT_READ, MAP_SHARED, fb, 0)`.
+ *   3. Read rows via readSync (nolib[vt] path).
  *   4. Walk `bits_per_pixel` bytes per pixel converting to ARGB.
  *
- * **DRM/KMS** — `/dev/dri/card0`.  The actual scanout pixels for the
- * real GPU live here.  Capture requires DRM Master (only one process
- * at a time) or the `DRM_CAP_DUMB_BUFFER` + `DRM_IOCTL_MODE_GETFB2`
- * + mmap dance to read the CRTC's current framebuffer without owning
- * it.  Several userspace helpers exist (`kmsgrab`, `libdrm`); we use
- * the raw ioctls to avoid a libdrm soname dependency for headless
- * deployments.
- *
- * Access requirements: `/dev/fb0` and `/dev/dri/card0` are `video`-
- * group readable on every mainstream distro.  Non-root users in the
- * `video` group get access with no further setup; the mechanism probe
- * reports `requiresElevatedPrivileges: true` when the device file
- * exists but isn't readable.
- *
- * This file is a *skeleton* — probe wiring is live, the actual capture
- * ioctls + mmap live partly here (layout structs, bit-depth conversion)
- * and partly in the napi `screen` crate (mmap + ioctl are awkward to
- * do from pure Node).  The auto-select priority intentionally places
- * framebuffer *below* the portal-pipewire path, because on a live
- * desktop the portal sees the *real* output (respecting HiDPI,
- * multi-monitor, color management) while the framebuffer path may see
- * a stale or blank scanout.  See PLAN.md §6e.
+ * The actual capture lives in `lib/nolib/screen-vt.ts` (ioctl bridge +
+ * readSync).  This module provides the pure-encoding helpers: struct
+ * layouts, ioctl constants, and the bpp-aware row-to-ARGB converter.
  */
 
 import { existsSync, accessSync, constants as fsConstants } from "fs";
@@ -54,22 +30,10 @@ export interface FbGeometry {
 }
 
 export const FRAMEBUFFER_DEV = "/dev/fb0";
-export const DRM_DEV = "/dev/dri/card0";
-
 export function framebufferAvailable(): boolean {
   if (!existsSync(FRAMEBUFFER_DEV)) return false;
   try {
     accessSync(FRAMEBUFFER_DEV, fsConstants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function drmAvailable(): boolean {
-  if (!existsSync(DRM_DEV)) return false;
-  try {
-    accessSync(DRM_DEV, fsConstants.R_OK);
     return true;
   } catch {
     return false;
@@ -186,153 +150,9 @@ export function parseFbFixSmemLen(buf: Uint8Array): number {
   return new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(20, true);
 }
 
-// =============================================================================
-// DRM/KMS ioctl layout (Linux <drm/drm.h>, <drm/drm_mode.h>)
-//
-// We use the legacy modeset ioctls rather than the atomic path because
-// the atomic path requires DRM master + a commit framework that's
-// overkill for a read-only scanout capture.  GETRESOURCES → GETCRTC →
-// GETFB → MAP_DUMB → mmap is enough to read the current scanout on a
-// process that opens /dev/dri/card0 with CAP_SYS_ADMIN (or runs as root
-// in a container where nothing else holds the master lease).
-//
-// These structures have no arch-dependent padding — all fields are fixed-
-// width u32/u64 — so encoding them as raw DataView reads/writes is
-// stable on x86_64, aarch64, riscv64.
-// =============================================================================
-
-// _IOWR('d', 0xA0, struct drm_mode_card_res)  = 0xC04064A0 on LP64
-// _IOWR('d', 0xA1, struct drm_mode_crtc)      = 0xC06864A1
-// _IOWR('d', 0xAD, struct drm_mode_fb_cmd)    = 0xC01864AD
-// _IOWR('d', 0xB0, struct drm_mode_create_dumb) = 0xC02064B0
-// _IOWR('d', 0xB3, struct drm_mode_map_dumb)  = 0xC01064B3
-// (Derived from include/uapi/drm/drm.h _IOC macros.)
-export const DRM_IOCTL_MODE_GETRESOURCES   = 0xC04064A0n;
-export const DRM_IOCTL_MODE_GETCRTC        = 0xC06864A1n;
-export const DRM_IOCTL_MODE_GETFB          = 0xC01864ADn;
-export const DRM_IOCTL_MODE_MAP_DUMB       = 0xC01064B3n;
-
-export interface DrmModeFb {
-  fbId: number;
-  width: number;
-  height: number;
-  pitch: number;   // bytes per row
-  bpp: number;
-  depth: number;
-  handle: number;  // buffer object handle (input to MAP_DUMB)
-}
-
 /**
- * `struct drm_mode_fb_cmd` (24 bytes):
- *   u32 fb_id     @ 0
- *   u32 width     @ 4
- *   u32 height    @ 8
- *   u32 pitch     @ 12
- *   u32 bpp       @ 16
- *   u32 depth     @ 20
- *   u32 handle    @ 24  — wait, that's 28 bytes; handle at offset 24 is
- *                         the last u32.  Size = 28 including tail padding.
- * Actually kernel layout: { u32 fb_id, width, height, pitch, bpp, depth,
- * handle; } — 7 × u32 = 28 bytes; pad to 8 = 32 bytes for some kernels,
- * but the ioctl size in the request number is 0x18 = 24 bytes on older
- * kernels.  We encode 28 bytes and the kernel ignores trailing padding.
- */
-export function encodeDrmModeFbCmd(fbId: number): Uint8Array {
-  const buf = new Uint8Array(28);
-  new DataView(buf.buffer).setUint32(0, fbId, true);
-  return buf;
-}
-
-export function parseDrmModeFbCmd(buf: Uint8Array): DrmModeFb {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  return {
-    fbId:   dv.getUint32(0, true),
-    width:  dv.getUint32(4, true),
-    height: dv.getUint32(8, true),
-    pitch:  dv.getUint32(12, true),
-    bpp:    dv.getUint32(16, true),
-    depth:  dv.getUint32(20, true),
-    handle: dv.getUint32(24, true),
-  };
-}
-
-/** `struct drm_mode_map_dumb` (16 bytes): u32 handle@0, u32 pad@4, u64 offset@8. */
-export function encodeDrmModeMapDumb(handle: number): Uint8Array {
-  const buf = new Uint8Array(16);
-  new DataView(buf.buffer).setUint32(0, handle, true);
-  return buf;
-}
-
-export function parseDrmModeMapDumbOffset(buf: Uint8Array): bigint {
-  return new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getBigUint64(8, true);
-}
-
-/**
- * `struct drm_mode_crtc` (96 bytes, padded to 104 on some kernels):
- *   u64 set_connectors_ptr @ 0
- *   u32 count_connectors   @ 8
- *   u32 crtc_id            @ 12
- *   u32 fb_id              @ 16
- *   u32 x                  @ 20
- *   u32 y                  @ 24
- *   u32 gamma_size         @ 28
- *   u32 mode_valid         @ 32
- *   struct drm_mode_modeinfo mode @ 36  (68 bytes)
- */
-export interface DrmModeCrtcGet { crtcId: number; fbId: number; }
-export function parseDrmModeCrtcGet(buf: Uint8Array): DrmModeCrtcGet {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  return { crtcId: dv.getUint32(12, true), fbId: dv.getUint32(16, true) };
-}
-
-export function encodeDrmModeCrtcGet(crtcId: number): Uint8Array {
-  const buf = new Uint8Array(104);
-  new DataView(buf.buffer).setUint32(12, crtcId, true);
-  return buf;
-}
-
-/**
- * `struct drm_mode_card_res` (40 bytes):
- *   u64 fb_id_ptr             @ 0
- *   u64 crtc_id_ptr           @ 8
- *   u64 connector_id_ptr      @ 16
- *   u64 encoder_id_ptr        @ 24
- *   u32 count_fbs             @ 32
- *   u32 count_crtcs           @ 36
- *   u32 count_connectors      @ 40
- *   u32 count_encoders        @ 44
- *   u32 min_width/max_*       @ 48..
- * (56 bytes total; we only need the first 48)
- */
-export function encodeDrmModeCardRes(): Uint8Array {
-  return new Uint8Array(56);
-}
-
-/** Patch the `crtc_id_ptr` and `count_crtcs` fields after a first query. */
-export function patchDrmModeCardResCrtcs(buf: Uint8Array, ptr: bigint, count: number): void {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  dv.setBigUint64(8, ptr, true);
-  dv.setUint32(36, count, true);
-}
-
-export interface DrmModeCardResCounts {
-  countFbs: number; countCrtcs: number;
-  countConnectors: number; countEncoders: number;
-}
-export function parseDrmModeCardResCounts(buf: Uint8Array): DrmModeCardResCounts {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  return {
-    countFbs:        dv.getUint32(32, true),
-    countCrtcs:      dv.getUint32(36, true),
-    countConnectors: dv.getUint32(40, true),
-    countEncoders:   dv.getUint32(44, true),
-  };
-}
-
-/**
- * Stub stays for back-compat — real capture is in lib/ffi/framebuffer.ts.
- * Pure-TS layer alone can't mmap, so this always returns null when
- * called without the FFI layer wired in.
+ * Stub for back-compat.  Real capture is in lib/nolib/screen-vt.ts
+ * (ioctl bridge + readSync).
  */
 export function captureFramebuffer(
   _x: number, _y: number, _w: number, _h: number,
