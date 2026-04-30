@@ -330,6 +330,23 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v xclip >/dev/null 2>&1; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
+# ── macOS-only: nolib[sh] clipboard (pbcopy/pbpaste subprocess path) ─
+if [ "$RUNNER_OS" = "macOS" ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-sh-clipboard.xml"
+  BE_COV_DIR="$COV_DIR/nolib-sh-clipboard"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
+    run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-sh-clipboard" \
+    "bun test for nolib-sh-clipboard (pbcopy/pbpaste subprocess) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
 # ── Linux-only: nolib[x11] clipboard (xproto selections protocol) ─
 # Pin clipboard to nolib[x11] so the xproto-based ICCCM SELECTION
 # protocol path in lib/nolib/clipboard.ts is exercised under Xvfb,
