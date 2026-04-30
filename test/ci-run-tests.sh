@@ -167,12 +167,17 @@ fi
 BACKENDS=(napi ffi)
 
 OVERALL_RC=0
+UNIT_DONE=false
 for be in "${BACKENDS[@]}"; do
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-$be.xml"
   BE_COV_DIR="$COV_DIR/$be"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
+  # Unit tests run once in the first backend cell; subsequent cells skip them.
+  SKIP_UNIT=""
+  if [ "$UNIT_DONE" = true ]; then SKIP_UNIT=1; fi
   MECHATRON_BACKEND="$be" \
+  MECHATRON_SKIP_UNIT="$SKIP_UNIT" \
     run_bun "$be" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -180,6 +185,7 @@ for be in "${BACKENDS[@]}"; do
   guard_junit "$BE_RC" "$JUNIT_FILE" "$be" \
     "bun test for MECHATRON_BACKEND=${be} exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run (see test-output.txt artifact)."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+  UNIT_DONE=true
 done
 
 # ── Linux-only: FFI + nolib[vt] input (uinput path) ──────────────
@@ -191,6 +197,7 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
   MECHATRON_BACKEND=ffi \
   MECHATRON_BACKEND_KEYBOARD='nolib[vt]' \
   MECHATRON_BACKEND_MOUSE='nolib[vt]' \
+  MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-vt-input" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -209,6 +216,7 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   MECHATRON_BACKEND=ffi \
   MECHATRON_BACKEND_KEYBOARD='nolib[x11]' \
   MECHATRON_BACKEND_MOUSE='nolib[x11]' \
+  MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-x11-input" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -254,6 +262,7 @@ for y in range(H):
       MECHATRON_FB_STUB_W=$FB_W \
       MECHATRON_FB_STUB_H=$FB_H \
       MECHATRON_FB_STUB_BPP=$FB_BPP \
+      MECHATRON_SKIP_UNIT=1 \
       LD_PRELOAD="$(pwd)/test/fb-stub.so" \
         run_bun "nolib-vt-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
           --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
@@ -262,6 +271,7 @@ for y in range(H):
     else
       MECHATRON_BACKEND=ffi \
       MECHATRON_BACKEND_SCREEN='nolib[vt]' \
+      MECHATRON_SKIP_UNIT=1 \
         run_bun "nolib-vt-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
           --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
           --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -286,6 +296,7 @@ if [ "$RUNNER_OS" = "Linux" ]; then
     BE_RC=0
     MECHATRON_BACKEND=ffi \
     MECHATRON_BLOCK_DLOPEN="$block" \
+    MECHATRON_SKIP_UNIT=1 \
     LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
       run_bun "ffi-$label" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
         --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
@@ -305,6 +316,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v xclip >/dev/null 2>&1; then
   BE_RC=0
   MECHATRON_BACKEND=ffi \
   MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
+  MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -322,6 +334,7 @@ if [ "$RUNNER_OS" = "macOS" ]; then
   BE_RC=0
   MECHATRON_BACKEND=ffi \
   MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
+  MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -343,6 +356,7 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   BE_RC=0
   MECHATRON_BACKEND=ffi \
   MECHATRON_BACKEND_CLIPBOARD='nolib[x11]' \
+  MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-x11-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -366,6 +380,7 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
   ATSPI_PID=$!
   sleep 1
   MECHATRON_BACKEND=ffi \
+  MECHATRON_SKIP_UNIT=1 \
     run_bun "ffi-atspi" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
@@ -419,6 +434,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
     busctl --user list 2>/dev/null | grep -i portal || echo ">>> warning: portal not on session bus"
 
     MECHATRON_BACKEND="nolib[portal]" \
+    MECHATRON_SKIP_UNIT=1 \
       "$BUN" test test/bun.test.ts \
         --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
@@ -522,6 +538,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     # keyboard/mouse/clipboard/etc. tests still load successfully.
     MECHATRON_BACKEND=ffi \
     MECHATRON_BACKEND_WINDOW="nolib[gext]" \
+    MECHATRON_SKIP_UNIT=1 \
       "$BUN" test test/bun.test.ts \
         --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
         --reporter=junit --reporter-outfile="$JUNIT_FILE"

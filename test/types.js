@@ -708,7 +708,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	}
 
 	return [
-		{ name: "types", functions: ["keyboard_ctor"], test: testTypes },
-		{ name: "timer", functions: ["keyboard_ctor"], test: testTimer },
+		{ name: "types", functions: [], unit: true, test: testTypes },
+		{ name: "timer", functions: [], unit: true, test: testTimer },
 	];
 };

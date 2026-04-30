@@ -8,7 +8,7 @@
 //                                                                            //
 //  Every test entry is annotated with the matrix function(s) it exercises.   //
 //  The runner calls shouldRun(entry.functions) before each test:             //
-//    - functions: ["keyboard_ctor"] → always run (ctor is always "ok")       //
+//    - functions: [], unit: true → unit test, runs once (no matrix gating)  //
 //    - functions: ["mouse_getPos"] → run only if mouse_getPos is "ok"       //
 //    - functions: ["keyboard_press", "keyboard_getKeyState"]                 //
 //      → run only if ALL listed functions are "ok"                           //

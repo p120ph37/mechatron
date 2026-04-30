@@ -198,7 +198,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Framebuffer / DRM pure-encoding tests ---
 		{
 			name: "Framebuffer/DRM pure-encoding helpers",
-			functions: ["screen_ctor"],
+			functions: [], unit: true,
 			test: async function () {
 				var IS_BUN = typeof globalThis.Bun !== "undefined";
 				var fb = IS_BUN

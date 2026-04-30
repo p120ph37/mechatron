@@ -493,11 +493,11 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	}
 
 	return [
-		{ name: "tokens", functions: ["window_ctor"], test: testTokens },
-		{ name: "gext token", functions: ["window_ctor"], test: testGextWindowAccessors },
-		{ name: "atspi avail", functions: ["window_ctor"], test: testAtSpiAvailability },
-		{ name: "atspi hash", functions: ["window_ctor"], test: testWindowPortalHash },
-		{ name: "dbus wire", functions: ["window_ctor"], test: testDbusWire },
-		{ name: "platform api", functions: ["screen_ctor"], test: testPlatformApi },
+		{ name: "tokens", functions: [], unit: true, test: testTokens },
+		{ name: "gext token", functions: [], unit: true, test: testGextWindowAccessors },
+		{ name: "atspi avail", functions: [], unit: true, test: testAtSpiAvailability },
+		{ name: "atspi hash", functions: [], unit: true, test: testWindowPortalHash },
+		{ name: "dbus wire", functions: [], unit: true, test: testDbusWire },
+		{ name: "platform api", functions: [], unit: true, test: testPlatformApi },
 	];
 };

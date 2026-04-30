@@ -60,7 +60,7 @@ const waitForAsync = async (condFn: () => Promise<boolean>, timeoutMs: number) =
 
 const compatMatrix = require("./matrix").create(mechatron);
 
-type TestEntry = { name: string; functions: string[]; test: () => any };
+type TestEntry = { name: string; functions: string[]; unit?: boolean; test: () => any };
 
 // Each entry declares the COMPATIBILITY.md functions it touches; matrix.js
 // derives the column per-function from platform + getBackend(subsystem).
@@ -83,7 +83,37 @@ if (compatMatrix.available) {
   log(`Matrix: loaded\n`);
 }
 
-// ── Suite ────────────────────────────────────────────────────────────────────
+// ── Separate unit tests (pure logic, no backend dependency) from matrix tests ─
+
+const unitEntries: Array<{ displayName: string; entry: TestEntry }> = [];
+const matrixEntries: Array<{ displayName: string; prefix: string; entry: TestEntry }> = [];
+
+for (const mod of allModules) {
+  for (const entry of mod.entries) {
+    const displayName = `${mod.prefix}: ${entry.name}`;
+    if (entry.unit) {
+      unitEntries.push({ displayName, entry });
+    } else {
+      matrixEntries.push({ displayName, prefix: mod.prefix, entry });
+    }
+  }
+}
+
+// ── Unit tests — run once, no matrix gating ─────────────────────────────────
+
+const skipUnit = process.env.MECHATRON_SKIP_UNIT === "1";
+
+if (!skipUnit) {
+  describe("unit", () => {
+    for (const { displayName, entry } of unitEntries) {
+      test(displayName, async () => {
+        await entry.test();
+      });
+    }
+  });
+}
+
+// ── Functional tests — matrix-gated per backend ────────────────────────────
 
 const exercisedFunctions = new Set<string>();
 
@@ -95,24 +125,21 @@ describe(`mechatron [${backend}]`, () => {
   }, 15000);
 
   let _prevPrefix = "";
-  for (const mod of allModules) {
-    for (const entry of mod.entries) {
-      const displayName = `${mod.prefix}: ${entry.name}`;
-      const timeout = mod.prefix === "window" ? 15000 : undefined;
-      const needsGC = mod.prefix !== _prevPrefix;
-      _prevPrefix = mod.prefix;
-      test(displayName, async () => {
-        if (needsGC && typeof (globalThis as any).Bun?.gc === "function") {
-          (globalThis as any).Bun.gc(true);
-        }
-        if (!compatMatrix.shouldRun(entry.functions)) {
-          log(`  ${displayName} (skipped: matrix)\n`);
-          return;
-        }
-        for (const fn of entry.functions) exercisedFunctions.add(fn);
-        await entry.test();
-      }, timeout);
-    }
+  for (const { displayName, prefix, entry } of matrixEntries) {
+    const timeout = prefix === "window" ? 15000 : undefined;
+    const needsGC = prefix !== _prevPrefix;
+    _prevPrefix = prefix;
+    test(displayName, async () => {
+      if (needsGC && typeof (globalThis as any).Bun?.gc === "function") {
+        (globalThis as any).Bun.gc(true);
+      }
+      if (!compatMatrix.shouldRun(entry.functions)) {
+        log(`  ${displayName} (skipped: matrix)\n`);
+        return;
+      }
+      for (const fn of entry.functions) exercisedFunctions.add(fn);
+      await entry.test();
+    }, timeout);
   }
 
   afterAll(() => {

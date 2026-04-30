@@ -97,26 +97,31 @@ var allModules = [
 	// from lib/portal/ to land coverage on the source rather than dist/.
 ];
 
-// Flatten into a single list of [displayName, testFn] pairs.
-// shouldRun() checks each function's matrix cell for the current column.
-var tests = [];
+// Separate unit tests (pure logic, no backend dependency) from matrix tests.
+var unitTests = [];
+var matrixTests = [];
 for (var m = 0; m < allModules.length; m++) {
 	var mod = allModules[m];
 	var entries = mod.entries;
 	for (var e = 0; e < entries.length; e++) {
 		var entry = entries[e];
 		var displayName = mod.prefix + ": " + entry.name;
-		tests.push([displayName, (function (ent, dname) {
-			return function () {
-				if (!compatMatrix.shouldRun(ent.functions)) {
-					log("  " + dname + " (skipped: matrix)\n");
-					return true;
-				}
-				return ent.test();
-			};
-		})(entry, displayName)]);
+		if (entry.unit) {
+			unitTests.push([displayName, entry.test]);
+		} else {
+			matrixTests.push([displayName, (function (ent, dname) {
+				return function () {
+					if (!compatMatrix.shouldRun(ent.functions)) {
+						log("  " + dname + " (skipped: matrix)\n");
+						return true;
+					}
+					return ent.test();
+				};
+			})(entry, displayName)]);
+		}
 	}
 }
+var tests = unitTests.concat(matrixTests);
 
 ////////////////////////////////////////////////////////////////////////////////
 
