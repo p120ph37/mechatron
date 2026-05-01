@@ -460,37 +460,40 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     fi
     echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
-    # Wait for org.gnome.Shell and org.gnome.Mutter.DisplayConfig on the bus.
-    # xdg-desktop-portal-gnome checks DisplayConfig to decide whether to
-    # expose RemoteDesktop/Screenshot interfaces.
-    SHELL_OK="" DC_OK=""
+    # Push env into the D-Bus daemon so D-Bus-activated services (like
+    # portal-gnome) inherit WAYLAND_DISPLAY and desktop identity.
+    dbus-update-activation-environment WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP 2>/dev/null || true
+
+    # Wait for org.gnome.Shell and org.gnome.Mutter.ServiceChannel on the
+    # bus. portal-gnome 46+ connects to ServiceChannel to verify a
+    # compatible display server is running.
+    SHELL_OK="" SC_OK=""
     for i in $(seq 1 60); do
       BUS_LIST=$(busctl --user list 2>/dev/null)
       if [ -z "$SHELL_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Shell"; then
         SHELL_OK=1; echo ">>> org.gnome.Shell registered after ${i}*0.5s"
       fi
-      if [ -z "$DC_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Mutter.DisplayConfig"; then
-        DC_OK=1; echo ">>> org.gnome.Mutter.DisplayConfig registered after ${i}*0.5s"
+      if [ -z "$SC_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Mutter.ServiceChannel"; then
+        SC_OK=1; echo ">>> org.gnome.Mutter.ServiceChannel registered after ${i}*0.5s"
       fi
-      [ -n "$SHELL_OK" ] && [ -n "$DC_OK" ] && break
+      [ -n "$SHELL_OK" ] && [ -n "$SC_OK" ] && break
       sleep 0.5
     done
 
-    # Diagnostics: what Mutter-related bus names are available?
-    echo ">>> Mutter/Shell bus names:"
-    busctl --user list 2>/dev/null | grep -iE "gnome\.(Mutter|Shell)" || echo "(none)"
-    echo ">>> DisplayConfig introspect via org.gnome.Shell:"
-    busctl --user introspect org.gnome.Shell /org/gnome/Mutter/DisplayConfig 2>/dev/null \
-      | head -10 || echo "(not available)"
-
-    /usr/libexec/xdg-desktop-portal &
-    XDP_PID=$!
-    /usr/libexec/xdg-desktop-portal-gnome &
+    # Start portal backend FIRST so it owns the impl bus name before the
+    # frontend queries it (avoids a race where frontend D-Bus-activates a
+    # second instance that lacks WAYLAND_DISPLAY).
+    G_MESSAGES_DEBUG=all /usr/libexec/xdg-desktop-portal-gnome 2>&1 &
     XDP_GNOME_PID=$!
+    sleep 1
 
-    # Wait for the portal frontend to register on the bus.
+    /usr/libexec/xdg-desktop-portal 2>&1 &
+    XDP_PID=$!
+
+    # Wait for the portal frontend to actually own the bus name (not just
+    # activatable). busctl shows active names with a PID in column 2.
     for i in $(seq 1 40); do
-      if busctl --user list 2>/dev/null | grep -q "org.freedesktop.portal.Desktop"; then
+      if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
         echo ">>> org.freedesktop.portal.Desktop registered after ${i}*0.5s"
         break
       fi
@@ -498,7 +501,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     done
     echo ">>> portal introspect:"
     busctl --user introspect org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop 2>/dev/null \
-      | grep -E '^org\.freedesktop\.portal\.' || echo "(no portal interfaces)"
+      | grep -E "interface|org\.freedesktop\.portal\." | head -20 || echo "(no portal interfaces)"
 
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
