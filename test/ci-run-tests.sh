@@ -392,8 +392,12 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
 fi
 
 # Detect GNOME Shell version once — used by both portal and gext cells to
-# choose between ESM (≥45) and legacy extension format.
-GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
+# choose between ESM (>=45) and legacy extension format.
+if [ "$RUNNER_OS" = "Linux" ]; then
+  GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
+else
+  GNOME_SHELL_VER=0
+fi
 
 # ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
 # Tests the standard freedesktop portal code path for keyboard, mouse,
@@ -550,7 +554,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
           echo ">>> [approver] attempt $attempt — window list:"
           busctl --user call "$DEST" "$OBJ" "$WIFACE" \
             List s "$EXT_TOKEN" 2>&1 || echo "(List call failed)"
-          # Take a screenshot via gnome-shell's built-in Screenshot D-Bus
+          # Take a screenshot via the gnome-shell built-in Screenshot D-Bus
           # interface (bypasses portal, so no recursive permission dialog).
           busctl --user call org.gnome.Shell \
             /org/gnome/Shell/Screenshot org.gnome.Shell.Screenshot \
