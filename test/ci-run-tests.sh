@@ -461,22 +461,28 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
     # Push env into the D-Bus daemon so D-Bus-activated services (like
-    # portal-gnome) inherit WAYLAND_DISPLAY and desktop identity.
-    dbus-update-activation-environment WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP 2>/dev/null || true
+    # portal-gnome and xdg-desktop-portal) inherit display and runtime vars.
+    dbus-update-activation-environment \
+      XDG_RUNTIME_DIR WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+      2>/dev/null || true
 
-    # Wait for org.gnome.Shell and org.gnome.Mutter.ServiceChannel on the
-    # bus. portal-gnome 46+ connects to ServiceChannel to verify a
-    # compatible display server is running.
-    SHELL_OK="" SC_OK=""
+    # Wait for org.gnome.Shell plus Mutter readiness. GNOME 46+ registers
+    # ServiceChannel (which portal-gnome 46 connects to); GNOME 42-45
+    # only registers DisplayConfig/RemoteDesktop/ScreenCast. Accept either.
+    SHELL_OK="" MUTTER_OK=""
     for i in $(seq 1 60); do
       BUS_LIST=$(busctl --user list 2>/dev/null)
       if [ -z "$SHELL_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Shell"; then
         SHELL_OK=1; echo ">>> org.gnome.Shell registered after ${i}*0.5s"
       fi
-      if [ -z "$SC_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Mutter.ServiceChannel"; then
-        SC_OK=1; echo ">>> org.gnome.Mutter.ServiceChannel registered after ${i}*0.5s"
+      if [ -z "$MUTTER_OK" ]; then
+        if echo "$BUS_LIST" | grep -q "org.gnome.Mutter.ServiceChannel"; then
+          MUTTER_OK=1; echo ">>> org.gnome.Mutter.ServiceChannel registered after ${i}*0.5s"
+        elif echo "$BUS_LIST" | grep -q "org.gnome.Mutter.RemoteDesktop"; then
+          MUTTER_OK=1; echo ">>> org.gnome.Mutter.RemoteDesktop registered after ${i}*0.5s"
+        fi
       fi
-      [ -n "$SHELL_OK" ] && [ -n "$SC_OK" ] && break
+      [ -n "$SHELL_OK" ] && [ -n "$MUTTER_OK" ] && break
       sleep 0.5
     done
 
