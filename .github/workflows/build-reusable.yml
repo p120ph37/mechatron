@@ -103,7 +103,7 @@ jobs:
           # lib/gext/installer.ts beyond the unit-test stubs (drives the
           # nolib-gext CI cell). gjs is the Shell extension runtime;
           # dbus-x11 lets us launch session buses for headless tests.
-          sudo apt-get install -y gnome-shell gjs dbus-x11 2>/dev/null || true
+          sudo apt-get install -y gnome-shell gjs dbus-x11 gnome-screenshot 2>/dev/null || true
 
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
@@ -322,6 +322,7 @@ jobs:
             ${{ runner.temp }}/coverage/
             ${{ runner.temp }}/exercised/
             ${{ runner.temp }}/node-reports/
+            ${{ runner.temp }}/portal-screenshots/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v7

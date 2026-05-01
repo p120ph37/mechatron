@@ -391,6 +391,10 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
+# Detect GNOME Shell version once — used by both portal and gext cells to
+# choose between ESM (≥45) and legacy extension format.
+GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
+
 # ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
 # Tests the standard freedesktop portal code path for keyboard, mouse,
 # and screen. The mechatron extension is loaded so its Input interface
@@ -407,6 +411,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   TOKENS_FILE="${RUNNER_TEMP:-/tmp}/mechatron-portal-tokens"
   EXT_UUID="mechatron@mechatronic.dev"
 
+  echo ">>> [portal] GNOME Shell version: $GNOME_SHELL_VER ($(gnome-shell --version 2>/dev/null))"
   export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER
   dbus-run-session -- bash -c '
     set -x
@@ -499,6 +504,13 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
+    if [ -z "$EXT_OK" ]; then
+      echo ">>> ERROR: mechatron extension never registered on D-Bus!"
+      echo ">>> Extension will not be available to auto-approve portal dialogs."
+      echo ">>> GNOME_SHELL_VER=$GNOME_SHELL_VER; current bus state:"
+      busctl --user list 2>/dev/null | head -30 || true
+    fi
+
     echo ">>> PipeWire socket check:"
     ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
 
@@ -523,10 +535,34 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     # dialogs that portal-gnome shows for RemoteDesktop/Screenshot.
     (
       IFACE="dev.mechatronic.Shell.Input"
+      WIFACE="dev.mechatronic.Shell.Window"
       DEST="dev.mechatronic.Shell"
       OBJ="/dev/mechatronic/Shell"
       XKB_RETURN=65293
+      XKB_TAB=65289
+      XKB_ALT_L=65513
+      XKB_A=97
+      SCREENSHOT_DIR="${RUNNER_TEMP:-/tmp}/portal-screenshots"
+      mkdir -p "$SCREENSHOT_DIR"
       for attempt in $(seq 1 120); do
+        # Diagnostic: list windows on first few attempts and every 20th
+        if [ "$attempt" -le 3 ] || [ $((attempt % 20)) -eq 0 ]; then
+          echo ">>> [approver] attempt $attempt — window list:"
+          busctl --user call "$DEST" "$OBJ" "$WIFACE" \
+            List s "$EXT_TOKEN" 2>&1 || echo "(List call failed)"
+          # Take a screenshot via gnome-shell's built-in Screenshot D-Bus
+          # interface (bypasses portal, so no recursive permission dialog).
+          busctl --user call org.gnome.Shell \
+            /org/gnome/Shell/Screenshot org.gnome.Shell.Screenshot \
+            Screenshot bbs true true "$SCREENSHOT_DIR/portal-dialog-$attempt.png" \
+            2>&1 || echo "(Screenshot call failed)"
+          ls -la "$SCREENSHOT_DIR/portal-dialog-$attempt.png" 2>/dev/null || true
+        fi
+        # Strategy: Tab to focus Allow button, then Enter to activate.
+        busctl --user call "$DEST" "$OBJ" "$IFACE" \
+          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_TAB" true 2>/dev/null
+        busctl --user call "$DEST" "$OBJ" "$IFACE" \
+          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_TAB" false 2>/dev/null
         busctl --user call "$DEST" "$OBJ" "$IFACE" \
           KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" true 2>/dev/null
         busctl --user call "$DEST" "$OBJ" "$IFACE" \
@@ -558,7 +594,6 @@ fi
 # PipeWire is required so Mutter initialises its RemoteDesktop/ScreenCast
 # D-Bus interfaces. GNOME 45+ uses ES modules (extension.js); GNOME 42-44
 # uses the legacy init() format (extension-legacy.js).
-GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-gext.xml"
   BE_COV_DIR="$COV_DIR/nolib-gext"
