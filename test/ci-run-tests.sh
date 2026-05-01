@@ -413,6 +413,13 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     export XDG_SESSION_TYPE=wayland
     export XDG_CURRENT_DESKTOP=GNOME
 
+    # gnome-shell + PipeWire need XDG_RUNTIME_DIR for their sockets.
+    if [ -z "$XDG_RUNTIME_DIR" ]; then
+      export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+      mkdir -p "$XDG_RUNTIME_DIR"
+      chmod 700 "$XDG_RUNTIME_DIR"
+    fi
+
     # Ensure the mechatron extension is NOT loaded in this cell — we are
     # testing the standard portal path, not the gext path.
     gsettings set org.gnome.shell enabled-extensions "[]" 2>/dev/null \
@@ -462,6 +469,24 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
+    # xdg-desktop-portal-gnome checks for org.gnome.Mutter.DisplayConfig to
+    # decide whether to expose RemoteDesktop/Screenshot interfaces. Wait for
+    # gnome-shell to register it (headless mode may be slower).
+    for i in $(seq 1 40); do
+      if busctl --user list 2>/dev/null | grep -q "org.gnome.Mutter.DisplayConfig"; then
+        echo ">>> org.gnome.Mutter.DisplayConfig registered after ${i}*0.5s"
+        break
+      fi
+      sleep 0.5
+    done
+
+    # Diagnostics: what Mutter-related bus names are available?
+    echo ">>> Mutter/Shell bus names:"
+    busctl --user list 2>/dev/null | grep -iE "gnome\.(Mutter|Shell)" || echo "(none)"
+    echo ">>> DisplayConfig introspect via org.gnome.Shell:"
+    busctl --user introspect org.gnome.Shell /org/gnome/Mutter/DisplayConfig 2>/dev/null \
+      | head -10 || echo "(not available)"
+
     /usr/libexec/xdg-desktop-portal &
     XDP_PID=$!
     /usr/libexec/xdg-desktop-portal-gnome &
@@ -475,6 +500,9 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       fi
       sleep 0.5
     done
+    echo ">>> portal introspect:"
+    busctl --user introspect org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop 2>/dev/null \
+      | grep -E '^org\.freedesktop\.portal\.' || echo "(no portal interfaces)"
 
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
@@ -499,13 +527,11 @@ fi
 # lib/nolib/window-gext.ts (variant impl) end-to-end. Distinct from the
 # nolib[portal] cell which only exercises the read-only AT-SPI fallback.
 #
-# The extension uses GNOME 45+ ES module format (import/export default),
-# so it requires Shell 45 or later. Earlier versions (e.g. Shell 42 on
-# Ubuntu 22.04) use a different extension API and will silently refuse
-# to load the extension.
+# GNOME 45+ uses ES modules (extension.js); GNOME 42-44 uses the legacy
+# init() format (extension-legacy.js). CI copies the right variant into
+# extension.js at install time.
 GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
-if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1 \
-   && [ "${GNOME_SHELL_VER:-0}" -ge 45 ]; then
+if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-gext.xml"
   BE_COV_DIR="$COV_DIR/nolib-gext"
   mkdir -p "$BE_COV_DIR"
@@ -514,9 +540,15 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1 \
   TOKENS_FILE="$RUNNER_TEMP/mechatron-tokens"
   EXT_UUID="mechatron@mechatronic.dev"
 
-  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID
+  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER
   dbus-run-session -- bash -c '
     set -x
+
+    if [ -z "$XDG_RUNTIME_DIR" ]; then
+      export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+      mkdir -p "$XDG_RUNTIME_DIR"
+      chmod 700 "$XDG_RUNTIME_DIR"
+    fi
 
     # The outer ci-run-tests.sh setup puts openbox on DISPLAY=:99 so EWMH
     # window tests have a window manager. gnome-shell needs to BE the
@@ -538,10 +570,15 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1 \
     export MECHATRON_GNOME_TOKEN="$EXT_TOKEN"
 
     # Install the extension into the user-local GNOME Shell extensions
-    # directory (no system install needed).
+    # directory (no system install needed). On GNOME 42-44, swap in the
+    # legacy init()-format variant since those versions cannot load ESM.
     EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
     mkdir -p "$EXT_DIR"
     cp -r extensions/mechatron/* "$EXT_DIR/"
+    if [ "${GNOME_SHELL_VER:-0}" -lt 45 ]; then
+      echo ">>> GNOME Shell $GNOME_SHELL_VER < 45: using legacy extension format"
+      cp extensions/mechatron/extension-legacy.js "$EXT_DIR/extension.js"
+    fi
 
     # Pre-enable via gsettings (gnome-shell reads this list on startup;
     # gnome-extensions CLI would need a running shell). GVariant accepts

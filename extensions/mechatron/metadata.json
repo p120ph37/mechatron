@@ -2,7 +2,7 @@
   "uuid": "mechatron@mechatronic.dev",
   "name": "Mechatron Shell Bridge",
   "description": "Exposes a privileged D-Bus interface for window management (and future Shell-side features) to mechatron — a higher-trust complement to the standard xdg-desktop-portal API that bypasses permission popups and exposes capabilities the portal doesn't offer.",
-  "shell-version": ["45", "46", "47", "48"],
+  "shell-version": ["42", "43", "44", "45", "46", "47", "48"],
   "version": 1,
   "url": "https://github.com/p120ph37/mechatron"
 }
