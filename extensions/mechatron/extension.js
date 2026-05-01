@@ -25,7 +25,6 @@ import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 
 const BUS_NAME = "dev.mechatronic.Shell";
 const OBJECT_PATH = "/dev/mechatronic/Shell";
-const IFACE_NAME = "dev.mechatronic.Shell.Window";
 const TOKEN_FILE = GLib.getenv("MECHATRON_TOKENS_FILE") || "/etc/mechatron/tokens";
 
 const IFACE_XML = `

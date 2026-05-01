@@ -460,23 +460,19 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     fi
     echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
-    # Wait for org.gnome.Shell on the bus (needed by xdg-desktop-portal-gnome).
+    # Wait for org.gnome.Shell and org.gnome.Mutter.DisplayConfig on the bus.
+    # xdg-desktop-portal-gnome checks DisplayConfig to decide whether to
+    # expose RemoteDesktop/Screenshot interfaces.
+    SHELL_OK="" DC_OK=""
     for i in $(seq 1 60); do
-      if busctl --user list 2>/dev/null | grep -q "org.gnome.Shell"; then
-        echo ">>> org.gnome.Shell registered after ${i}*0.5s"
-        break
+      BUS_LIST=$(busctl --user list 2>/dev/null)
+      if [ -z "$SHELL_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Shell"; then
+        SHELL_OK=1; echo ">>> org.gnome.Shell registered after ${i}*0.5s"
       fi
-      sleep 0.5
-    done
-
-    # xdg-desktop-portal-gnome checks for org.gnome.Mutter.DisplayConfig to
-    # decide whether to expose RemoteDesktop/Screenshot interfaces. Wait for
-    # gnome-shell to register it (headless mode may be slower).
-    for i in $(seq 1 40); do
-      if busctl --user list 2>/dev/null | grep -q "org.gnome.Mutter.DisplayConfig"; then
-        echo ">>> org.gnome.Mutter.DisplayConfig registered after ${i}*0.5s"
-        break
+      if [ -z "$DC_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Mutter.DisplayConfig"; then
+        DC_OK=1; echo ">>> org.gnome.Mutter.DisplayConfig registered after ${i}*0.5s"
       fi
+      [ -n "$SHELL_OK" ] && [ -n "$DC_OK" ] && break
       sleep 0.5
     done
 
