@@ -391,8 +391,13 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
-# ── Linux-only: nolib[portal] via Wayland (mutter --headless) ─────
-if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
+# ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
+# Uses gnome-shell as the Wayland compositor (NOT mutter --headless) so
+# that org.gnome.Shell is on the session bus — xdg-desktop-portal-gnome
+# requires it to fulfill RemoteDesktop and Screenshot portal requests.
+# No mechatron extension is installed: this tests the standard freedesktop
+# portal code path, not the gext path.
+if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"
   BE_COV_DIR="$COV_DIR/nolib-portal"
   mkdir -p "$BE_COV_DIR"
@@ -407,8 +412,15 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
     echo ">>> XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
     echo ">>> DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
 
-    mutter --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
-    MUTTER_PID=$!
+    # Ensure the mechatron extension is NOT loaded in this cell — we are
+    # testing the standard portal path, not the gext path.
+    gsettings set org.gnome.shell enabled-extensions "[]" 2>/dev/null \
+      || dconf write /org/gnome/shell/enabled-extensions "[]" 2>/dev/null \
+      || true
+    gsettings set org.gnome.shell disable-user-extensions true 2>/dev/null || true
+
+    gnome-shell --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
+    SHELL_PID=$!
 
     for _ in $(seq 1 100); do
       WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | head -1 | xargs -r basename)
@@ -418,12 +430,21 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
     export WAYLAND_DISPLAY
 
     if [ -z "$WAYLAND_DISPLAY" ]; then
-      echo ">>> warning: mutter did not create a Wayland socket within 10s"
+      echo ">>> warning: gnome-shell did not create a Wayland socket within 10s"
       ls -la "$XDG_RUNTIME_DIR"/ 2>/dev/null || true
-      kill "$MUTTER_PID" 2>/dev/null || true
+      kill "$SHELL_PID" 2>/dev/null || true
       exit 1
     fi
     echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+
+    # Wait for org.gnome.Shell on the bus (needed by xdg-desktop-portal-gnome).
+    for i in $(seq 1 60); do
+      if busctl --user list 2>/dev/null | grep -q "org.gnome.Shell"; then
+        echo ">>> org.gnome.Shell registered after ${i}*0.5s"
+        break
+      fi
+      sleep 0.5
+    done
 
     /usr/libexec/xdg-desktop-portal &
     XDP_PID=$!
@@ -440,11 +461,11 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v mutter >/dev/null 2>&1; then
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$XDP_GNOME_PID" "$XDP_PID" "$MUTTER_PID" 2>/dev/null || true
+    kill "$XDP_GNOME_PID" "$XDP_PID" "$SHELL_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
-    "nolib-portal test (mutter --headless + portal) exited ${BE_RC} without producing a JUnit report."
+    "nolib-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
