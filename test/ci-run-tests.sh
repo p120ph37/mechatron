@@ -486,10 +486,16 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
+    # Verify PipeWire socket exists (xdg-desktop-portal needs it for
+    # RemoteDesktop/ScreenCast stream management).
+    echo ">>> PipeWire socket check:"
+    ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
+    pw-cli info 0 2>/dev/null | head -3 || echo "(pw-cli not available or pipewire not reachable)"
+
     # Start portal backend FIRST so it owns the impl bus name before the
     # frontend queries it (avoids a race where frontend D-Bus-activates a
     # second instance that lacks WAYLAND_DISPLAY).
-    G_MESSAGES_DEBUG=all /usr/libexec/xdg-desktop-portal-gnome 2>&1 &
+    /usr/libexec/xdg-desktop-portal-gnome 2>&1 &
     XDP_GNOME_PID=$!
     sleep 1
 
