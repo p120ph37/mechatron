@@ -446,13 +446,27 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
+    # Diagnostics: what portal files and interfaces are available?
+    echo ">>> portal files:"
+    ls /usr/share/xdg-desktop-portal/portals/ 2>/dev/null || echo "(none)"
+    for pf in /usr/share/xdg-desktop-portal/portals/*.portal; do
+      [ -f "$pf" ] && echo "--- $pf ---" && cat "$pf"
+    done
+    echo ">>> gnome-shell portal introspect:"
+    busctl --user introspect org.gnome.Shell /org/freedesktop/portal/desktop 2>/dev/null \
+      | head -30 || echo "(introspect failed)"
+
     /usr/libexec/xdg-desktop-portal &
     XDP_PID=$!
     /usr/libexec/xdg-desktop-portal-gnome &
     XDP_GNOME_PID=$!
     sleep 2
 
-    busctl --user list 2>/dev/null | grep -i portal || echo ">>> warning: portal not on session bus"
+    echo ">>> portal bus names:"
+    busctl --user list 2>/dev/null | grep -iE "portal|freedesktop.portal|gnome.Shell" || echo "(none)"
+    echo ">>> xdg-desktop-portal introspect:"
+    busctl --user introspect org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop 2>/dev/null \
+      | head -40 || echo "(introspect failed)"
 
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
