@@ -4,6 +4,7 @@
  * Dispatches to variant-specific implementations:
  *   - x11:    XTest FakeButtonEvent / WarpPointer over xproto. Requires $DISPLAY.
  *   - portal: RemoteDesktop D-Bus. Requires Wayland + portal.
+ *   - gext:   Clutter virtual device via GNOME Shell extension D-Bus.
  *   - vt:     /dev/uinput via ioctl bridge.
  */
 
@@ -13,6 +14,7 @@ const VARIANT = getNolibVariant();
 
 const impl: typeof import("./mouse-x11") =
   VARIANT === "portal" ? require("./mouse-portal") :
+  VARIANT === "gext"   ? require("./mouse-gext") :
   VARIANT === "vt"     ? require("./mouse-vt") :
                          require("./mouse-x11");
 

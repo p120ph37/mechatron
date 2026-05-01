@@ -10,7 +10,7 @@
 
 "use strict";
 
-const { Gio, GLib, Meta, Shell } = imports.gi;
+const { Clutter, Gio, GLib, Meta, Shell } = imports.gi;
 
 const BUS_NAME = "dev.mechatronic.Shell";
 const OBJECT_PATH = "/dev/mechatronic/Shell";
@@ -107,6 +107,48 @@ const IFACE_XML = `
     </method>
     <method name="Ping">
       <arg type="b" direction="out" name="ok"/>
+    </method>
+  </interface>
+</node>
+`;
+
+const INPUT_IFACE_XML = `
+<node>
+  <interface name="dev.mechatronic.Shell.Input">
+    <method name="KeyboardKeysym">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="in" name="keysym"/>
+      <arg type="b" direction="in" name="pressed"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="PointerButton">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="i" direction="in" name="button"/>
+      <arg type="b" direction="in" name="pressed"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="PointerMotionAbsolute">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="d" direction="in" name="x"/>
+      <arg type="d" direction="in" name="y"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="PointerMotion">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="d" direction="in" name="dx"/>
+      <arg type="d" direction="in" name="dy"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="PointerAxisDiscrete">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="in" name="axis"/>
+      <arg type="i" direction="in" name="steps"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="GetPointerPos">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="d" direction="out" name="x"/>
+      <arg type="d" direction="out" name="y"/>
     </method>
   </interface>
 </node>
@@ -275,7 +317,22 @@ function init() {
 class MechatronWMExtension {
   constructor() {
     this._dbus = null;
+    this._dbusInput = null;
     this._ownerId = 0;
+    this._virtualKeyboard = null;
+    this._virtualPointer = null;
+  }
+
+  _ensureVirtualDevices() {
+    if (!this._virtualKeyboard) {
+      const seat = Clutter.get_default_backend().get_default_seat();
+      this._virtualKeyboard = seat.create_virtual_device(
+        Clutter.InputDeviceType.KEYBOARD_DEVICE,
+      );
+      this._virtualPointer = seat.create_virtual_device(
+        Clutter.InputDeviceType.POINTER_DEVICE,
+      );
+    }
   }
 
   enable() {
@@ -283,6 +340,70 @@ class MechatronWMExtension {
     const ifaceInfo = nodeInfo.interfaces[0];
     this._dbus = Gio.DBusExportedObject.wrapJSObject(ifaceInfo, handlers);
     this._dbus.export(Gio.DBus.session, OBJECT_PATH);
+
+    const ext = this;
+    const inputNodeInfo = Gio.DBusNodeInfo.new_for_xml(INPUT_IFACE_XML);
+    const inputIfaceInfo = inputNodeInfo.interfaces[0];
+    this._dbusInput = Gio.DBusExportedObject.wrapJSObject(inputIfaceInfo, {
+      KeyboardKeysym(token, keysym, pressed) {
+        requireAuth(token);
+        ext._ensureVirtualDevices();
+        const time = global.get_current_time();
+        const state = pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
+        ext._virtualKeyboard.notify_keyval(time, keysym, state);
+        return true;
+      },
+      PointerButton(token, button, pressed) {
+        requireAuth(token);
+        ext._ensureVirtualDevices();
+        const time = global.get_current_time();
+        const state = pressed ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED;
+        ext._virtualPointer.notify_button(time, button, state);
+        return true;
+      },
+      PointerMotionAbsolute(token, x, y) {
+        requireAuth(token);
+        ext._ensureVirtualDevices();
+        const time = global.get_current_time();
+        ext._virtualPointer.notify_absolute_motion(time, x, y);
+        return true;
+      },
+      PointerMotion(token, dx, dy) {
+        requireAuth(token);
+        ext._ensureVirtualDevices();
+        const time = global.get_current_time();
+        ext._virtualPointer.notify_relative_motion(time, dx, dy);
+        return true;
+      },
+      PointerAxisDiscrete(token, axis, steps) {
+        requireAuth(token);
+        ext._ensureVirtualDevices();
+        const time = global.get_current_time();
+        const absSteps = Math.abs(steps);
+        let direction;
+        if (axis === 0) {
+          direction = steps > 0
+            ? Clutter.ScrollDirection.DOWN
+            : Clutter.ScrollDirection.UP;
+        } else {
+          direction = steps > 0
+            ? Clutter.ScrollDirection.RIGHT
+            : Clutter.ScrollDirection.LEFT;
+        }
+        for (let i = 0; i < absSteps; i++) {
+          ext._virtualPointer.notify_discrete_scroll(time, direction,
+            Clutter.ScrollFinishFlags.NONE);
+        }
+        return true;
+      },
+      GetPointerPos(token) {
+        requireAuth(token);
+        const [x, y] = global.get_pointer();
+        return [x, y];
+      },
+    });
+    this._dbusInput.export(Gio.DBus.session, OBJECT_PATH);
+
     this._ownerId = Gio.bus_own_name(
       Gio.BusType.SESSION,
       BUS_NAME,
@@ -294,6 +415,10 @@ class MechatronWMExtension {
   }
 
   disable() {
+    if (this._dbusInput) {
+      this._dbusInput.unexport();
+      this._dbusInput = null;
+    }
     if (this._dbus) {
       this._dbus.unexport();
       this._dbus = null;
@@ -302,5 +427,7 @@ class MechatronWMExtension {
       Gio.bus_unown_name(this._ownerId);
       this._ownerId = 0;
     }
+    this._virtualKeyboard = null;
+    this._virtualPointer = null;
   }
 }

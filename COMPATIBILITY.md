@@ -36,25 +36,25 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Keyboard
 
-| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|------|
-| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_getKeyState | ok | skip | ok | ok | skip | skip | ok | ok | ok | ok |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[gext] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|------|
+| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_getKeyState | ok | skip | ok | ok | skip | skip | skip | ok | ok | ok | ok |
 
 ## Mouse
 
-| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|------|
-| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_getPos | ok | skip | ok | ok | skip | skip | ok | ok | ok | ok |
-| mouse_setPos | ok | ok | ok | ok | skip | ok | ok | ok | ok | ok |
-| mouse_getButtonState | ok | skip | ok | ok | skip | skip | ok | ok | ok | ok |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[gext] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|------|
+| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_getPos | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
+| mouse_setPos | ok | ok | ok | ok | skip | ok | ok | ok | ok | ok | ok |
+| mouse_getButtonState | ok | skip | ok | ok | skip | skip | skip | ok | ok | ok | ok |
 
 ## Window
 

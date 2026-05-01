@@ -11,6 +11,10 @@ import { getNolibVariant } from "../backend";
 
 const VARIANT = getNolibVariant();
 
+if (VARIANT === "gext") {
+  throw new Error("nolib/screen[gext]: no gext screen implementation; use nolib[portal] or nolib[x11]");
+}
+
 const impl: typeof import("./screen-x11") =
   VARIANT === "portal" ? require("./screen-portal") :
   VARIANT === "vt"     ? require("./screen-vt") :

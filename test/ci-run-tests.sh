@@ -392,43 +392,56 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
 fi
 
 # ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
-# Uses gnome-shell as the Wayland compositor so that org.gnome.Shell is
-# on the session bus — xdg-desktop-portal-gnome requires it to fulfill
-# RemoteDesktop and Screenshot portal requests. PipeWire must be running
-# before gnome-shell starts so Mutter initialises its RemoteDesktop and
-# ScreenCast D-Bus interfaces (which xdg-desktop-portal-gnome delegates
-# to); without PipeWire, xdg-desktop-portal-gnome falls back to
-# "settings only" mode and the portal tests fail.
-# No mechatron extension is installed: this tests the standard freedesktop
-# portal code path, not the gext path.
+# Tests the standard freedesktop portal code path for keyboard, mouse,
+# and screen. The mechatron extension is loaded so its Input interface
+# can auto-approve portal permission dialogs (which otherwise block in
+# headless CI since nobody can click "Allow"). The test itself uses
+# MECHATRON_BACKEND=nolib[portal] — the extension is only used for the
+# dialog approval side-channel.
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"
   BE_COV_DIR="$COV_DIR/nolib-portal"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
 
-  export BUN JUNIT_FILE BE_COV_DIR
+  TOKENS_FILE="${RUNNER_TEMP:-/tmp}/mechatron-portal-tokens"
+  EXT_UUID="mechatron@mechatronic.dev"
+
+  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER
   dbus-run-session -- bash -c '
     set -x
     export XDG_SESSION_TYPE=wayland
     export XDG_CURRENT_DESKTOP=GNOME
 
-    # gnome-shell + PipeWire need XDG_RUNTIME_DIR for their sockets.
     if [ -z "$XDG_RUNTIME_DIR" ]; then
       export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
       mkdir -p "$XDG_RUNTIME_DIR"
       chmod 700 "$XDG_RUNTIME_DIR"
     fi
 
-    # Ensure the mechatron extension is NOT loaded in this cell — we are
-    # testing the standard portal path, not the gext path.
-    gsettings set org.gnome.shell enabled-extensions "[]" 2>/dev/null \
-      || dconf write /org/gnome/shell/enabled-extensions "[]" 2>/dev/null \
-      || true
-    gsettings set org.gnome.shell disable-user-extensions true 2>/dev/null || true
+    # Install the mechatron extension — needed to auto-approve portal
+    # permission dialogs via its Input interface (Clutter virtual device).
+    EXT_TOKEN=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+    echo "$EXT_TOKEN" > "$TOKENS_FILE"
+    chmod 600 "$TOKENS_FILE"
+    export MECHATRON_TOKENS_FILE="$TOKENS_FILE"
+    export MECHATRON_GNOME_TOKEN="$EXT_TOKEN"
 
-    # PipeWire must be running before gnome-shell so Mutter can register
-    # org.gnome.Mutter.RemoteDesktop and org.gnome.Mutter.ScreenCast.
+    EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+    mkdir -p "$EXT_DIR"
+    cp -r extensions/mechatron/* "$EXT_DIR/"
+    if [ "${GNOME_SHELL_VER:-0}" -lt 45 ]; then
+      cp extensions/mechatron/extension-legacy.js "$EXT_DIR/extension.js"
+    fi
+    mkdir -p "$HOME/.config/dconf"
+    EXT_LIST="[\"$EXT_UUID\"]"
+    gsettings set org.gnome.shell enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || dconf write /org/gnome/shell/enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || true
+    gsettings set org.gnome.shell disable-user-extensions false 2>/dev/null || true
+
+    # PipeWire must be running before gnome-shell so Mutter registers
+    # RemoteDesktop/ScreenCast D-Bus interfaces.
     pipewire &
     PW_PID=$!
     sleep 0.5
@@ -460,17 +473,14 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     fi
     echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
-    # Push env into the D-Bus daemon so D-Bus-activated services (like
-    # portal-gnome and xdg-desktop-portal) inherit display and runtime vars.
     dbus-update-activation-environment \
       XDG_RUNTIME_DIR WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+      MECHATRON_TOKENS_FILE \
       2>/dev/null || true
 
-    # Wait for org.gnome.Shell plus Mutter readiness. GNOME 46+ registers
-    # ServiceChannel (which portal-gnome 46 connects to); GNOME 42-45
-    # only registers DisplayConfig/RemoteDesktop/ScreenCast. Accept either.
-    SHELL_OK="" MUTTER_OK=""
-    for i in $(seq 1 60); do
+    # Wait for gnome-shell + Mutter + extension.
+    SHELL_OK="" MUTTER_OK="" EXT_OK=""
+    for i in $(seq 1 120); do
       BUS_LIST=$(busctl --user list 2>/dev/null)
       if [ -z "$SHELL_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Shell"; then
         SHELL_OK=1; echo ">>> org.gnome.Shell registered after ${i}*0.5s"
@@ -482,28 +492,24 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
           MUTTER_OK=1; echo ">>> org.gnome.Mutter.RemoteDesktop registered after ${i}*0.5s"
         fi
       fi
-      [ -n "$SHELL_OK" ] && [ -n "$MUTTER_OK" ] && break
+      if [ -z "$EXT_OK" ] && echo "$BUS_LIST" | grep -q "dev.mechatronic.Shell"; then
+        EXT_OK=1; echo ">>> mechatron extension registered after ${i}*0.5s"
+      fi
+      [ -n "$SHELL_OK" ] && [ -n "$MUTTER_OK" ] && [ -n "$EXT_OK" ] && break
       sleep 0.5
     done
 
-    # Verify PipeWire socket exists (xdg-desktop-portal needs it for
-    # RemoteDesktop/ScreenCast stream management).
     echo ">>> PipeWire socket check:"
     ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
-    pw-cli info 0 2>/dev/null | head -3 || echo "(pw-cli not available or pipewire not reachable)"
 
-    # Start portal backend FIRST so it owns the impl bus name before the
-    # frontend queries it (avoids a race where frontend D-Bus-activates a
-    # second instance that lacks WAYLAND_DISPLAY).
+    # Start portal-gnome, then the frontend.
     /usr/libexec/xdg-desktop-portal-gnome 2>&1 &
     XDP_GNOME_PID=$!
     sleep 1
 
-    /usr/libexec/xdg-desktop-portal 2>&1 &
+    /usr/libexec/xdg-desktop-portal --replace 2>&1 &
     XDP_PID=$!
 
-    # Wait for the portal frontend to actually own the bus name (not just
-    # activatable). busctl shows active names with a PID in column 2.
     for i in $(seq 1 40); do
       if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
         echo ">>> org.freedesktop.portal.Desktop registered after ${i}*0.5s"
@@ -511,9 +517,24 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       fi
       sleep 0.5
     done
-    echo ">>> portal introspect:"
-    busctl --user introspect org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop 2>/dev/null \
-      | grep -E "interface|org\.freedesktop\.portal\." | head -20 || echo "(no portal interfaces)"
+
+    # Background auto-approver: uses the mechatron extension Input
+    # interface to send Enter keypresses, dismissing portal permission
+    # dialogs that portal-gnome shows for RemoteDesktop/Screenshot.
+    (
+      IFACE="dev.mechatronic.Shell.Input"
+      DEST="dev.mechatronic.Shell"
+      OBJ="/dev/mechatronic/Shell"
+      XKB_RETURN=65293
+      for attempt in $(seq 1 120); do
+        busctl --user call "$DEST" "$OBJ" "$IFACE" \
+          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" true 2>/dev/null
+        busctl --user call "$DEST" "$OBJ" "$IFACE" \
+          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" false 2>/dev/null
+        sleep 0.5
+      done
+    ) &
+    APPROVER_PID=$!
 
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
@@ -522,7 +543,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$XDP_GNOME_PID" "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+    kill "$APPROVER_PID" "$XDP_GNOME_PID" "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
@@ -530,17 +551,13 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
-# ── Linux-only: full GNOME Shell + Mechatron extension ──────────
-# Boots a real gnome-shell process on Xvfb so the shell loads our
-# extension (mechatron@mechatronic.dev) and answers the
-# dev.mechatronic.Shell D-Bus interface. This exercises lib/gext/window.ts
-# (D-Bus client) + lib/gext/installer.ts (extension lifecycle) +
-# lib/nolib/window-gext.ts (variant impl) end-to-end. Distinct from the
-# nolib[portal] cell which only exercises the read-only AT-SPI fallback.
-#
-# GNOME 45+ uses ES modules (extension.js); GNOME 42-44 uses the legacy
-# init() format (extension-legacy.js). CI copies the right variant into
-# extension.js at install time.
+# ── Linux-only: full GNOME Shell + Mechatron extension (Wayland) ──
+# Boots gnome-shell --headless as a Wayland compositor and loads the
+# mechatron extension, exercising the gext variant for window management
+# AND keyboard/mouse input injection (via Clutter virtual devices).
+# PipeWire is required so Mutter initialises its RemoteDesktop/ScreenCast
+# D-Bus interfaces. GNOME 45+ uses ES modules (extension.js); GNOME 42-44
+# uses the legacy init() format (extension-legacy.js).
 GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-gext.xml"
@@ -554,6 +571,8 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER
   dbus-run-session -- bash -c '
     set -x
+    export XDG_SESSION_TYPE=wayland
+    export XDG_CURRENT_DESKTOP=GNOME
 
     if [ -z "$XDG_RUNTIME_DIR" ]; then
       export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
@@ -561,17 +580,6 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       chmod 700 "$XDG_RUNTIME_DIR"
     fi
 
-    # The outer ci-run-tests.sh setup puts openbox on DISPLAY=:99 so EWMH
-    # window tests have a window manager. gnome-shell needs to BE the
-    # window manager, so it cannot share that display. Start a fresh
-    # Xvfb on :199 dedicated to gnome-shell.
-    Xvfb :199 -screen 0 1920x1080x24 -nolisten tcp &
-    GEXT_XVFB_PID=$!
-    for _ in $(seq 1 50); do
-      xdpyinfo -display :199 >/dev/null 2>&1 && break
-      sleep 0.1
-    done
-    export DISPLAY=:199
     export MECHATRON_TOKENS_FILE="$TOKENS_FILE"
 
     # Provision a token for the extension to validate against.
@@ -580,9 +588,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     chmod 600 "$TOKENS_FILE"
     export MECHATRON_GNOME_TOKEN="$EXT_TOKEN"
 
-    # Install the extension into the user-local GNOME Shell extensions
-    # directory (no system install needed). On GNOME 42-44, swap in the
-    # legacy init()-format variant since those versions cannot load ESM.
+    # Install the extension. On GNOME 42-44, swap in the legacy format.
     EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
     mkdir -p "$EXT_DIR"
     cp -r extensions/mechatron/* "$EXT_DIR/"
@@ -591,25 +597,46 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       cp extensions/mechatron/extension-legacy.js "$EXT_DIR/extension.js"
     fi
 
-    # Pre-enable via gsettings (gnome-shell reads this list on startup;
-    # gnome-extensions CLI would need a running shell). GVariant accepts
-    # double-quoted strings inside arrays which sidesteps the bash -c
-    # outer-single-quote escaping headache entirely.
     mkdir -p "$HOME/.config/dconf"
     EXT_LIST="[\"$EXT_UUID\"]"
     gsettings set org.gnome.shell enabled-extensions "$EXT_LIST" 2>/dev/null \
       || dconf write /org/gnome/shell/enabled-extensions "$EXT_LIST" 2>/dev/null \
       || echo ">>> warning: could not pre-enable extension via gsettings/dconf"
-    # Also disable user-extensions safety lock that some Shell versions
-    # ship with (extensions silently fail to load otherwise).
     gsettings set org.gnome.shell disable-user-extensions false 2>/dev/null || true
 
-    # Start gnome-shell on the dedicated Xvfb display.
-    gnome-shell --x11 &
+    # PipeWire must be running before gnome-shell so Mutter initialises
+    # its RemoteDesktop/ScreenCast D-Bus interfaces.
+    pipewire &
+    PW_PID=$!
+    sleep 0.5
+    if command -v wireplumber >/dev/null 2>&1; then
+      wireplumber &
+      WP_PID=$!
+    elif command -v pipewire-media-session >/dev/null 2>&1; then
+      pipewire-media-session &
+      WP_PID=$!
+    else
+      WP_PID=""
+    fi
+    sleep 0.5
+
+    gnome-shell --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
     SHELL_PID=$!
 
-    # Wait for the extension to register its D-Bus name (up to 60s —
-    # gnome-shell startup is not fast in CI).
+    # Wait for Wayland socket.
+    for _ in $(seq 1 100); do
+      WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | head -1 | xargs -r basename)
+      [ -n "$WAYLAND_DISPLAY" ] && break
+      sleep 0.1
+    done
+    export WAYLAND_DISPLAY
+    echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+
+    dbus-update-activation-environment \
+      XDG_RUNTIME_DIR WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+      2>/dev/null || true
+
+    # Wait for the extension to register its D-Bus name.
     for i in $(seq 1 120); do
       if busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
         echo ">>> mechatron extension registered on D-Bus after ${i}*0.5s"
@@ -622,27 +649,23 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     if ! busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
       echo ">>> warning: extension never registered; current bus state:"
       busctl --user list 2>/dev/null | head -50 || true
-      kill "$SHELL_PID" "$GEXT_XVFB_PID" 2>/dev/null || true
+      kill "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
       exit 1
     fi
 
-    # Smoke-test the bus interface before running the full suite.
     busctl --user call dev.mechatronic.Shell \
       /dev/mechatronic/Shell dev.mechatronic.Shell.Window \
       Ping || echo ">>> Ping failed"
 
-    # Only the window subsystem has a gext variant — pin it explicitly
-    # while leaving every other subsystem on the default ffi backend so
-    # keyboard/mouse/clipboard/etc. tests still load successfully.
-    MECHATRON_BACKEND=ffi \
-    MECHATRON_BACKEND_WINDOW="nolib[gext]" \
+    # Use gext for window + keyboard + mouse (all via extension D-Bus).
+    MECHATRON_BACKEND="nolib[gext]" \
     MECHATRON_SKIP_UNIT=1 \
       "$BUN" test test/bun.test.ts \
         --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$SHELL_PID" "$GEXT_XVFB_PID" 2>/dev/null || true
+    kill "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-gext" \
