@@ -392,9 +392,13 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
 fi
 
 # ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
-# Uses gnome-shell as the Wayland compositor (NOT mutter --headless) so
-# that org.gnome.Shell is on the session bus — xdg-desktop-portal-gnome
-# requires it to fulfill RemoteDesktop and Screenshot portal requests.
+# Uses gnome-shell as the Wayland compositor so that org.gnome.Shell is
+# on the session bus — xdg-desktop-portal-gnome requires it to fulfill
+# RemoteDesktop and Screenshot portal requests. PipeWire must be running
+# before gnome-shell starts so Mutter initialises its RemoteDesktop and
+# ScreenCast D-Bus interfaces (which xdg-desktop-portal-gnome delegates
+# to); without PipeWire, xdg-desktop-portal-gnome falls back to
+# "settings only" mode and the portal tests fail.
 # No mechatron extension is installed: this tests the standard freedesktop
 # portal code path, not the gext path.
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
@@ -409,15 +413,28 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     export XDG_SESSION_TYPE=wayland
     export XDG_CURRENT_DESKTOP=GNOME
 
-    echo ">>> XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-    echo ">>> DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
-
     # Ensure the mechatron extension is NOT loaded in this cell — we are
     # testing the standard portal path, not the gext path.
     gsettings set org.gnome.shell enabled-extensions "[]" 2>/dev/null \
       || dconf write /org/gnome/shell/enabled-extensions "[]" 2>/dev/null \
       || true
     gsettings set org.gnome.shell disable-user-extensions true 2>/dev/null || true
+
+    # PipeWire must be running before gnome-shell so Mutter can register
+    # org.gnome.Mutter.RemoteDesktop and org.gnome.Mutter.ScreenCast.
+    pipewire &
+    PW_PID=$!
+    sleep 0.5
+    if command -v wireplumber >/dev/null 2>&1; then
+      wireplumber &
+      WP_PID=$!
+    elif command -v pipewire-media-session >/dev/null 2>&1; then
+      pipewire-media-session &
+      WP_PID=$!
+    else
+      WP_PID=""
+    fi
+    sleep 0.5
 
     gnome-shell --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
     SHELL_PID=$!
@@ -431,8 +448,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
 
     if [ -z "$WAYLAND_DISPLAY" ]; then
       echo ">>> warning: gnome-shell did not create a Wayland socket within 10s"
-      ls -la "$XDG_RUNTIME_DIR"/ 2>/dev/null || true
-      kill "$SHELL_PID" 2>/dev/null || true
+      kill "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
       exit 1
     fi
     echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
@@ -446,27 +462,19 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
-    # Diagnostics: what portal files and interfaces are available?
-    echo ">>> portal files:"
-    ls /usr/share/xdg-desktop-portal/portals/ 2>/dev/null || echo "(none)"
-    for pf in /usr/share/xdg-desktop-portal/portals/*.portal; do
-      [ -f "$pf" ] && echo "--- $pf ---" && cat "$pf"
-    done
-    echo ">>> gnome-shell portal introspect:"
-    busctl --user introspect org.gnome.Shell /org/freedesktop/portal/desktop 2>/dev/null \
-      | head -30 || echo "(introspect failed)"
-
     /usr/libexec/xdg-desktop-portal &
     XDP_PID=$!
     /usr/libexec/xdg-desktop-portal-gnome &
     XDP_GNOME_PID=$!
-    sleep 2
 
-    echo ">>> portal bus names:"
-    busctl --user list 2>/dev/null | grep -iE "portal|freedesktop.portal|gnome.Shell" || echo "(none)"
-    echo ">>> xdg-desktop-portal introspect:"
-    busctl --user introspect org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop 2>/dev/null \
-      | head -40 || echo "(introspect failed)"
+    # Wait for the portal frontend to register on the bus.
+    for i in $(seq 1 40); do
+      if busctl --user list 2>/dev/null | grep -q "org.freedesktop.portal.Desktop"; then
+        echo ">>> org.freedesktop.portal.Desktop registered after ${i}*0.5s"
+        break
+      fi
+      sleep 0.5
+    done
 
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
@@ -475,7 +483,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$XDP_GNOME_PID" "$XDP_PID" "$SHELL_PID" 2>/dev/null || true
+    kill "$XDP_GNOME_PID" "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
@@ -490,7 +498,14 @@ fi
 # (D-Bus client) + lib/gext/installer.ts (extension lifecycle) +
 # lib/nolib/window-gext.ts (variant impl) end-to-end. Distinct from the
 # nolib[portal] cell which only exercises the read-only AT-SPI fallback.
-if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
+#
+# The extension uses GNOME 45+ ES module format (import/export default),
+# so it requires Shell 45 or later. Earlier versions (e.g. Shell 42 on
+# Ubuntu 22.04) use a different extension API and will silently refuse
+# to load the extension.
+GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
+if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1 \
+   && [ "${GNOME_SHELL_VER:-0}" -ge 45 ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-gext.xml"
   BE_COV_DIR="$COV_DIR/nolib-gext"
   mkdir -p "$BE_COV_DIR"
