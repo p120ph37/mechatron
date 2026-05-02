@@ -428,7 +428,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       chmod 700 "$XDG_RUNTIME_DIR"
     fi
 
-    # Install the mechatron extension — needed to auto-approve portal
+    # Install the mechatron extension -- needed to auto-approve portal
     # permission dialogs via its Input interface (Clutter virtual device).
     EXT_TOKEN=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
     echo "$EXT_TOKEN" > "$TOKENS_FILE"
@@ -534,12 +534,10 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
-    # Background auto-approver: uses the mechatron extension Input
-    # interface to send Enter keypresses, dismissing portal permission
-    # dialogs that portal-gnome shows for RemoteDesktop/Screenshot.
-    # The "Allow" button has default focus in GNOME system dialogs, so
-    # a bare Enter activates it. (Do NOT send Tab first — that moves
-    # focus to "Don't Allow" and causes response=1 denial.)
+    # Background auto-approver: send Enter keypresses via the mechatron
+    # extension Input interface to dismiss portal permission dialogs.
+    # The Allow button has default focus, so bare Enter approves it.
+    # Do NOT send Tab first -- it moves focus to the deny button.
     (
       IFACE="dev.mechatronic.Shell.Input"
       WIFACE="dev.mechatronic.Shell.Window"
@@ -549,7 +547,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       for attempt in $(seq 1 120); do
         # Diagnostic: list windows on first few attempts and every 20th
         if [ "$attempt" -le 3 ] || [ $((attempt % 20)) -eq 0 ]; then
-          echo ">>> [approver] attempt $attempt — window list:"
+          echo ">>> [approver] attempt $attempt - window list:"
           busctl --user call "$DEST" "$OBJ" "$WIFACE" \
             List s "$EXT_TOKEN" 2>&1 || echo "(List call failed)"
         fi
