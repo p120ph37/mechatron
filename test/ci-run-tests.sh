@@ -416,7 +416,88 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   EXT_UUID="mechatron@mechatronic.dev"
 
   echo ">>> [portal] GNOME Shell version: $GNOME_SHELL_VER ($(gnome-shell --version 2>/dev/null))"
-  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER
+
+  # Write the portal dialog auto-approver as a separate script to avoid
+  # quoting issues inside the bash -c single-quoted string.
+  APPROVER_SCRIPT="${RUNNER_TEMP:-/tmp}/portal-approver.sh"
+  cat > "$APPROVER_SCRIPT" <<'APPROVER_HEREDOC'
+#!/usr/bin/env bash
+# Auto-approve portal permission dialogs by detecting dialog windows
+# and clicking the Allow button via the mechatron extension Input interface.
+# Usage: portal-approver.sh <ext-token>
+set -u
+EXT_TOKEN="$1"
+IFACE="dev.mechatronic.Shell.Input"
+WIFACE="dev.mechatronic.Shell.Window"
+DEST="dev.mechatronic.Shell"
+OBJ="/dev/mechatronic/Shell"
+XKB_RETURN=65293
+SCREENSHOT_TAKEN=""
+
+for attempt in $(seq 1 120); do
+  RAW=$(busctl --user call "$DEST" "$OBJ" "$WIFACE" \
+    List s "$EXT_TOKEN" 2>/dev/null) || RAW=""
+
+  if [ "$attempt" -le 5 ] || [ $((attempt % 20)) -eq 0 ]; then
+    echo ">>> [approver] attempt $attempt - raw: $RAW"
+  fi
+
+  # Check if a portal dialog window is present
+  if echo "$RAW" | grep -qiE 'Remote Desktop|Screenshot|Screen Cast|Sharing'; then
+    # Extract window id (first "id": value)
+    DID=$(echo "$RAW" | grep -oE '"id":[0-9]+' | head -1 | grep -oE '[0-9]+')
+
+    # Extract bounds
+    BX=$(echo "$RAW" | grep -oE '"x":[0-9]+' | head -1 | grep -oE '[0-9]+')
+    BY=$(echo "$RAW" | grep -oE '"y":[0-9]+' | head -1 | grep -oE '[0-9]+')
+    BW=$(echo "$RAW" | grep -oE '"w":[0-9]+' | head -1 | grep -oE '[0-9]+')
+    BH=$(echo "$RAW" | grep -oE '"h":[0-9]+' | head -1 | grep -oE '[0-9]+')
+
+    # Take one screenshot for debugging
+    if [ -z "$SCREENSHOT_TAKEN" ]; then
+      SCREENSHOT_TAKEN=1
+      ACTIVE_WIN=$(busctl --user call "$DEST" "$OBJ" "$WIFACE" \
+        GetActive s "$EXT_TOKEN" 2>/dev/null) || ACTIVE_WIN="(failed)"
+      echo ">>> [approver] dialog found: id=$DID bounds=($BX,$BY,$BW,$BH) active=$ACTIVE_WIN"
+      busctl --user call org.gnome.Shell.Screenshot \
+        /org/gnome/Shell/Screenshot org.gnome.Shell.Screenshot \
+        Screenshot bss true "" "${SCREENSHOT_DIR:-/tmp}/portal-dialog-$attempt.png" \
+        2>/dev/null && echo ">>> screenshot saved" || echo ">>> screenshot failed"
+    fi
+
+    # Activate (focus) the dialog window
+    if [ -n "$DID" ]; then
+      busctl --user call "$DEST" "$OBJ" "$WIFACE" \
+        Activate su "$EXT_TOKEN" "$DID" 2>/dev/null
+    fi
+
+    # Click the Allow button if bounds are valid (bottom-right area)
+    if [ -n "$BW" ] && [ "$BW" -gt 0 ] 2>/dev/null && [ "$BH" -gt 0 ] 2>/dev/null; then
+      CX=$((BX + BW - 80))
+      CY=$((BY + BH - 40))
+      if [ "$attempt" -le 10 ] || [ $((attempt % 20)) -eq 0 ]; then
+        echo ">>> [approver] clicking at ($CX, $CY)"
+      fi
+      busctl --user call "$DEST" "$OBJ" "$IFACE" \
+        PointerMotionAbsolute sdd "$EXT_TOKEN" "$CX" "$CY" 2>/dev/null
+      sleep 0.1
+      busctl --user call "$DEST" "$OBJ" "$IFACE" \
+        PointerButton sib "$EXT_TOKEN" 272 true 2>/dev/null
+      busctl --user call "$DEST" "$OBJ" "$IFACE" \
+        PointerButton sib "$EXT_TOKEN" 272 false 2>/dev/null
+    fi
+  fi
+
+  # Also send Enter as backup
+  busctl --user call "$DEST" "$OBJ" "$IFACE" \
+    KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" true 2>/dev/null
+  busctl --user call "$DEST" "$OBJ" "$IFACE" \
+    KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" false 2>/dev/null
+  sleep 0.5
+done
+APPROVER_HEREDOC
+  chmod +x "$APPROVER_SCRIPT"
+  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER APPROVER_SCRIPT
   dbus-run-session -- bash -c '
     set -x
     export XDG_SESSION_TYPE=wayland
@@ -518,13 +599,11 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     echo ">>> PipeWire socket check:"
     ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
 
-    # Start portal-gnome, then the frontend.
-    /usr/libexec/xdg-desktop-portal-gnome 2>&1 &
-    XDP_GNOME_PID=$!
-    sleep 1
-
+    # Start portal frontend; portal-gnome is auto-activated by D-Bus
+    # when the first portal request arrives.
     /usr/libexec/xdg-desktop-portal --replace 2>&1 &
     XDP_PID=$!
+    XDP_GNOME_PID=""
 
     for i in $(seq 1 40); do
       if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
@@ -534,30 +613,10 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
       sleep 0.5
     done
 
-    # Background auto-approver: send Enter keypresses via the mechatron
-    # extension Input interface to dismiss portal permission dialogs.
-    # The Allow button has default focus, so bare Enter approves it.
-    # Do NOT send Tab first -- it moves focus to the deny button.
-    (
-      IFACE="dev.mechatronic.Shell.Input"
-      WIFACE="dev.mechatronic.Shell.Window"
-      DEST="dev.mechatronic.Shell"
-      OBJ="/dev/mechatronic/Shell"
-      XKB_RETURN=65293
-      for attempt in $(seq 1 120); do
-        # Diagnostic: list windows on first few attempts and every 20th
-        if [ "$attempt" -le 3 ] || [ $((attempt % 20)) -eq 0 ]; then
-          echo ">>> [approver] attempt $attempt - window list:"
-          busctl --user call "$DEST" "$OBJ" "$WIFACE" \
-            List s "$EXT_TOKEN" 2>&1 || echo "(List call failed)"
-        fi
-        busctl --user call "$DEST" "$OBJ" "$IFACE" \
-          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" true 2>/dev/null
-        busctl --user call "$DEST" "$OBJ" "$IFACE" \
-          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" false 2>/dev/null
-        sleep 0.5
-      done
-    ) &
+    SCREENSHOT_DIR="${RUNNER_TEMP:-/tmp}/portal-screenshots"
+    mkdir -p "$SCREENSHOT_DIR"
+    export SCREENSHOT_DIR
+    "$APPROVER_SCRIPT" "$EXT_TOKEN" &
     APPROVER_PID=$!
 
     MECHATRON_BACKEND="nolib[portal]" \
@@ -567,7 +626,7 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$APPROVER_PID" "$XDP_GNOME_PID" "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+    kill "$APPROVER_PID" ${XDP_GNOME_PID:+"$XDP_GNOME_PID"} "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
