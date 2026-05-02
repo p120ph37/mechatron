@@ -670,7 +670,7 @@ AUTOACCEPT_HEREDOC
     fi
 
     # Wait for org.freedesktop.portal.Desktop (auto-activated by ibus
-    # during gnome-shell startup).  If it doesn't appear, trigger it.
+    # during gnome-shell startup).  If it does not appear, trigger it.
     for i in $(seq 1 20); do
       if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
         echo ">>> org.freedesktop.portal.Desktop registered after ${i}*0.5s"
