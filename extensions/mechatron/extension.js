@@ -133,6 +133,12 @@ const INPUT_IFACE_XML = `
       <arg type="b" direction="in" name="pressed"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
+    <method name="KeyboardKey">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="in" name="key"/>
+      <arg type="b" direction="in" name="pressed"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
     <method name="PointerButton">
       <arg type="s" direction="in" name="token"/>
       <arg type="i" direction="in" name="button"/>
@@ -186,6 +192,11 @@ function requireAuth(token) {
   const allowed = loadTokens();
   if (allowed.size === 0) throw new Error("No tokens configured in " + TOKEN_FILE);
   if (!allowed.has(token)) throw new Error("Unauthorized: invalid token");
+}
+
+function inputTime() {
+  const t = global.get_current_time();
+  return t > 0 ? t : Math.floor(GLib.get_monotonic_time() / 1000);
 }
 
 function findWindow(id) {
@@ -371,16 +382,25 @@ export default class MechatronWMExtension extends Extension {
       KeyboardKeysym(token, keysym, pressed) {
         requireAuth(token);
         ext._ensureVirtualDevices();
-        const time = global.get_current_time();
+        const time = inputTime();
         const state = pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
         ext._virtualKeyboard.notify_keyval(time, keysym, state);
+        return true;
+      },
+
+      KeyboardKey(token, key, pressed) {
+        requireAuth(token);
+        ext._ensureVirtualDevices();
+        const time = inputTime();
+        const state = pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
+        ext._virtualKeyboard.notify_key(time, key, state);
         return true;
       },
 
       PointerButton(token, button, pressed) {
         requireAuth(token);
         ext._ensureVirtualDevices();
-        const time = global.get_current_time();
+        const time = inputTime();
         const state = pressed ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED;
         ext._virtualPointer.notify_button(time, button, state);
         return true;
@@ -389,7 +409,7 @@ export default class MechatronWMExtension extends Extension {
       PointerMotionAbsolute(token, x, y) {
         requireAuth(token);
         ext._ensureVirtualDevices();
-        const time = global.get_current_time();
+        const time = inputTime();
         ext._virtualPointer.notify_absolute_motion(time, x, y);
         return true;
       },
@@ -397,7 +417,7 @@ export default class MechatronWMExtension extends Extension {
       PointerMotion(token, dx, dy) {
         requireAuth(token);
         ext._ensureVirtualDevices();
-        const time = global.get_current_time();
+        const time = inputTime();
         ext._virtualPointer.notify_relative_motion(time, dx, dy);
         return true;
       },
@@ -405,7 +425,7 @@ export default class MechatronWMExtension extends Extension {
       PointerAxisDiscrete(token, axis, steps) {
         requireAuth(token);
         ext._ensureVirtualDevices();
-        const time = global.get_current_time();
+        const time = inputTime();
         const absSteps = Math.abs(steps);
         let direction;
         if (axis === 0) {

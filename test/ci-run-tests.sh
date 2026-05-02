@@ -401,11 +401,11 @@ fi
 
 # ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
 # Tests the standard freedesktop portal code path for keyboard, mouse,
-# and screen. The mechatron extension is loaded so its Input interface
-# can auto-approve portal permission dialogs (which otherwise block in
-# headless CI since nobody can click "Allow"). The test itself uses
-# MECHATRON_BACKEND=nolib[portal] — the extension is only used for the
-# dialog approval side-channel.
+# and screen. A minimal GJS portal backend (portal-autoaccept) replaces
+# xdg-desktop-portal-gnome for the RemoteDesktop interface, auto-approving
+# sessions without showing a dialog (headless Mutter's virtual input
+# can't reach Wayland clients). The mechatron extension is still loaded
+# for the gext test cell that follows.
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"
   BE_COV_DIR="$COV_DIR/nolib-portal"
@@ -417,87 +417,80 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
 
   echo ">>> [portal] GNOME Shell version: $GNOME_SHELL_VER ($(gnome-shell --version 2>/dev/null))"
 
-  # Write the portal dialog auto-approver as a separate script to avoid
-  # quoting issues inside the bash -c single-quoted string.
-  APPROVER_SCRIPT="${RUNNER_TEMP:-/tmp}/portal-approver.sh"
-  cat > "$APPROVER_SCRIPT" <<'APPROVER_HEREDOC'
-#!/usr/bin/env bash
-# Auto-approve portal permission dialogs by detecting dialog windows
-# and clicking the Allow button via the mechatron extension Input interface.
-# Usage: portal-approver.sh <ext-token>
-set -u
-EXT_TOKEN="$1"
-IFACE="dev.mechatronic.Shell.Input"
-WIFACE="dev.mechatronic.Shell.Window"
-DEST="dev.mechatronic.Shell"
-OBJ="/dev/mechatronic/Shell"
-XKB_RETURN=65293
-SCREENSHOT_TAKEN=""
+  # GJS script: minimal portal backend that auto-approves RemoteDesktop
+  # sessions without showing a dialog. In headless Mutter, virtual keyboard
+  # events don't reach Wayland clients, so we can't dismiss the GNOME
+  # portal dialog. Instead we replace the GNOME backend for RemoteDesktop.
+  PORTAL_AUTOACCEPT="${RUNNER_TEMP:-/tmp}/portal-autoaccept.js"
+  cat > "$PORTAL_AUTOACCEPT" <<'AUTOACCEPT_HEREDOC'
+const { Gio, GLib } = imports.gi;
+const BUS_NAME = "org.freedesktop.impl.portal.ci.autoaccept";
+const RD_XML = `<node>
+  <interface name="org.freedesktop.impl.portal.RemoteDesktop">
+    <method name="CreateSession">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="SelectDevices">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="Start">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <property name="AvailableDeviceTypes" type="u" access="read"/>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.impl.portal.Session">
+    <method name="Close"><arg type="u" direction="out"/><arg type="a{sv}" direction="out"/></method>
+    <signal name="Closed"/>
+  </interface>
+</node>`;
+const ni = Gio.DBusNodeInfo.new_for_xml(RD_XML);
+const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
+const loop = new GLib.MainLoop(null, false);
+let n = 0;
+function onCall(c, s, p, iface, method, params, inv) {
+  print("[portal-autoaccept] " + method);
+  if (method === "CreateSession") {
+    const sh = params.deep_unpack()[1];
+    try { c.register_object(sh, ni.interfaces[1], onCall, null, null); } catch(e) {}
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"session_id": new GLib.Variant("s", "auto_" + (++n))}]));
+  } else if (method === "SelectDevices") {
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
+  } else if (method === "Start") {
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"devices": new GLib.Variant("u", 3)}]));
+  } else if (method === "Close") {
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
+  } else {
+    inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
+  }
+}
+function onProp(c, s, p, iface, prop) {
+  if (prop === "AvailableDeviceTypes") return new GLib.Variant("u", 3);
+  if (prop === "version") return new GLib.Variant("u", 2);
+  return null;
+}
+bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[0], onCall, onProp, null);
+Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept] ready"), () => loop.quit());
+loop.run();
+AUTOACCEPT_HEREDOC
 
-for attempt in $(seq 1 120); do
-  RAW=$(busctl --user call "$DEST" "$OBJ" "$WIFACE" \
-    List s "$EXT_TOKEN" 2>/dev/null) || RAW=""
-
-  if [ "$attempt" -le 5 ] || [ $((attempt % 20)) -eq 0 ]; then
-    echo ">>> [approver] attempt $attempt - raw: $RAW"
-  fi
-
-  # Check if a portal dialog window is present
-  if echo "$RAW" | grep -qiE 'Remote Desktop|Screenshot|Screen Cast|Sharing'; then
-    # Extract window id (first "id": value)
-    DID=$(echo "$RAW" | grep -oE '"id":[0-9]+' | head -1 | grep -oE '[0-9]+')
-
-    # Extract bounds
-    BX=$(echo "$RAW" | grep -oE '"x":[0-9]+' | head -1 | grep -oE '[0-9]+')
-    BY=$(echo "$RAW" | grep -oE '"y":[0-9]+' | head -1 | grep -oE '[0-9]+')
-    BW=$(echo "$RAW" | grep -oE '"w":[0-9]+' | head -1 | grep -oE '[0-9]+')
-    BH=$(echo "$RAW" | grep -oE '"h":[0-9]+' | head -1 | grep -oE '[0-9]+')
-
-    # Take one screenshot for debugging
-    if [ -z "$SCREENSHOT_TAKEN" ]; then
-      SCREENSHOT_TAKEN=1
-      ACTIVE_WIN=$(busctl --user call "$DEST" "$OBJ" "$WIFACE" \
-        GetActive s "$EXT_TOKEN" 2>/dev/null) || ACTIVE_WIN="(failed)"
-      echo ">>> [approver] dialog found: id=$DID bounds=($BX,$BY,$BW,$BH) active=$ACTIVE_WIN"
-      busctl --user call org.gnome.Shell.Screenshot \
-        /org/gnome/Shell/Screenshot org.gnome.Shell.Screenshot \
-        Screenshot bss true "" "${SCREENSHOT_DIR:-/tmp}/portal-dialog-$attempt.png" \
-        2>/dev/null && echo ">>> screenshot saved" || echo ">>> screenshot failed"
-    fi
-
-    # Activate (focus) the dialog window
-    if [ -n "$DID" ]; then
-      busctl --user call "$DEST" "$OBJ" "$WIFACE" \
-        Activate su "$EXT_TOKEN" "$DID" 2>/dev/null
-    fi
-
-    # Click the Allow button if bounds are valid (bottom-right area)
-    if [ -n "$BW" ] && [ "$BW" -gt 0 ] 2>/dev/null && [ "$BH" -gt 0 ] 2>/dev/null; then
-      CX=$((BX + BW - 80))
-      CY=$((BY + BH - 40))
-      if [ "$attempt" -le 10 ] || [ $((attempt % 20)) -eq 0 ]; then
-        echo ">>> [approver] clicking at ($CX, $CY)"
-      fi
-      busctl --user call "$DEST" "$OBJ" "$IFACE" \
-        PointerMotionAbsolute sdd "$EXT_TOKEN" "$CX" "$CY" 2>/dev/null
-      sleep 0.1
-      busctl --user call "$DEST" "$OBJ" "$IFACE" \
-        PointerButton sib "$EXT_TOKEN" 272 true 2>/dev/null
-      busctl --user call "$DEST" "$OBJ" "$IFACE" \
-        PointerButton sib "$EXT_TOKEN" 272 false 2>/dev/null
-    fi
-  fi
-
-  # Also send Enter as backup
-  busctl --user call "$DEST" "$OBJ" "$IFACE" \
-    KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" true 2>/dev/null
-  busctl --user call "$DEST" "$OBJ" "$IFACE" \
-    KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" false 2>/dev/null
-  sleep 0.5
-done
-APPROVER_HEREDOC
-  chmod +x "$APPROVER_SCRIPT"
-  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER APPROVER_SCRIPT
+  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER PORTAL_AUTOACCEPT
   dbus-run-session -- bash -c '
     set -x
     export XDG_SESSION_TYPE=wayland
@@ -509,8 +502,7 @@ APPROVER_HEREDOC
       chmod 700 "$XDG_RUNTIME_DIR"
     fi
 
-    # Install the mechatron extension -- needed to auto-approve portal
-    # permission dialogs via its Input interface (Clutter virtual device).
+    # Install the mechatron extension for the gext test cell.
     EXT_TOKEN=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
     echo "$EXT_TOKEN" > "$TOKENS_FILE"
     chmod 600 "$TOKENS_FILE"
@@ -599,11 +591,46 @@ APPROVER_HEREDOC
     echo ">>> PipeWire socket check:"
     ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
 
-    # Start portal frontend; portal-gnome is auto-activated by D-Bus
-    # when the first portal request arrives.
+    # In headless Mutter, virtual keyboard events don't reach Wayland
+    # clients, so we can't dismiss the portal-gnome RemoteDesktop dialog.
+    # Instead, run a minimal GJS portal backend that auto-approves.
+    AUTOACCEPT_PID=""
+    if command -v gjs >/dev/null 2>&1; then
+      # Register our portal backend via XDG_DATA_DIRS (avoids needing
+      # write access to /usr/share on CI).
+      _PORTAL_DATA="${RUNNER_TEMP:-/tmp}/portal-data"
+      mkdir -p "$_PORTAL_DATA/xdg-desktop-portal/portals"
+      cat > "$_PORTAL_DATA/xdg-desktop-portal/portals/ci-autoaccept.portal" <<PEOF
+[portal]
+DBusName=org.freedesktop.impl.portal.ci.autoaccept
+Interfaces=org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.ScreenCast;
+UseIn=gnome
+PEOF
+      export XDG_DATA_DIRS="$_PORTAL_DATA:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+      # Route RemoteDesktop to our backend instead of portal-gnome.
+      mkdir -p "$HOME/.config/xdg-desktop-portal"
+      cat > "$HOME/.config/xdg-desktop-portal/portals.conf" <<CEOF
+[preferred]
+default=gnome
+org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept
+CEOF
+
+      dbus-update-activation-environment XDG_DATA_DIRS 2>/dev/null || true
+
+      gjs "$PORTAL_AUTOACCEPT" &
+      AUTOACCEPT_PID=$!
+      for i in $(seq 1 20); do
+        busctl --user list 2>/dev/null | grep -q "ci.autoaccept" && break
+        sleep 0.25
+      done
+      echo ">>> portal-autoaccept backend started (pid=$AUTOACCEPT_PID)"
+    else
+      echo ">>> WARNING: gjs not found — portal dialog will not be auto-approved"
+    fi
+
     /usr/libexec/xdg-desktop-portal --replace 2>&1 &
     XDP_PID=$!
-    XDP_GNOME_PID=""
 
     for i in $(seq 1 40); do
       if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
@@ -613,12 +640,6 @@ APPROVER_HEREDOC
       sleep 0.5
     done
 
-    SCREENSHOT_DIR="${RUNNER_TEMP:-/tmp}/portal-screenshots"
-    mkdir -p "$SCREENSHOT_DIR"
-    export SCREENSHOT_DIR
-    "$APPROVER_SCRIPT" "$EXT_TOKEN" &
-    APPROVER_PID=$!
-
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
       "$BUN" test test/bun.test.ts \
@@ -626,7 +647,7 @@ APPROVER_HEREDOC
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill "$APPROVER_PID" ${XDP_GNOME_PID:+"$XDP_GNOME_PID"} "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+    kill ${AUTOACCEPT_PID:+"$AUTOACCEPT_PID"} "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
