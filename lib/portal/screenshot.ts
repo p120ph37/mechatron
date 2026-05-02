@@ -27,6 +27,7 @@ export interface PortalScreenInfo {
 
 let _conn: DBusConnection | null = null;
 let _connPromise: Promise<DBusConnection> | null = null;
+let _shotSeq = 0;
 
 async function getConn(): Promise<DBusConnection> {
   if (_conn) return _conn;
@@ -43,7 +44,7 @@ async function getConn(): Promise<DBusConnection> {
 
 export async function portalScreenshot(): Promise<Uint32Array & { width: number; height: number } | null> {
   const conn = await getConn();
-  const token = `mechatron_shot_${process.pid}_${Date.now()}`;
+  const token = `mechatron_shot_${process.pid}_${++_shotSeq}`;
   const reqPath = requestPath(conn, token);
   const responsePromise = waitForResponse(conn, reqPath);
 
