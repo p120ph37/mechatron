@@ -423,15 +423,14 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   sudo tee /usr/share/xdg-desktop-portal/portals/ci-autoaccept.portal > /dev/null <<'PORTALEOF'
 [portal]
 DBusName=org.freedesktop.impl.portal.ci.autoaccept
-Interfaces=org.freedesktop.impl.portal.RemoteDesktop;
+Interfaces=org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;
 UseIn=gnome
 PORTALEOF
-  # Remove RemoteDesktop from the GNOME portal so our autoaccept backend
-  # is the only one claiming the interface. This is the only routing
-  # mechanism for xdg-desktop-portal < 1.15 (Ubuntu 22.04) which lacks
-  # portals.conf support. On >= 1.15 the gnome-portals.conf below also
-  # ensures correct routing.
-  sudo sed -i 's/org\.freedesktop\.impl\.portal\.RemoteDesktop;//g' \
+  # Remove RemoteDesktop and ScreenCast from the GNOME portal so our
+  # autoaccept backend is the only one claiming these interfaces. This
+  # is the only routing mechanism for xdg-desktop-portal < 1.15
+  # (Ubuntu 22.04) which lacks portals.conf support.
+  sudo sed -i 's/org\.freedesktop\.impl\.portal\.RemoteDesktop;//g; s/org\.freedesktop\.impl\.portal\.ScreenCast;//g; s/org\.freedesktop\.impl\.portal\.Screenshot;//g' \
     /usr/share/xdg-desktop-portal/portals/gnome.portal 2>/dev/null || true
   # Update gnome-portals.conf for xdg-desktop-portal >= 1.15.
   if [ -f /usr/share/xdg-desktop-portal/gnome-portals.conf ]; then
@@ -442,6 +441,8 @@ PORTALEOF
 default=gnome;gtk;
 org.freedesktop.impl.portal.Secret=gnome-keyring;
 org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept;
+org.freedesktop.impl.portal.ScreenCast=ci-autoaccept;
+org.freedesktop.impl.portal.Screenshot=ci-autoaccept;
 CONFEOF
   fi
 
@@ -453,7 +454,7 @@ CONFEOF
   cat > "$PORTAL_AUTOACCEPT" <<'AUTOACCEPT_HEREDOC'
 const { Gio, GLib } = imports.gi;
 const BUS_NAME = "org.freedesktop.impl.portal.ci.autoaccept";
-const RD_XML = `<node>
+const XML = `<node>
   <interface name="org.freedesktop.impl.portal.RemoteDesktop">
     <method name="CreateSession">
       <arg type="o" name="handle" direction="in"/>
@@ -483,20 +484,53 @@ const RD_XML = `<node>
     <property name="AvailableDeviceTypes" type="u" access="read"/>
     <property name="version" type="u" access="read"/>
   </interface>
+  <interface name="org.freedesktop.impl.portal.Screenshot">
+    <method name="Screenshot">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <property name="version" type="u" access="read"/>
+  </interface>
   <interface name="org.freedesktop.impl.portal.Session">
     <method name="Close"><arg type="u" direction="out"/><arg type="a{sv}" direction="out"/></method>
     <signal name="Closed"/>
   </interface>
 </node>`;
-const ni = Gio.DBusNodeInfo.new_for_xml(RD_XML);
+const ni = Gio.DBusNodeInfo.new_for_xml(XML);
 const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
 const loop = new GLib.MainLoop(null, false);
 let n = 0;
+let shotN = 0;
+function takeScreenshot(inv) {
+  const fname = "/tmp/ci-autoaccept-shot-" + (++shotN) + ".png";
+  try {
+    const Cairo = imports.cairo;
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, 1920, 1080);
+    const cr = new Cairo.Context(surface);
+    cr.setSourceRGBA(0.2, 0.3, 0.4, 1.0);
+    cr.paint();
+    surface.writeToPNG(fname);
+    const uri = "file://" + fname;
+    print("[portal-autoaccept] Screenshot -> " + uri);
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"uri": new GLib.Variant("s", uri)}]));
+  } catch(e) {
+    print("[portal-autoaccept] Screenshot error: " + e);
+    inv.return_value(new GLib.Variant("(ua{sv})", [2, {}]));
+  }
+}
 function onCall(c, s, p, iface, method, params, inv) {
-  print("[portal-autoaccept] " + method);
+  print("[portal-autoaccept] " + iface + "." + method);
+  if (iface === "org.freedesktop.impl.portal.Screenshot" && method === "Screenshot") {
+    takeScreenshot(inv);
+    return;
+  }
   if (method === "CreateSession") {
     const sh = params.deep_unpack()[1];
-    try { c.register_object(sh, ni.interfaces[1], onCall, null, null); } catch(e) {}
+    try { c.register_object(sh, ni.interfaces[2], onCall, null, null); } catch(e) {}
     inv.return_value(new GLib.Variant("(ua{sv})", [0, {"session_id": new GLib.Variant("s", "auto_" + (++n))}]));
   } else if (method === "SelectDevices") {
     inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
@@ -514,6 +548,7 @@ function onProp(c, s, p, iface, prop) {
   return null;
 }
 bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[0], onCall, onProp, null);
+bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[1], onCall, onProp, null);
 Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept] ready"), () => loop.quit());
 loop.run();
 AUTOACCEPT_HEREDOC
@@ -634,16 +669,39 @@ AUTOACCEPT_HEREDOC
       echo ">>> WARNING: gjs not found — portal dialog will not be auto-approved"
     fi
 
-    /usr/libexec/xdg-desktop-portal --replace 2>&1 &
-    XDP_PID=$!
-
-    for i in $(seq 1 40); do
+    # Wait for org.freedesktop.portal.Desktop (auto-activated by ibus
+    # during gnome-shell startup).  If it doesn't appear, trigger it.
+    for i in $(seq 1 20); do
       if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
         echo ">>> org.freedesktop.portal.Desktop registered after ${i}*0.5s"
         break
       fi
       sleep 0.5
     done
+    if ! busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
+      echo ">>> portal.Desktop not found, triggering activation..."
+      busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+        org.freedesktop.DBus.Peer Ping 2>/dev/null || true
+      sleep 2
+    fi
+
+    # Keep xdg-desktop-portal alive (it has a GApplication idle timeout).
+    (while true; do
+      busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+        org.freedesktop.DBus.Peer Ping 2>/dev/null || true
+      sleep 3
+    done) &
+    PINGER_PID=$!
+
+    # Pre-grant screenshot permission so xdp calls our ci-autoaccept
+    # backend directly instead of showing an Access dialog.
+    busctl --user call org.freedesktop.impl.portal.PermissionStore \
+      /org/freedesktop/impl/portal/PermissionStore \
+      org.freedesktop.impl.portal.PermissionStore SetPermission \
+      sbssas "screenshot" true "screenshot" "" 1 "yes" 2>/dev/null || true
+
+    echo ">>> Bus state:"
+    busctl --user list 2>/dev/null | grep -E "(portal|autoaccept)" | head -20
 
     MECHATRON_BACKEND="nolib[portal]" \
     MECHATRON_SKIP_UNIT=1 \
@@ -652,7 +710,7 @@ AUTOACCEPT_HEREDOC
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    kill ${AUTOACCEPT_PID:+"$AUTOACCEPT_PID"} "$XDP_PID" "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+    kill $PINGER_PID ${AUTOACCEPT_PID:+"$AUTOACCEPT_PID"} "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
