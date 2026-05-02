@@ -537,36 +537,22 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
     # Background auto-approver: uses the mechatron extension Input
     # interface to send Enter keypresses, dismissing portal permission
     # dialogs that portal-gnome shows for RemoteDesktop/Screenshot.
+    # The "Allow" button has default focus in GNOME system dialogs, so
+    # a bare Enter activates it. (Do NOT send Tab first — that moves
+    # focus to "Don't Allow" and causes response=1 denial.)
     (
       IFACE="dev.mechatronic.Shell.Input"
       WIFACE="dev.mechatronic.Shell.Window"
       DEST="dev.mechatronic.Shell"
       OBJ="/dev/mechatronic/Shell"
       XKB_RETURN=65293
-      XKB_TAB=65289
-      XKB_ALT_L=65513
-      XKB_A=97
-      SCREENSHOT_DIR="${RUNNER_TEMP:-/tmp}/portal-screenshots"
-      mkdir -p "$SCREENSHOT_DIR"
       for attempt in $(seq 1 120); do
         # Diagnostic: list windows on first few attempts and every 20th
         if [ "$attempt" -le 3 ] || [ $((attempt % 20)) -eq 0 ]; then
           echo ">>> [approver] attempt $attempt — window list:"
           busctl --user call "$DEST" "$OBJ" "$WIFACE" \
             List s "$EXT_TOKEN" 2>&1 || echo "(List call failed)"
-          # Take a screenshot via the gnome-shell built-in Screenshot D-Bus
-          # interface (bypasses portal, so no recursive permission dialog).
-          busctl --user call org.gnome.Shell \
-            /org/gnome/Shell/Screenshot org.gnome.Shell.Screenshot \
-            Screenshot bbs true true "$SCREENSHOT_DIR/portal-dialog-$attempt.png" \
-            2>&1 || echo "(Screenshot call failed)"
-          ls -la "$SCREENSHOT_DIR/portal-dialog-$attempt.png" 2>/dev/null || true
         fi
-        # Strategy: Tab to focus Allow button, then Enter to activate.
-        busctl --user call "$DEST" "$OBJ" "$IFACE" \
-          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_TAB" true 2>/dev/null
-        busctl --user call "$DEST" "$OBJ" "$IFACE" \
-          KeyboardKeysym sub "$EXT_TOKEN" "$XKB_TAB" false 2>/dev/null
         busctl --user call "$DEST" "$OBJ" "$IFACE" \
           KeyboardKeysym sub "$EXT_TOKEN" "$XKB_RETURN" true 2>/dev/null
         busctl --user call "$DEST" "$OBJ" "$IFACE" \
