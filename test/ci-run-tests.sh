@@ -417,6 +417,34 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
 
   echo ">>> [portal] GNOME Shell version: $GNOME_SHELL_VER ($(gnome-shell --version 2>/dev/null))"
 
+  # Install a portal backend definition that routes RemoteDesktop to our
+  # auto-accept GJS service. xdg-desktop-portal only loads .portal files
+  # from /usr/share/xdg-desktop-portal/portals/ (ignores XDG_DATA_DIRS).
+  sudo tee /usr/share/xdg-desktop-portal/portals/ci-autoaccept.portal > /dev/null <<'PORTALEOF'
+[portal]
+DBusName=org.freedesktop.impl.portal.ci.autoaccept
+Interfaces=org.freedesktop.impl.portal.RemoteDesktop;
+UseIn=gnome
+PORTALEOF
+  # Remove RemoteDesktop from the GNOME portal so our autoaccept backend
+  # is the only one claiming the interface. This is the only routing
+  # mechanism for xdg-desktop-portal < 1.15 (Ubuntu 22.04) which lacks
+  # portals.conf support. On >= 1.15 the gnome-portals.conf below also
+  # ensures correct routing.
+  sudo sed -i 's/org\.freedesktop\.impl\.portal\.RemoteDesktop;//g' \
+    /usr/share/xdg-desktop-portal/portals/gnome.portal 2>/dev/null || true
+  # Update gnome-portals.conf for xdg-desktop-portal >= 1.15.
+  if [ -f /usr/share/xdg-desktop-portal/gnome-portals.conf ]; then
+    sudo cp /usr/share/xdg-desktop-portal/gnome-portals.conf \
+            /usr/share/xdg-desktop-portal/gnome-portals.conf.bak
+    sudo tee /usr/share/xdg-desktop-portal/gnome-portals.conf > /dev/null <<'CONFEOF'
+[preferred]
+default=gnome;gtk;
+org.freedesktop.impl.portal.Secret=gnome-keyring;
+org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept;
+CONFEOF
+  fi
+
   # GJS script: minimal portal backend that auto-approves RemoteDesktop
   # sessions without showing a dialog. In headless Mutter, virtual keyboard
   # events don't reach Wayland clients, so we can't dismiss the GNOME
@@ -591,35 +619,10 @@ AUTOACCEPT_HEREDOC
     echo ">>> PipeWire socket check:"
     ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
 
-    # In headless Mutter, virtual keyboard events do not reach Wayland
-    # clients, so the portal-gnome RemoteDesktop dialog cannot be dismissed.
-    # Instead, run a minimal GJS portal backend that auto-approves.
+    # Start the GJS auto-accept portal backend (the .portal file and
+    # gnome-portals.conf were installed into /usr/share above).
     AUTOACCEPT_PID=""
     if command -v gjs >/dev/null 2>&1; then
-      # Register our portal backend via XDG_DATA_DIRS (avoids needing
-      # write access to /usr/share on CI).
-      _PORTAL_DATA="${RUNNER_TEMP:-/tmp}/portal-data"
-      mkdir -p "$_PORTAL_DATA/xdg-desktop-portal/portals"
-      cat > "$_PORTAL_DATA/xdg-desktop-portal/portals/ci-autoaccept.portal" <<PEOF
-[portal]
-DBusName=org.freedesktop.impl.portal.ci.autoaccept
-Interfaces=org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.ScreenCast;
-UseIn=gnome
-PEOF
-      export XDG_DATA_DIRS="$_PORTAL_DATA:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-
-      # Route RemoteDesktop to our backend instead of portal-gnome.
-      # Use gnome-portals.conf (desktop-specific) so it takes priority
-      # over any system-level portals.conf.
-      mkdir -p "$HOME/.config/xdg-desktop-portal"
-      cat > "$HOME/.config/xdg-desktop-portal/gnome-portals.conf" <<CEOF
-[preferred]
-default=gnome
-org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept
-CEOF
-
-      dbus-update-activation-environment XDG_DATA_DIRS 2>/dev/null || true
-
       gjs "$PORTAL_AUTOACCEPT" &
       AUTOACCEPT_PID=$!
       for i in $(seq 1 20); do
