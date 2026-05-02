@@ -591,8 +591,8 @@ AUTOACCEPT_HEREDOC
     echo ">>> PipeWire socket check:"
     ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
 
-    # In headless Mutter, virtual keyboard events don't reach Wayland
-    # clients, so we can't dismiss the portal-gnome RemoteDesktop dialog.
+    # In headless Mutter, virtual keyboard events do not reach Wayland
+    # clients, so the portal-gnome RemoteDesktop dialog cannot be dismissed.
     # Instead, run a minimal GJS portal backend that auto-approves.
     AUTOACCEPT_PID=""
     if command -v gjs >/dev/null 2>&1; then
