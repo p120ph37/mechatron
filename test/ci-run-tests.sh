@@ -609,8 +609,10 @@ PEOF
       export XDG_DATA_DIRS="$_PORTAL_DATA:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
       # Route RemoteDesktop to our backend instead of portal-gnome.
+      # Use gnome-portals.conf (desktop-specific) so it takes priority
+      # over any system-level portals.conf.
       mkdir -p "$HOME/.config/xdg-desktop-portal"
-      cat > "$HOME/.config/xdg-desktop-portal/portals.conf" <<CEOF
+      cat > "$HOME/.config/xdg-desktop-portal/gnome-portals.conf" <<CEOF
 [preferred]
 default=gnome
 org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept
