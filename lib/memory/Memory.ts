@@ -253,8 +253,8 @@ export class Memory {
     const len = length !== undefined ? length : buffer.length;
     if (len === 0) return 0;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
-    const slice = len < buffer.length ? buffer.subarray(0, len) : buffer;
-    return getNative("memory").memory_writeData(this._pid, toBigInt(address), slice as Buffer, flags);
+    const buf = len === buffer.length ? buffer : buffer.subarray(0, len) as Buffer;
+    return getNative("memory").memory_writeData(this._pid, toBigInt(address), buf, flags);
   }
 
   async readInt8(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
