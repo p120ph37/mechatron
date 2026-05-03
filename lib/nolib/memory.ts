@@ -17,9 +17,9 @@ if (process.platform !== "linux") {
 export interface RegionInfo {
   valid: boolean;
   bound: boolean;
-  start: number;
-  stop: number;
-  size: number;
+  start: bigint;
+  stop: bigint;
+  size: bigint;
   readable: boolean;
   writable: boolean;
   executable: boolean;
@@ -30,7 +30,7 @@ export interface RegionInfo {
 
 function emptyRegion(): RegionInfo {
   return {
-    valid: false, bound: false, start: 0, stop: 0, size: 0,
+    valid: false, bound: false, start: 0n, stop: 0n, size: 0n,
     readable: false, writable: false, executable: false,
     access: 0, private: false, guarded: false,
   };
@@ -55,8 +55,8 @@ function parseMaps(pid: number): RegionInfo[] {
     if (parts.length < 2) continue;
     const [s, e] = parts[0].split("-");
     if (!s || !e) continue;
-    const start = parseInt(s, 16);
-    const stop = parseInt(e, 16);
+    const start = BigInt("0x" + s);
+    const stop = BigInt("0x" + e);
     const perms = parts[1] || "";
     const readable = perms.includes("r");
     const writable = perms.includes("w");
@@ -75,13 +75,13 @@ function parseMaps(pid: number): RegionInfo[] {
   return out;
 }
 
-function procRead(pid: number, addr: number, buf: Uint8Array): number {
+function procRead(pid: number, addr: bigint, buf: Uint8Array): number {
   if (buf.length === 0) return 0;
   let fd: number;
   try { fd = openSync(`/proc/${pid}/mem`, "r"); }
   catch { return 0; }
   try {
-    return readSync(fd, buf, 0, buf.length, addr);
+    return readSync(fd, buf, 0, buf.length, Number(addr));
   } catch {
     return 0;
   } finally {
@@ -89,22 +89,22 @@ function procRead(pid: number, addr: number, buf: Uint8Array): number {
   }
 }
 
-function procReadFd(fd: number, addr: number, buf: Uint8Array): number {
+function procReadFd(fd: number, addr: bigint, buf: Uint8Array): number {
   if (buf.length === 0) return 0;
   try {
-    return readSync(fd, buf, 0, buf.length, addr);
+    return readSync(fd, buf, 0, buf.length, Number(addr));
   } catch {
     return 0;
   }
 }
 
-function procWrite(pid: number, addr: number, buf: Uint8Array): number {
+function procWrite(pid: number, addr: bigint, buf: Uint8Array): number {
   if (buf.length === 0) return 0;
   let fd: number;
   try { fd = openSync(`/proc/${pid}/mem`, "r+"); }
   catch { return 0; }
   try {
-    return writeSync(fd, buf, 0, buf.length, addr);
+    return writeSync(fd, buf, 0, buf.length, Number(addr));
   } catch {
     return 0;
   } finally {
@@ -112,10 +112,10 @@ function procWrite(pid: number, addr: number, buf: Uint8Array): number {
   }
 }
 
-function procWriteFd(fd: number, addr: number, buf: Uint8Array): number {
+function procWriteFd(fd: number, addr: bigint, buf: Uint8Array): number {
   if (buf.length === 0) return 0;
   try {
-    return writeSync(fd, buf, 0, buf.length, addr);
+    return writeSync(fd, buf, 0, buf.length, Number(addr));
   } catch {
     return 0;
   }
@@ -177,7 +177,7 @@ export function memory_isValid(pid: number): boolean {
   return pid > 0 && existsSync(`/proc/${pid}`);
 }
 
-export function memory_getRegion(pid: number, address: number): RegionInfo {
+export function memory_getRegion(pid: number, address: bigint): RegionInfo {
   const regions = parseMaps(pid);
   for (const r of regions) {
     if (address >= r.start && address < r.stop) return r;
@@ -185,17 +185,17 @@ export function memory_getRegion(pid: number, address: number): RegionInfo {
   return emptyRegion();
 }
 
-export function memory_getRegions(pid: number, start?: number, stop?: number): RegionInfo[] {
-  const startAddr = start || 0;
-  const stopAddr = stop || Number.MAX_SAFE_INTEGER;
+export function memory_getRegions(pid: number, start?: bigint, stop?: bigint): RegionInfo[] {
+  const startAddr = start ?? 0n;
+  const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
   return parseMaps(pid).filter(r => r.stop > startAddr && r.start < stopAddr);
 }
 
-export function memory_setAccess(_pid: number, _regionStart: number, _readable: boolean, _writable: boolean, _executable: boolean): boolean {
+export function memory_setAccess(_pid: number, _regionStart: bigint, _readable: boolean, _writable: boolean, _executable: boolean): boolean {
   return false;
 }
 
-export function memory_setAccessFlags(_pid: number, _regionStart: number, _flags: number): boolean {
+export function memory_setAccessFlags(_pid: number, _regionStart: bigint, _flags: number): boolean {
   return false;
 }
 
@@ -216,21 +216,21 @@ export function memory_getPtrSize(pid: number): number {
   return process.arch === "x64" || process.arch === "arm64" ? 8 : 4;
 }
 
-export function memory_getMinAddress(pid: number): number {
+export function memory_getMinAddress(pid: number): bigint {
   const regions = parseMaps(pid);
-  return regions.length > 0 ? regions[0].start : 0;
+  return regions.length > 0 ? regions[0].start : 0n;
 }
 
-export function memory_getMaxAddress(pid: number): number {
+export function memory_getMaxAddress(pid: number): bigint {
   const regions = parseMaps(pid);
-  return regions.length > 0 ? regions[regions.length - 1].stop : 0;
+  return regions.length > 0 ? regions[regions.length - 1].stop : 0n;
 }
 
 export function memory_getPageSize(_pid: number): number {
   return getPageSize();
 }
 
-export function memory_readData(pid: number, address: number, length: number, flags?: number): Buffer | null {
+export function memory_readData(pid: number, address: bigint, length: number, flags?: number): Buffer | null {
   const len = length | 0;
   if (len <= 0) return null;
   const f = flags === undefined ? FLAG_DEFAULT : flags;
@@ -247,7 +247,7 @@ export function memory_readData(pid: number, address: number, length: number, fl
   catch { return null; }
   try {
     const buf = new Uint8Array(len);
-    const stop = address + len;
+    const stop = address + BigInt(len);
     const regions = parseMaps(pid);
     let bytes = 0;
     let a = address;
@@ -257,14 +257,14 @@ export function memory_readData(pid: number, address: number, length: number, fl
       if (idx >= regions.length) break;
       const region = regions[idx];
       if (region.start > a) {
-        const gapEnd = Math.min(region.start, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.start < stop ? region.start : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
         continue;
       }
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       if (region.readable) {
         const slice = new Uint8Array(regionLen);
         const n = procReadFd(fd, a, slice);
@@ -274,14 +274,14 @@ export function memory_readData(pid: number, address: number, length: number, fl
       a = end;
       idx++;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
   } finally {
     closeSync(fd);
   }
 }
 
-export function memory_writeData(pid: number, address: number, data: Buffer | Uint8Array, flags?: number): number {
+export function memory_writeData(pid: number, address: bigint, data: Buffer | Uint8Array, flags?: number): number {
   const f = flags === undefined ? FLAG_DEFAULT : flags;
   const buf: Uint8Array = data;
   const len = buf.length;
@@ -293,7 +293,7 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
   try { fd = openSync(`/proc/${pid}/mem`, "r+"); }
   catch { return 0; }
   try {
-    const stop = address + len;
+    const stop = address + BigInt(len);
     const regions = parseMaps(pid);
     let bytes = 0;
     let a = address;
@@ -301,21 +301,21 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
       if (a >= stop) break;
       if (region.stop <= a) continue;
       if (region.start > a) {
-        const gapEnd = Math.min(region.start, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.start < stop ? region.start : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
       }
       if (a >= stop) break;
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       if (region.writable) {
         procWriteFd(fd, a, buf.subarray(offset, offset + regionLen));
       }
       bytes += regionLen;
       a = end;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes;
   } finally {
     closeSync(fd);
@@ -324,14 +324,14 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
 
 export function memory_find(
   pid: number, pattern: string,
-  start?: number, stop?: number,
+  start?: bigint, stop?: bigint,
   limit?: number, _flags?: string,
-): number[] {
-  const startAddr = start || 0;
-  const stopAddr = stop || Number.MAX_SAFE_INTEGER;
+): bigint[] {
+  const startAddr = start ?? 0n;
+  const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
   const max = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
   const pat = parsePattern(pattern);
-  const out: number[] = [];
+  const out: bigint[] = [];
   if (pat.length === 0) return out;
 
   const regions = parseMaps(pid);
@@ -345,9 +345,9 @@ export function memory_find(
       if (out.length >= max) break;
       if (!region.readable) continue;
       if (region.stop <= startAddr || region.start >= stopAddr) continue;
-      const readStart = Math.max(region.start, startAddr);
-      const readEnd = Math.min(region.stop, stopAddr);
-      const readSize = readEnd - readStart;
+      const readStart = region.start > startAddr ? region.start : startAddr;
+      const readEnd = region.stop < stopAddr ? region.stop : stopAddr;
+      const readSize = Number(readEnd - readStart);
       if (readSize <= 0 || readSize > CHUNK_CAP) continue;
       const buf = new Uint8Array(readSize);
       const got = procReadFd(fd, readStart, buf);
@@ -355,7 +355,7 @@ export function memory_find(
       const hits = findInBuffer(buf, got, pat);
       for (const off of hits) {
         if (out.length >= max) break;
-        out.push(readStart + off);
+        out.push(readStart + BigInt(off));
       }
     }
   } finally {

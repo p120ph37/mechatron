@@ -10,7 +10,7 @@
  */
 
 // Data types
-export { Point, Size, Bounds, Color, Range, Hash, Image, Timer } from "./types";
+export { Point, Size, Bounds, Color, Range, Hash, Image, Timer, Ptr } from "./types";
 
 // Keyboard
 export { Keyboard, KEYS, getAllKeys, getKeyNames, getAllKeyConstants } from "./keyboard";

@@ -134,8 +134,8 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		var minAddr = await mem.getMinAddress();
 		var maxAddr = await mem.getMaxAddress();
 		var pageSize = await mem.getPageSize();
-		assert(minAddr >= 0, "minAddress >= 0");
-		assert(maxAddr > 0, "maxAddress > 0");
+		assert(minAddr >= 0n, "minAddress >= 0");
+		assert(maxAddr > 0n, "maxAddress > 0");
 		assert(maxAddr > minAddr, "maxAddress > minAddress");
 		assert(pageSize > 0, "pageSize > 0");
 
@@ -146,7 +146,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// Find a readable region
 		var readable = null;
 		for (var i = 0; i < regions.length; ++i) {
-			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16) {
+			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16n) {
 				readable = regions[i];
 				break;
 			}
@@ -176,11 +176,11 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		var region0 = regions[0];
 		assert(typeof region0.valid === "boolean", "region valid bool");
 		assert(typeof region0.bound === "boolean", "region bound bool");
-		assert(typeof region0.start === "number", "region start number");
-		assert(typeof region0.size === "number", "region size number");
+		assert(typeof region0.start === "bigint", "region start bigint");
+		assert(typeof region0.size === "bigint", "region size bigint");
 		assert(typeof region0.readable === "boolean", "region readable bool");
 		assert(typeof region0.writable === "boolean", "region writable bool");
-		if (region0.valid && region0.size > 0) {
+		if (region0.valid && region0.size > 0n) {
 			assert(region0.contains(region0.start), "region contains start");
 			assert(!region0.contains(region0.start + region0.size), "region !contains end");
 		}
@@ -205,12 +205,15 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// --- Region eq/ne/lt/gt/le/ge with numbers and TypeError ---
 		if (regions.length > 0) {
 			var reg0 = regions[0];
-			assert(typeof reg0.eq(reg0.start) === "boolean", "Region eq number");
-			assert(typeof reg0.ne(reg0.start) === "boolean", "Region ne number");
-			assert(typeof reg0.lt(reg0.start) === "boolean", "Region lt number");
-			assert(typeof reg0.gt(reg0.start) === "boolean", "Region gt number");
-			assert(typeof reg0.le(reg0.start) === "boolean", "Region le number");
-			assert(typeof reg0.ge(reg0.start) === "boolean", "Region ge number");
+			assert(typeof reg0.eq(reg0.start) === "boolean", "Region eq bigint");
+			assert(typeof reg0.ne(reg0.start) === "boolean", "Region ne bigint");
+			assert(typeof reg0.lt(reg0.start) === "boolean", "Region lt bigint");
+			assert(typeof reg0.gt(reg0.start) === "boolean", "Region gt bigint");
+			assert(typeof reg0.le(reg0.start) === "boolean", "Region le bigint");
+			assert(typeof reg0.ge(reg0.start) === "boolean", "Region ge bigint");
+			// Also test with number
+			assert(typeof reg0.eq(0) === "boolean", "Region eq number");
+			assert(typeof reg0.ne(0) === "boolean", "Region ne number");
 			var regThrew = false;
 			try { reg0.eq("bad"); } catch(e) { regThrew = true; }
 			assert(regThrew, "Region eq invalid throws");
@@ -245,40 +248,15 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
 
 		// --- Cross-process memory write verification ---
-		// Spawn a compiled native helper (see test/memory-child.c) that
-		// allocates a random buffer internally and emits a fresh hex
-		// dump of it on stdout every time the parent writes a newline
-		// to its stdin.  mechatron attaches to the helper's address
-		// space via the Memory API and performs round-trip writes/reads;
-		// the child's own view is verified by prompting it to re-dump
-		// the buffer after each round of writes.
-		//
-		// Rationale for using a native binary (not `node`) as the target:
-		// on macOS, the official Node.js binary ships with the hardened
-		// runtime enabled, which makes task_for_pid() deny access unless
-		// the target is re-signed with com.apple.security.get-task-allow.
-		// A plain compiled binary is not hardened by default, so it
-		// stands in for the real-world "game trainer" scenario in which
-		// the user disables SIP or enables Developer Mode to allow
-		// debugging third-party same-user processes — the net effect of
-		// either of those is exactly what we get here by targeting a
-		// non-hardened binary.
 		var _cp = require("child_process");
 		var _path = require("path");
 
 		var _helperExt = process.platform === "win32" ? ".exe" : "";
 		var _helper = _path.join(__dirname, "memory-child" + _helperExt);
 
-		// stdin/stdout: piped line protocol.  stderr: inherited so any
-		// helper panics surface directly in the test log.
 		var _child = _cp.spawn(_helper, [],
 			{ stdio: ["pipe", "pipe", "inherit"] });
 
-		// Line-oriented reader over the child's stdout.  In normal
-		// lockstep use, there is at most one outstanding waiter and the
-		// child emits exactly one line per newline we write — but any
-		// extra lines are queued defensively so nothing is silently
-		// dropped.
 		var _lineQueue = [];
 		var _lineWaiter = null;
 		var _childClosed = false;
@@ -317,8 +295,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		try {
-			// First query doubles as the readiness probe and returns
-			// the child's self-generated initial buffer contents.
 			var _initialHex = await _queryChild();
 			assert(/^[0-9a-f]{128}$/.test(_initialHex),
 				"native helper emitted 64-byte hex dump");
@@ -334,53 +310,41 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			var _needle = _initialHex.substring(0, 32).match(/../g).join(" ");
 			var _addrs = await childMem.find(_needle, undefined, undefined, 1);
 			assert(_addrs.length > 0, "child sentinel found via find()");
-			var wa = _addrs[0];
+			var wa = _addrs[0]; // bigint address
 
-			// Write various types at non-overlapping offsets, then verify
-			// via a single query that the child process sees them all.
-			//   [0]     writeInt8(0x42)
-			//   [2-3]   writeInt16(0x1234)
-			//   [4-7]   writeInt32(0x12345678)
-			//   [8]     writeBool(true)
-			//   [16-23] writeInt64(0x1122)
-			//   [24-25] writeString("Hi")
-			//   [28-31] writeReal32(1.5)
-			//   [32-39] writeReal64(2.5)
-			//   [40-47] writePtr(0x1234)
+			// Write various types at non-overlapping offsets
 			assert(await childMem.writeInt8(wa, 0x42),
 				"cross-process writeInt8 succeeded");
-			await childMem.writeInt16(wa + 2, 0x1234);
-			await childMem.writeInt32(wa + 4, 0x12345678);
-			await childMem.writeBool(wa + 8, true);
-			await childMem.writeInt64(wa + 16, 0x1122);
-			await childMem.writeString(wa + 24, "Hi");
-			await childMem.writeReal32(wa + 28, 1.5);
-			await childMem.writeReal64(wa + 32, 2.5);
-			await childMem.writePtr(wa + 40, 0x1234);
+			await childMem.writeInt16(wa + 2n, 0x1234);
+			await childMem.writeInt32(wa + 4n, 0x12345678);
+			await childMem.writeBool(wa + 8n, true);
+			await childMem.writeInt64(wa + 16n, 0x1122);
+			await childMem.writeString(wa + 24n, "Hi");
+			await childMem.writeReal32(wa + 28n, 1.5);
+			await childMem.writeReal64(wa + 32n, 2.5);
+			await childMem.writePtr(wa + 40n, 0x1234);
 
 			// Read back via typed read methods (cross-process read).
 			assert(await childMem.readInt8(wa) === 0x42,
 				"cross-process readInt8");
-			assert(await childMem.readInt16(wa + 2) === 0x1234,
+			assert(await childMem.readInt16(wa + 2n) === 0x1234,
 				"cross-process readInt16");
-			assert(await childMem.readInt32(wa + 4) === 0x12345678,
+			assert(await childMem.readInt32(wa + 4n) === 0x12345678,
 				"cross-process readInt32");
-			assert(await childMem.readBool(wa + 8) === true,
+			assert(await childMem.readBool(wa + 8n) === true,
 				"cross-process readBool");
-			assert(await childMem.readInt64(wa + 16) === 0x1122,
+			assert(await childMem.readInt64(wa + 16n) === 0x1122,
 				"cross-process readInt64");
-			assert(await childMem.readString(wa + 24, 2) === "Hi",
+			assert(await childMem.readString(wa + 24n, 2) === "Hi",
 				"cross-process readString");
-			assert(await childMem.readReal32(wa + 28) === 1.5,
+			assert(await childMem.readReal32(wa + 28n) === 1.5,
 				"cross-process readReal32");
-			assert(await childMem.readReal64(wa + 32) === 2.5,
+			assert(await childMem.readReal64(wa + 32n) === 2.5,
 				"cross-process readReal64");
-			assert(await childMem.readPtr(wa + 40) === 0x1234,
+			assert(await childMem.readPtr(wa + 40n) === 0x1234,
 				"cross-process readPtr");
 
 			// Belt-and-suspenders: ask the child to re-dump its buffer.
-			// The child uses volatile reads so the values we see here are
-			// the actual bytes in its address space, not a stale cache.
 			var _hex = await _queryChild();
 			assert(_hex.substring(0, 2) === "42",
 				"cross-process writeInt8 visible");
@@ -402,17 +366,17 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			// Round 2: negative / signed values
 			await childMem.writeData(wa, Buffer.alloc(64, 0xA5), 64);
 			await childMem.writeInt8(wa, -1);
-			await childMem.writeInt16(wa + 2, -2);
-			await childMem.writeInt32(wa + 4, -3);
-			await childMem.writeInt64(wa + 16, -4);
+			await childMem.writeInt16(wa + 2n, -2);
+			await childMem.writeInt32(wa + 4n, -3);
+			await childMem.writeInt64(wa + 16n, -4);
 
 			assert(await childMem.readInt8(wa) === -1,
 				"cross-process readInt8 negative");
-			assert(await childMem.readInt16(wa + 2) === -2,
+			assert(await childMem.readInt16(wa + 2n) === -2,
 				"cross-process readInt16 negative");
-			assert(await childMem.readInt32(wa + 4) === -3,
+			assert(await childMem.readInt32(wa + 4n) === -3,
 				"cross-process readInt32 negative");
-			assert(await childMem.readInt64(wa + 16) === -4,
+			assert(await childMem.readInt64(wa + 16n) === -4,
 				"cross-process readInt64 negative");
 
 			// Verify the same via child's own view
@@ -434,28 +398,11 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 			childProc.close();
 		} finally {
-			// Closing stdin is the child's cue to exit cleanly on EOF.
 			try { _child.stdin.end(); } catch (_) {}
 			try { _child.kill(); } catch (_) {}
 		}
 
 		// --- task_for_pid failure path (macOS, non-root -> root process) ---
-		// On macOS CI the test suite runs as root (sudo -E).  Spawn a
-		// helper child with uid dropped to `nobody` and target launchd
-		// (pid 1, root-owned).  task_for_pid() returns KERN_FAILURE for
-		// an unprivileged caller against a privileged target, which
-		// exercises the `task_for_pid(...) !== 0 -> return 0` arm in
-		// macGetTask (lib/ffi/memory.ts line ~124, lib/ffi/process.ts
-		// line ~151).  The non-root drop is preferred over targeting a
-		// hardened binary because SIP-disabled CI hosts can sometimes
-		// bypass hardened runtime restrictions, while a root-owned task
-		// always denies an unprivileged task_for_pid.
-		//
-		// The child emits a distinct stdout token so the parent can
-		// distinguish "ran, task_for_pid correctly denied" from any
-		// other failure mode (child couldn't load bun as nobody, path
-		// permissions, etc.) — the latter skip cleanly rather than
-		// fail the suite for unrelated host-permissions issues.
 		if (process.platform === "darwin" &&
 			typeof process.getuid === "function" &&
 			process.getuid() === 0) {
@@ -484,17 +431,14 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			if (_nrOut.indexOf("TASK_DENIED") >= 0) {
 				assert(true, "non-root Memory(pid=1) denied (task_for_pid KERN_FAILURE)");
 			} else if (_nrOut.indexOf("TASK_OK") >= 0) {
-				// task_for_pid unexpectedly succeeded as nobody — don't
-				// fail the suite on a host-specific quirk, just note it.
 				log("(task_for_pid succeeded as nobody?) ");
 			} else {
-				// Child couldn't launch / load mechatron as nobody.
 				log("(non-root helper unavailable) ");
 			}
 		}
 
 		// --- Multi-value (count > 1) typed reads ---
-		if (readable && readable.size >= 32) {
+		if (readable && readable.size >= 32n) {
 			var mv8 = await mem.readInt8(readable.start, 4);
 			assert(Array.isArray(mv8), "readInt8 count=4 returns array");
 			assert(mv8.length === 4, "readInt8 count=4 length");
@@ -520,27 +464,18 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Flag-bearing reads: SKIP_ERRORS / AUTO_ACCESS ---
-		// These drive the per-region walker in lib/ffi/memory.ts (linux/mac/win
-		// have separate implementations at lines ~676-706, ~717-754, ~763-809
-		// for reads and symmetric blocks for writes) — paths that FLAG_DEFAULT
-		// bypasses entirely in favor of the single-shot read primitive.
-		// Use a span that deliberately crosses region boundaries so we exit
-		// the region loop via the "gap" and "end-of-range" paths as well.
 		if (readable) {
 			var spanStart = readable.start;
-			// 1MB span is big enough to cross region boundaries in most processes
-			var spanLen = Math.min(1024 * 1024, readable.size * 2);
+			var spanLen = Number(readable.size * 2n < 1048576n ? readable.size * 2n : 1048576n);
 			var spanBuf = Buffer.alloc(spanLen);
 			var gotSkip = await mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
 			assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
 			var gotAuto = await mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
 			assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
 
-			// Same for writeData — target the tail of a writable region so the
-			// no-op path (non-writable region in between) gets exercised too.
 			var writable = null;
 			for (var j = 0; j < regions.length; ++j) {
-				if (regions[j].valid && regions[j].bound && regions[j].writable && regions[j].size > 16) {
+				if (regions[j].valid && regions[j].bound && regions[j].writable && regions[j].size > 16n) {
 					writable = regions[j];
 					break;
 				}
@@ -555,8 +490,8 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- readData with zero length early-out ---
-		assert(await mem.readData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "readData len=0");
-		assert(await mem.writeData(readable ? readable.start : 0, Buffer.alloc(1), 0) === 0, "writeData len=0");
+		assert(await mem.readData(readable ? readable.start : 0n, Buffer.alloc(1), 0) === 0, "readData len=0");
+		assert(await mem.writeData(readable ? readable.start : 0n, Buffer.alloc(1), 0) === 0, "writeData len=0");
 
 		await proc.close();
 
@@ -574,7 +509,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		var regions = await mem.getRegions();
 		var readable = null;
 		for (var i = 0; i < regions.length; ++i) {
-			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16) {
+			if (regions[i].valid && regions[i].bound && regions[i].readable && regions[i].size > 16n) {
 				readable = regions[i];
 				break;
 			}
