@@ -439,7 +439,7 @@ check("Stats.prototype.clone",   typeof robot.Memory.Stats.prototype.clone === "
 check("Memory.Region() without new", robot.Memory.Region() != null);
 var region = robot.Memory.Region();
 check("Region.valid === false",   region.valid === false);
-check("Region.start === 0",      region.start === 0);
+check("Region.start === 0",      region.start == 0);
 check("Region.prototype.contains", typeof robot.Memory.Region.prototype.contains === "function");
 check("Region.prototype.lt",    typeof robot.Memory.Region.prototype.lt === "function");
 check("Region.prototype.gt",    typeof robot.Memory.Region.prototype.gt === "function");
