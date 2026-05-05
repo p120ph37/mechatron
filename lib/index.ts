@@ -10,7 +10,7 @@
  */
 
 // Data types
-export { Point, Size, Bounds, Color, Range, Hash, Image, Timer } from "./types";
+export { Point, Size, Bounds, Color, Range, Hash, Image, Timer, Ptr } from "./types";
 
 // Keyboard
 export { Keyboard, KEYS, getAllKeys, getKeyNames, getAllKeyConstants } from "./keyboard";
@@ -43,8 +43,20 @@ export {
 } from "./memory";
 
 // Native availability checking
-export { isAvailable, getBackend } from "./napi";
-export type { Subsystem, Backend } from "./napi";
+export { isAvailable, getBackend } from "./backend";
+export type { Subsystem, Backend, Variant, BackendEntry } from "./backend";
+
+// Platform mechanism introspection — discover / select / override which
+// backend mechanism is in use per capability, and manage cacheable
+// permission handles for mechanisms that use them.
+export {
+  Platform, listMechanisms, getMechanism, getPreferredMechanisms,
+  setMechanism, resetMechanism, getCapabilities,
+  saveScreenPermission, loadScreenPermission,
+} from "./platform";
+export type {
+  PlatformCapability, MechanismInfo, CapabilitySummary,
+} from "./platform";
 
 /** Version of the mechatron meta-package. */
 export const VERSION = "0.0.0";

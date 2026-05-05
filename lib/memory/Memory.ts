@@ -1,5 +1,5 @@
 import { Process } from "../process";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 
 export class Stats {
   systemReads: number = 0;
@@ -38,9 +38,9 @@ export class Stats {
 export class Region {
   valid: boolean = false;
   bound: boolean = false;
-  start: number = 0;
-  stop: number = 0;
-  size: number = 0;
+  start: bigint = 0n;
+  stop: bigint = 0n;
+  size: bigint = 0n;
   readable: boolean = false;
   writable: boolean = false;
   executable: boolean = false;
@@ -48,43 +48,50 @@ export class Region {
   private: boolean = false;
   guarded: boolean = false;
 
-  contains(address: number): boolean {
-    return address >= this.start && address < this.stop;
+  contains(address: bigint | number): boolean {
+    const a = BigInt(address);
+    return a >= this.start && a < this.stop;
   }
 
-  lt(value: Region | number): boolean {
+  lt(value: Region | bigint | number): boolean {
     if (value instanceof Region) return this.start < value.start;
-    if (typeof value === "number") return this.start < value;
+    if (typeof value === "bigint") return this.start < value;
+    if (typeof value === "number") return this.start < BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  gt(value: Region | number): boolean {
+  gt(value: Region | bigint | number): boolean {
     if (value instanceof Region) return this.start > value.start;
-    if (typeof value === "number") return this.start > value;
+    if (typeof value === "bigint") return this.start > value;
+    if (typeof value === "number") return this.start > BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  le(value: Region | number): boolean {
+  le(value: Region | bigint | number): boolean {
     if (value instanceof Region) return this.start <= value.start;
-    if (typeof value === "number") return this.start <= value;
+    if (typeof value === "bigint") return this.start <= value;
+    if (typeof value === "number") return this.start <= BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  ge(value: Region | number): boolean {
+  ge(value: Region | bigint | number): boolean {
     if (value instanceof Region) return this.start >= value.start;
-    if (typeof value === "number") return this.start >= value;
+    if (typeof value === "bigint") return this.start >= value;
+    if (typeof value === "number") return this.start >= BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  eq(value: Region | number): boolean {
+  eq(value: Region | bigint | number): boolean {
     if (value instanceof Region) return this.start === value.start && this.size === value.size;
-    if (typeof value === "number") return this.start === value;
+    if (typeof value === "bigint") return this.start === value;
+    if (typeof value === "number") return this.start === BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  ne(value: Region | number): boolean {
+  ne(value: Region | bigint | number): boolean {
     if (value instanceof Region) return this.start !== value.start || this.size !== value.size;
-    if (typeof value === "number") return this.start !== value;
+    if (typeof value === "bigint") return this.start !== value;
+    if (typeof value === "number") return this.start !== BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
@@ -111,7 +118,6 @@ export class Region {
   }
 }
 
-// Data type enum matching C++ adapter
 const enum DataType {
   Int8 = 1,
   Int16 = 2,
@@ -121,6 +127,10 @@ const enum DataType {
   Real64 = 6,
   Bool = 7,
   String = 8,
+}
+
+function toBigInt(v: bigint | number): bigint {
+  return typeof v === "bigint" ? v : BigInt(v);
 }
 
 export class Memory {
@@ -142,7 +152,7 @@ export class Memory {
     }
   }
 
-  isValid(): boolean {
+  async isValid(): Promise<boolean> {
     return getNative("memory").memory_isValid(this._pid);
   }
 
@@ -151,19 +161,17 @@ export class Memory {
   }
 
   getStats(reset?: boolean): Stats {
-    // Stats are tracked in the native layer; for now return empty
-    // The native backend doesn't expose stats directly in our thin interface
     return new Stats();
   }
 
-  getRegion(address: number): Region {
-    const r = getNative("memory").memory_getRegion(this._pid, address);
+  async getRegion(address: bigint | number): Promise<Region> {
+    const r = getNative("memory").memory_getRegion(this._pid, toBigInt(address));
     const region = new Region();
     region.valid = r.valid;
     region.bound = r.bound;
-    region.start = r.start;
-    region.stop = r.stop;
-    region.size = r.size;
+    region.start = BigInt(r.start);
+    region.stop = BigInt(r.stop);
+    region.size = BigInt(r.size);
     region.readable = r.readable;
     region.writable = r.writable;
     region.executable = r.executable;
@@ -173,20 +181,22 @@ export class Memory {
     return region;
   }
 
-  getRegions(start?: number, stop?: number): Region[] {
+  async getRegions(start?: bigint | number, stop?: bigint | number): Promise<Region[]> {
     interface RawRegion {
-      valid: boolean; bound: boolean; start: number; stop: number; size: number;
+      valid: boolean; bound: boolean; start: bigint; stop: bigint; size: bigint;
       readable: boolean; writable: boolean; executable: boolean; access: number;
       private: boolean; guarded: boolean;
     }
-    const regions: RawRegion[] = getNative("memory").memory_getRegions(this._pid, start, stop);
+    const biStart = start !== undefined ? toBigInt(start) : undefined;
+    const biStop = stop !== undefined ? toBigInt(stop) : undefined;
+    const regions: RawRegion[] = getNative("memory").memory_getRegions(this._pid, biStart, biStop);
     return regions.map((r) => {
       const region = new Region();
       region.valid = r.valid;
       region.bound = r.bound;
-      region.start = r.start;
-      region.stop = r.stop;
-      region.size = r.size;
+      region.start = BigInt(r.start);
+      region.stop = BigInt(r.stop);
+      region.size = BigInt(r.size);
       region.readable = r.readable;
       region.writable = r.writable;
       region.executable = r.executable;
@@ -197,167 +207,135 @@ export class Memory {
     });
   }
 
-  async getRegionsAsync(start?: number, stop?: number): Promise<Region[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.getRegions(start, stop))));
-  }
-
-  setAccess(region: Region, readable: boolean, writable: boolean, executable: boolean): boolean;
-  setAccess(region: Region, flags: number): boolean;
-  setAccess(region: Region, a: boolean | number, b?: boolean, c?: boolean): boolean {
+  async setAccess(region: Region, readable: boolean, writable: boolean, executable: boolean): Promise<boolean>;
+  async setAccess(region: Region, flags: number): Promise<boolean>;
+  async setAccess(region: Region, a: boolean | number, b?: boolean, c?: boolean): Promise<boolean> {
     if (typeof a === "number") {
       return getNative("memory").memory_setAccessFlags(this._pid, region.start, a);
     }
     return getNative("memory").memory_setAccess(this._pid, region.start, a, b!, c!);
   }
 
-  getPtrSize(): number {
+  async getPtrSize(): Promise<number> {
     return getNative("memory").memory_getPtrSize(this._pid);
   }
 
-  getMinAddress(): number {
-    return getNative("memory").memory_getMinAddress(this._pid);
+  async getMinAddress(): Promise<bigint> {
+    return BigInt(getNative("memory").memory_getMinAddress(this._pid));
   }
 
-  getMaxAddress(): number {
-    return getNative("memory").memory_getMaxAddress(this._pid);
+  async getMaxAddress(): Promise<bigint> {
+    return BigInt(getNative("memory").memory_getMaxAddress(this._pid));
   }
 
-  getPageSize(): number {
+  async getPageSize(): Promise<number> {
     return getNative("memory").memory_getPageSize(this._pid);
   }
 
-  async findAsync(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): Promise<number[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.find(pattern, start, stop, limit, flags))));
+  async find(pattern: string, start?: bigint | number, stop?: bigint | number, limit?: number, flags?: string): Promise<bigint[]> {
+    const biStart = start !== undefined ? toBigInt(start) : undefined;
+    const biStop = stop !== undefined ? toBigInt(stop) : undefined;
+    const results = getNative("memory").memory_find(this._pid, pattern, biStart, biStop, limit, flags);
+    return results.map((v: bigint | number) => BigInt(v));
   }
 
-  find(pattern: string, start?: number, stop?: number, limit?: number, flags?: string): number[] {
-    return getNative("memory").memory_find(this._pid, pattern, start, stop, limit, flags);
-  }
-
-  createCache(address: number, size: number, blockSize: number, maxBlocks?: number, flags?: number): boolean {
-    return getNative("memory").memory_createCache(this._pid, address, size, blockSize, maxBlocks, flags);
-  }
-
-  clearCache(): void {
-    getNative("memory").memory_clearCache(this._pid);
-  }
-
-  deleteCache(): void {
-    getNative("memory").memory_deleteCache(this._pid);
-  }
-
-  isCaching(): boolean {
-    return getNative("memory").memory_isCaching(this._pid);
-  }
-
-  getCacheSize(): number {
-    return getNative("memory").memory_getCacheSize(this._pid);
-  }
-
-  readData(address: number, buffer: Buffer, length?: number, flags?: number): number {
+  async readData(address: bigint | number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
     const len = length !== undefined ? length : buffer.length;
+    if (len === 0) return 0;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
-    const result = getNative("memory").memory_readData(this._pid, address, len, flags);
+    const result = getNative("memory").memory_readData(this._pid, toBigInt(address), len, flags);
     if (!result) return 0;
     result.copy(buffer, 0, 0, len);
     return len;
   }
 
-  writeData(address: number, buffer: Buffer, length?: number, flags?: number): number {
+  async writeData(address: bigint | number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
     const len = length !== undefined ? length : buffer.length;
-    if (buffer.length < len) throw new RangeError("Buffer is too small");
     if (len === 0) return 0;
-    const buf = len === buffer.length ? buffer : buffer.subarray(0, len);
-    return getNative("memory").memory_writeData(this._pid, address, buf, flags);
+    if (buffer.length < len) throw new RangeError("Buffer is too small");
+    const buf = len === buffer.length ? buffer : buffer.subarray(0, len) as Buffer;
+    return getNative("memory").memory_writeData(this._pid, toBigInt(address), buf, flags);
   }
 
-  async readDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.readData(address, buffer, length, flags))));
+  async readInt8(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    return this._readType(toBigInt(address), DataType.Int8, 1, count, stride);
   }
 
-  async writeDataAsync(address: number, buffer: Buffer, length?: number, flags?: number): Promise<number> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.writeData(address, buffer, length, flags))));
+  async readInt16(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    return this._readType(toBigInt(address), DataType.Int16, 2, count, stride);
   }
 
-  readInt8(address: number, count?: number, stride?: number): number | number[] | null {
-    return this._readType(address, DataType.Int8, 1, count, stride);
+  async readInt32(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    return this._readType(toBigInt(address), DataType.Int32, 4, count, stride);
   }
 
-  readInt16(address: number, count?: number, stride?: number): number | number[] | null {
-    return this._readType(address, DataType.Int16, 2, count, stride);
+  async readInt64(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    return this._readType(toBigInt(address), DataType.Int64, 8, count, stride);
   }
 
-  readInt32(address: number, count?: number, stride?: number): number | number[] | null {
-    return this._readType(address, DataType.Int32, 4, count, stride);
+  async readReal32(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    return this._readType(toBigInt(address), DataType.Real32, 4, count, stride);
   }
 
-  readInt64(address: number, count?: number, stride?: number): number | number[] | null {
-    return this._readType(address, DataType.Int64, 8, count, stride);
+  async readReal64(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    return this._readType(toBigInt(address), DataType.Real64, 8, count, stride);
   }
 
-  readReal32(address: number, count?: number, stride?: number): number | number[] | null {
-    return this._readType(address, DataType.Real32, 4, count, stride);
+  async readBool(address: bigint | number, count?: number, stride?: number): Promise<boolean | boolean[] | null> {
+    return this._readType(toBigInt(address), DataType.Bool, 1, count, stride) as any;
   }
 
-  readReal64(address: number, count?: number, stride?: number): number | number[] | null {
-    return this._readType(address, DataType.Real64, 8, count, stride);
+  async readString(address: bigint | number, length: number, count?: number, stride?: number): Promise<string | string[] | null> {
+    return this._readType(toBigInt(address), DataType.String, length, count, stride) as any;
   }
 
-  readBool(address: number, count?: number, stride?: number): boolean | boolean[] | null {
-    return this._readType(address, DataType.Bool, 1, count, stride) as any;
+  async readPtr(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
+    const ptrSize = await this.getPtrSize();
+    return this._readType(toBigInt(address), ptrSize === 4 ? DataType.Int32 : DataType.Int64, ptrSize, count, stride);
   }
 
-  readString(address: number, length: number, count?: number, stride?: number): string | string[] | null {
-    return this._readType(address, DataType.String, length, count, stride) as any;
+  async writeInt8(address: bigint | number, value: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Int8, 1);
   }
 
-  readPtr(address: number, count?: number, stride?: number): number | number[] | null {
-    const ptrSize = this.getPtrSize();
-    return this._readType(address, ptrSize === 4 ? DataType.Int32 : DataType.Int64, ptrSize, count, stride);
+  async writeInt16(address: bigint | number, value: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Int16, 2);
   }
 
-  writeInt8(address: number, value: number): boolean {
-    return this._writeType(address, value, DataType.Int8, 1);
+  async writeInt32(address: bigint | number, value: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Int32, 4);
   }
 
-  writeInt16(address: number, value: number): boolean {
-    return this._writeType(address, value, DataType.Int16, 2);
+  async writeInt64(address: bigint | number, value: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Int64, 8);
   }
 
-  writeInt32(address: number, value: number): boolean {
-    return this._writeType(address, value, DataType.Int32, 4);
+  async writeReal32(address: bigint | number, value: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Real32, 4);
   }
 
-  writeInt64(address: number, value: number): boolean {
-    return this._writeType(address, value, DataType.Int64, 8);
+  async writeReal64(address: bigint | number, value: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Real64, 8);
   }
 
-  writeReal32(address: number, value: number): boolean {
-    return this._writeType(address, value, DataType.Real32, 4);
+  async writeBool(address: bigint | number, value: boolean): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.Bool, 1);
   }
 
-  writeReal64(address: number, value: number): boolean {
-    return this._writeType(address, value, DataType.Real64, 8);
+  async writeString(address: bigint | number, value: string, length?: number): Promise<boolean> {
+    return this._writeType(toBigInt(address), value, DataType.String, length || 0);
   }
 
-  writeBool(address: number, value: boolean): boolean {
-    return this._writeType(address, value, DataType.Bool, 1);
-  }
-
-  writeString(address: number, value: string, length?: number): boolean {
-    return this._writeType(address, value, DataType.String, length || 0);
-  }
-
-  writePtr(address: number, value: number): boolean {
-    const ptrSize = this.getPtrSize();
-    return this._writeType(address, value, ptrSize === 4 ? DataType.Int32 : DataType.Int64, ptrSize);
+  async writePtr(address: bigint | number, value: number): Promise<boolean> {
+    const ptrSize = await this.getPtrSize();
+    return this._writeType(toBigInt(address), value, ptrSize === 4 ? DataType.Int32 : DataType.Int64, ptrSize);
   }
 
   clone(): Memory {
     return new Memory(new Process(this._pid));
   }
 
-  private _readType(address: number, type: DataType, length: number, count?: number, stride?: number): any {
+  private _readType(address: bigint, type: DataType, length: number, count?: number, stride?: number): any {
     const native = getNative("memory");
     const c = count || 1;
     const s = stride || 0;
@@ -402,7 +380,7 @@ export class Memory {
     return result;
   }
 
-  private _writeType(address: number, value: any, type: DataType, length: number): boolean {
+  private _writeType(address: bigint, value: any, type: DataType, length: number): boolean {
     const native = getNative("memory");
     if (type === DataType.String) {
       const str = value as string;

@@ -6,9 +6,6 @@ use std::fs;
 #[cfg(target_os = "linux")]
 use std::path::Path;
 
-#[cfg(target_os = "linux")]
-use crate::x11::*;
-
 // ── Linux internals ─────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
@@ -777,37 +774,6 @@ pub fn process_get_modules(env: Env, pid: i32, regex_str: Option<String>) -> Res
         arr.set(i as u32, obj)?;
     }
     Ok(arr.coerce_to_object()?)
-}
-
-// ── process_getWindows ──────────────────────────────────────────────────
-
-#[cfg(target_os = "linux")]
-#[napi(js_name = "process_getWindows")]
-pub fn process_get_windows(env: Env, pid: i32, regex_str: Option<String>) -> Result<napi::JsObject> {
-    unsafe {
-        let d = get_display();
-        if d.is_null() {
-            return Ok(env.create_array(0)?.coerce_to_object()?);
-        }
-        let _xe = XDismissErrors::new();
-
-        let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
-        let mut results = Vec::new();
-        let root = XDefaultRootWindow(d);
-        crate::window::enum_windows_with_pid(root, pattern.as_ref(), pid, &mut results);
-
-        let mut arr = env.create_array(results.len() as u32)?;
-        for (i, &h) in results.iter().enumerate() {
-            arr.set(i as u32, h as f64)?;
-        }
-        Ok(arr.coerce_to_object()?)
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-#[napi(js_name = "process_getWindows")]
-pub fn process_get_windows(env: Env, _pid: i32, _regex_str: Option<String>) -> Result<napi::JsObject> {
-    Ok(env.create_array(0)?.coerce_to_object()?)
 }
 
 // ── process_getList ─────────────────────────────────────────────────────

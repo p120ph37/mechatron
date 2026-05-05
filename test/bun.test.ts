@@ -18,122 +18,152 @@
  * (Bun has no 32-bit Windows build) and for any direct `node` invocations.
  */
 
-import { describe, test } from "bun:test";
+import { describe, test, afterAll } from "bun:test";
 
 // Default backend when none specified: ffi on every supported platform.
 // CI explicitly sets MECHATRON_BACKEND for each invocation; this default
 // is for `npm test` / `bun test` ergonomics.
 const _envBackend = (process.env.MECHATRON_BACKEND || "").toLowerCase();
-const backend: "ffi" | "napi" =
-  _envBackend === "ffi" || _envBackend === "napi" ? _envBackend : "ffi";
+const _baseBackend = _envBackend.replace(/\[.*$/, "").split(",")[0];
+const backend: string =
+  _baseBackend === "ffi" || _baseBackend === "napi" || _baseBackend === "nolib"
+    ? _envBackend
+    : "ffi";
 process.env.MECHATRON_BACKEND = backend;
 
-const SKIP_PLATFORM = false;
-const describeMaybe = describe;
-
 // ── Test helpers (mirrors test/test.js) ──────────────────────────────────────
-
-const gExpected: Record<string, Record<string, boolean>> = {
-  "linux-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "linux-arm64":  { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "darwin-arm64": { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "darwin-x64":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "win32-x64":    { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-  "win32-ia32":   { keyboardSim: true, mousePos: true, mouseSim: true, grabScreen: true },
-};
-const gPlatformKey = process.platform + "-" + process.arch;
-const gExpect: Record<string, boolean> = gExpected[gPlatformKey] || {};
-
-// Honour the LD_PRELOAD `dlopen-block` shim's block list (see
-// test/dlopen-block.c + .github/workflows/build-reusable.yml).  When a
-// library is deliberately denied via MECHATRON_BLOCK_DLOPEN, the
-// capabilities it provides can't be probed, so demote them from
-// "expected to work" to "may skip" on this run.  This lets the FFI
-// backend's dlopen-catch arms (lib/ffi/x11.ts:220, 234, 245) get
-// deterministic coverage without spuriously failing keyboardSim /
-// mouseSim / grabScreen assertions.
-const _blocked = (process.env.MECHATRON_BLOCK_DLOPEN || "").toLowerCase();
-if (_blocked.includes("libxtst")) {
-  gExpect.keyboardSim = false;
-  gExpect.mouseSim = false;
-  // linux_mouse_setPos short-circuits on !isXTestAvailable() even though
-  // XWarpPointer itself lives in libX11 (lib/ffi/mouse.ts:131), so the
-  // getPos/setPos round-trip observes no movement when libXtst is blocked.
-  gExpect.mousePos = false;
-}
 
 const log = (msg: string) => process.stdout.write(msg);
 const assert = (cond: unknown, msg?: string) => {
   if (!cond) throw new Error("Assertion Failed" + (msg ? ": " + msg : ""));
 };
-const expectOrSkip = (capability: string, label: string) => {
-  if (gExpect[capability]) {
-    assert(false, `${label} — expected to work on ${gPlatformKey} but probe failed (regression!)`);
-  }
-};
 
 // ── Load mechatron + per-subsystem test modules ──────────────────────────────
 
-// `require("..")` resolves to lib/index.ts under the "bun" exports condition,
-// so coverage attribution is against the TypeScript source files directly.
-// Skip when SKIP_PLATFORM is true so that requiring an unsupported subsystem
-// doesn't blow up at file load time.
-
-let typesM: any, kbM: any, mouseM: any, clipM: any, procM: any, winM: any, scrM: any, memM: any;
-let waitFor: (cond: () => boolean, timeoutMs: number) => boolean;
-
-if (!SKIP_PLATFORM) {
-  // Import the TypeScript source directly (not dist/index.js).  Bun
-  // executes .ts natively, so coverage is attributed to lib/**/*.ts
-  // — making FFI files visible to the lcov report.  Path-based
-  // `require("..")` would resolve via package.json's `main` to
-  // `dist/index.js` (the `exports` field's `"bun"` condition isn't
-  // consulted for path requires).
-  const mechatron: any = require("../lib");
-  waitFor = (condFn, timeoutMs) => {
+const mechatron: any = require("../lib");
+const waitFor = (condFn: () => boolean, timeoutMs: number) => {
+  if (condFn()) return true;
+  for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
+    mechatron.Timer.sleep(5);
     if (condFn()) return true;
-    for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
-      mechatron.Timer.sleep(5);
-      if (condFn()) return true;
-    }
-    return false;
-  };
-  typesM = require("./types")(mechatron, log, assert);
-  kbM    = require("./keyboard")(mechatron, log, assert, waitFor, expectOrSkip);
-  mouseM = require("./mouse")(mechatron, log, assert, waitFor, expectOrSkip);
-  clipM  = require("./clipboard")(mechatron, log, assert, waitFor, expectOrSkip);
-  procM  = require("./process")(mechatron, log, assert, waitFor, expectOrSkip);
-  winM   = require("./window")(mechatron, log, assert, waitFor, expectOrSkip);
-  scrM   = require("./screen")(mechatron, log, assert, waitFor, expectOrSkip);
-  memM   = require("./memory")(mechatron, log, assert, waitFor, expectOrSkip);
+  }
+  return false;
+};
 
-  log(`\nMECHATRON [${backend.toUpperCase()} backend] ${gPlatformKey}\n`);
-  const expected = Object.keys(gExpect).filter((k) => gExpect[k]).join(", ");
-  if (expected) log(`Expected: ${expected}\n`);
+const waitForAsync = async (condFn: () => Promise<boolean>, timeoutMs: number) => {
+  for (let elapsed = 0; elapsed < timeoutMs; elapsed += 5) {
+    if (await condFn()) return true;
+    await new Promise(r => setTimeout(r, 5));
+  }
+  return false;
+};
+
+const compatMatrix = require("./matrix").create(mechatron);
+
+type TestEntry = { name: string; functions: string[]; unit?: boolean; test: () => any };
+
+// Each entry declares the COMPATIBILITY.md functions it touches; matrix.js
+// derives the column per-function from platform + getBackend(subsystem).
+const allModules: Array<{ prefix: string; entries: TestEntry[] }> = [
+  { prefix: "types",     entries: require("./types")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "keyboard",  entries: require("./keyboard")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "mouse",     entries: require("./mouse")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "clipboard", entries: require("./clipboard")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "process",   entries: require("./process")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "window",    entries: require("./window")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "screen",    entries: require("./screen")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "memory",    entries: require("./memory")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "uinput",    entries: require("./uinput")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "xproto",    entries: require("./xproto")(mechatron, log, assert, waitFor, waitForAsync) },
+  { prefix: "portal",    entries: require("./portal")(mechatron, log, assert, waitFor, waitForAsync) },
+];
+
+log(`\nMECHATRON [${backend.toUpperCase()} backend] ${process.platform}-${process.arch}\n`);
+if (compatMatrix.available) {
+  log(`Matrix: loaded\n`);
 }
 
-// ── Suite ────────────────────────────────────────────────────────────────────
+// ── Separate unit tests (pure logic, no backend dependency) from matrix tests ─
 
-describeMaybe(`mechatron [${backend}]`, () => {
+const unitEntries: Array<{ displayName: string; entry: TestEntry }> = [];
+const matrixEntries: Array<{ displayName: string; prefix: string; entry: TestEntry }> = [];
+
+for (const mod of allModules) {
+  for (const entry of mod.entries) {
+    const displayName = `${mod.prefix}: ${entry.name}`;
+    if (entry.unit) {
+      unitEntries.push({ displayName, entry });
+    } else {
+      matrixEntries.push({ displayName, prefix: mod.prefix, entry });
+    }
+  }
+}
+
+// ── Unit tests — run once, no matrix gating ─────────────────────────────────
+
+const skipUnit = process.env.MECHATRON_SKIP_UNIT === "1";
+
+if (!skipUnit) {
+  describe("unit", () => {
+    for (const { displayName, entry } of unitEntries) {
+      test(displayName, async () => {
+        await entry.test();
+      });
+    }
+  });
+}
+
+// ── Functional tests — matrix-gated per backend ────────────────────────────
+
+const exercisedFunctions = new Set<string>();
+
+describe(`mechatron [${backend}]`, () => {
   test("availability", () => {
-    const mechatron: any = require("../lib");
     for (const sub of ["keyboard", "mouse", "clipboard", "screen", "window", "process", "memory"]) {
       assert(typeof mechatron.isAvailable(sub) === "boolean", `isAvailable(${sub})`);
     }
-    assert(mechatron.isAvailable("keyboard"), "keyboard available");
+  }, 15000);
+
+  let _prevPrefix = "";
+  for (const { displayName, prefix, entry } of matrixEntries) {
+    const timeout = prefix === "window" ? 15000 : undefined;
+    const needsGC = prefix !== _prevPrefix;
+    _prevPrefix = prefix;
+    test(displayName, async () => {
+      if (needsGC && typeof (globalThis as any).Bun?.gc === "function") {
+        (globalThis as any).Bun.gc(true);
+      }
+      if (!compatMatrix.shouldRun(entry.functions)) {
+        log(`  ${displayName} (skipped: matrix)\n`);
+        return;
+      }
+      for (const fn of entry.functions) exercisedFunctions.add(fn);
+      await entry.test();
+    }, timeout);
+  }
+
+  afterAll(() => {
+    if (!compatMatrix.available) return;
+    const okCells: string[] = compatMatrix.getOkCells();
+    const unexercised = okCells.filter((fn: string) => !exercisedFunctions.has(fn));
+    log(`\nMatrix cross-check: ${exercisedFunctions.size}/${okCells.length} ok cells exercised.`);
+    if (unexercised.length > 0) log(` Missing: ${unexercised.join(", ")}`);
+    log("\n");
+
+    const outDir = process.env.RUNNER_TEMP;
+    if (outDir) {
+      const fs = require("fs");
+      const path = require("path");
+      const exDir = path.join(outDir, "exercised");
+      fs.mkdirSync(exDir, { recursive: true });
+      const safeBackend = backend.replace(/[\[\]]/g, "_");
+      const fname = `${process.platform}-${process.arch}-${safeBackend}.json`;
+      fs.writeFileSync(
+        path.join(exDir, fname),
+        JSON.stringify({ platform: process.platform, arch: process.arch,
+          backend, exercised: [...exercisedFunctions], okCells }) + "\n",
+      );
+    }
   });
-  test("types",     () => typesM.testTypes());
-  test("timer",     () => typesM.testTimer());
-  test("keyboard",  () => kbM.testKeyboard());
-  test("mouse",     () => mouseM.testMouse());
-  test("clipboard", () => clipM.testClipboard());
-  test("process",   () => procM.testProcess());
-  // Per-test timeout bumped above bun's 5s default: the Linux FFI
-  // stale-handle probe spawns xmessage, waits for the window to be
-  // mapped (≤1.5s), destroys it, then waits for the X server to
-  // drop the handle (≤1.5s).  Combined with the normal window-
-  // enumeration work this can exceed 5s on slow CI runners.
-  test("window",    () => winM.testWindow(), 15000);
-  test("screen",    () => scrM.testScreen());
-  test("memory",    () => memM.testMemory());
+
 });

@@ -1,0 +1,886 @@
+#!/usr/bin/env bash
+# CI test runner — invoked by .github/workflows/build-reusable.yml.
+#
+# Expected env vars (set by the workflow step):
+#   MATRIX_ARCH   — matrix.arch  (x64, arm64, ia32)
+#   MATRIX_OS     — matrix.os    (ubuntu-24.04, macos-15, windows-latest, …)
+#   RUNNER_OS     — runner.os    (Linux, macOS, Windows)
+#   RUNNER_ARCH   — runner.arch  (X64, ARM64)
+#   RUNNER_TEMP   — runner.temp  (per-job temp directory)
+set -euo pipefail
+
+JUNIT_DIR="${RUNNER_TEMP}/junit"
+COV_DIR="${RUNNER_TEMP}/coverage"
+mkdir -p "$JUNIT_DIR" "$COV_DIR"
+TEST_LOG="${RUNNER_TEMP}/test-output.txt"
+: > "$TEST_LOG"
+
+run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
+
+run_bun() {
+  local LABEL="$1"; shift
+  local JUNIT_FILE="$1"; shift
+  [ "$1" = "--" ] && shift
+  echo ">>> [$LABEL]: $*" | tee -a "$TEST_LOG"
+  run_and_log "$@"
+}
+
+# Write a synthetic JUnit failure when a backend crashes before producing output.
+synth_junit_failure() {
+  local JUNIT_FILE="$1" LABEL="$2" MSG="$3"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n' > "$JUNIT_FILE"
+  printf '<testsuites tests="1" failures="1">\n' >> "$JUNIT_FILE"
+  printf '  <testsuite name="%s-backend" tests="1" failures="1">\n' "$LABEL" >> "$JUNIT_FILE"
+  printf '    <testcase name="%s backend startup" classname="backend" time="0">\n' "$LABEL" >> "$JUNIT_FILE"
+  printf '      <failure message="%s"/>\n' "$MSG" >> "$JUNIT_FILE"
+  printf '    </testcase>\n' >> "$JUNIT_FILE"
+  printf '  </testsuite>\n' >> "$JUNIT_FILE"
+  printf '</testsuites>\n' >> "$JUNIT_FILE"
+}
+
+# Append a synthetic <testcase><failure/></testcase> to an existing JUnit
+# file. Used when a cell exited non-zero but its JUnit only records passes —
+# e.g. the test process crashed during shutdown after writing the report.
+# Without this the failure stays invisible in the PR summary comment, which
+# only reads JUnit XML.
+append_junit_failure() {
+  local JUNIT_FILE="$1" LABEL="$2" MSG="$3"
+  node -e '
+    const fs = require("fs");
+    const [file, label, msg] = process.argv.slice(1);
+    let xml = fs.readFileSync(file, "utf8");
+    const esc = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const tc = "    <testcase name=\"" + esc(label + " process exit") + "\" classname=\"backend\" time=\"0\">\n" +
+               "      <failure message=\"" + esc(msg) + "\"/>\n" +
+               "    </testcase>\n";
+    // Insert before the LAST </testsuite> in the document.
+    const idx = xml.lastIndexOf("</testsuite>");
+    if (idx < 0) {
+      // No testsuite to inject into — overwrite with a minimal failing report.
+      xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n  <testsuite name=\"" + esc(label) + "\">\n" + tc + "  </testsuite>\n</testsuites>\n";
+    } else {
+      xml = xml.slice(0, idx) + tc + xml.slice(idx);
+    }
+    fs.writeFileSync(file, xml);
+  ' "$JUNIT_FILE" "$LABEL" "$MSG"
+}
+
+# Guard: check a backend exit code and surface failure in JUnit.
+#   - No testcases at all → synthesize a single failing testcase
+#   - Has testcases but no failures → tests passed but the process died
+#     non-zero afterward; append a synthetic failure so the PR comment
+#     reflects what the CI step status already shows.
+guard_junit() {
+  local BE_RC="$1" JUNIT_FILE="$2" LABEL="$3" MSG="$4"
+  if [ "$BE_RC" = 0 ]; then return; fi
+  if ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
+    synth_junit_failure "$JUNIT_FILE" "$LABEL" "$MSG"
+  elif ! grep -q "<failure" "$JUNIT_FILE" 2>/dev/null; then
+    append_junit_failure "$JUNIT_FILE" "$LABEL" "$MSG"
+  fi
+}
+
+# ── Windows ia32: legacy node runner, napi-only, no coverage ──────
+if [ "$MATRIX_ARCH" = "ia32" ]; then
+  NODE_VERSION=$(node -v)
+  curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
+  unzip -q "node-${NODE_VERSION}-win-x86.zip"
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}.xml"
+  REPORT_DIR="${RUNNER_TEMP}/node-reports"
+  mkdir -p "$REPORT_DIR"
+  RC=0
+  run_and_log ./node-${NODE_VERSION}-win-x86/node \
+    --report-on-fatalerror --report-directory="$REPORT_DIR" \
+    test/test.js all --backend napi --junit "$JUNIT_FILE" \
+    || RC=$?
+  if [ "$RC" != 0 ]; then
+    echo ">>> [ia32] node exited rc=$RC; diagnostic reports (if any):"
+    ls -la "$REPORT_DIR" || true
+    for rpt in "$REPORT_DIR"/*.json; do
+      [ -f "$rpt" ] || continue
+      echo "--- $rpt ---"
+      cat "$rpt"
+    done
+  fi
+  guard_junit "$RC" "$JUNIT_FILE" "ia32" \
+    "node exited rc=$RC after writing JUnit (likely a shutdown crash; see test-output.txt and node-reports)."
+  exit "$RC"
+fi
+
+BUN="$(command -v bun)"
+
+# ── Per-OS test wrapper (xvfb / sudo / none) ──────────────────────
+if [ "$RUNNER_OS" = "Linux" ]; then
+  export DISPLAY=:99
+  Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
+  XVFB_PID=$!
+  for _ in $(seq 1 50); do
+    xdpyinfo -display :99 >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+  openbox &
+  OPENBOX_PID=$!
+  sleep 0.5
+  xmessage -timeout 600 -name MechatronTestWindow "mechatron test client" &
+  XMESSAGE_PID=$!
+  XMSG_WIN=""
+  for _ in $(seq 1 100); do
+    XMSG_WIN=$(xwininfo -root -tree 2>/dev/null \
+      | { grep MechatronTestWindow || true; } \
+      | head -1 | awk '{print $1}')
+    [ -n "$XMSG_WIN" ] && break
+    sleep 0.1
+  done
+  if [ -n "$XMSG_WIN" ]; then
+    xprop -id "$XMSG_WIN" -f _NET_WM_PID 32c -set _NET_WM_PID "$XMESSAGE_PID" 2>/dev/null || true
+  else
+    echo ">>> warning: xmessage window not mapped within 10s; window tests may have reduced coverage"
+  fi
+  cleanup_x() {
+    kill "$XMESSAGE_PID" "$OPENBOX_PID" "$XVFB_PID" 2>/dev/null || true
+  }
+  trap cleanup_x EXIT
+  WRAP=()
+elif [ "$RUNNER_OS" = "macOS" ]; then
+  WRAP=(sudo -E)
+else
+  WRAP=()
+fi
+
+# ── macOS x64 on arm64 runner: swap in x64 Bun under Rosetta ──────
+if [ "$RUNNER_OS" = "macOS" ] && [ "$MATRIX_ARCH" = "x64" ] && [ "$RUNNER_ARCH" != "X64" ]; then
+  curl -sL "https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64-baseline.zip" -o /tmp/bun-x64.zip
+  unzip -q /tmp/bun-x64.zip -d /tmp/
+  X64_BUN="/tmp/bun-darwin-x64-baseline/bun"
+  chmod +x "$X64_BUN"
+  BUN="$X64_BUN"
+  WRAP+=(arch -x86_64)
+  TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+  for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+    sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_BUN',1,2,4,1,0);" 2>/dev/null || true
+  done
+  sudo launchctl stop com.apple.tccd 2>/dev/null || true
+  sleep 1
+fi
+
+# ── Backends per platform ─────────────────────────────────────────
+BACKENDS=(napi ffi)
+
+OVERALL_RC=0
+UNIT_DONE=false
+for be in "${BACKENDS[@]}"; do
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-$be.xml"
+  BE_COV_DIR="$COV_DIR/$be"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  # Unit tests run once in the first backend cell; subsequent cells skip them.
+  SKIP_UNIT=""
+  if [ "$UNIT_DONE" = true ]; then SKIP_UNIT=1; fi
+  MECHATRON_BACKEND="$be" \
+  MECHATRON_SKIP_UNIT="$SKIP_UNIT" \
+    run_bun "$be" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "$be" \
+    "bun test for MECHATRON_BACKEND=${be} exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run (see test-output.txt artifact)."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+  UNIT_DONE=true
+done
+
+# ── Linux-only: FFI + nolib[vt] input (uinput path) ──────────────
+if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-input.xml"
+  BE_COV_DIR="$COV_DIR/nolib-vt-input"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_KEYBOARD='nolib[vt]' \
+  MECHATRON_BACKEND_MOUSE='nolib[vt]' \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "nolib-vt-input" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-vt-input" \
+    "bun test for nolib-vt-input exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── Linux-only: FFI + nolib[x11] input (xproto path) ────────────
+if [ "$RUNNER_OS" = "Linux" ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-x11-input.xml"
+  BE_COV_DIR="$COV_DIR/nolib-x11-input"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_KEYBOARD='nolib[x11]' \
+  MECHATRON_BACKEND_MOUSE='nolib[x11]' \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "nolib-x11-input" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-x11-input" \
+    "bun test for nolib-x11-input exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── Linux-only: nolib[vt] screen (framebuffer) ──────────────────
+# If /dev/fb0 is already a real device, run the test directly against
+# the real framebuffer.  Otherwise generate a synthetic pixel file at
+# /dev/fb0 and preload fb-stub.so so the ioctl calls return valid
+# geometry.  Either way, this exercises the full screen-vt.ts code path
+# (ioctl bridge → geometry parse → readSync → rowToArgb).
+if [ "$RUNNER_OS" = "Linux" ]; then
+  FB_USE_STUB=false
+  if [ -c /dev/fb0 ] && [ -r /dev/fb0 ]; then
+    echo ">>> /dev/fb0 is a real device — using it directly"
+  elif [ -f test/fb-stub.so ]; then
+    FB_W=8 FB_H=4 FB_BPP=32
+    python3 -c "
+import struct, sys
+W, H = $FB_W, $FB_H
+for y in range(H):
+    for x in range(W):
+        sys.stdout.buffer.write(struct.pack('BBBB', x*30, y*60, 128, 255))
+" | sudo tee /dev/fb0 > /dev/null
+    sudo chmod 666 /dev/fb0
+    FB_USE_STUB=true
+  else
+    echo ">>> skipping nolib-vt-fb: no /dev/fb0 and no fb-stub.so"
+  fi
+
+  if [ -e /dev/fb0 ]; then
+    JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-fb.xml"
+    BE_COV_DIR="$COV_DIR/nolib-vt-fb"
+    mkdir -p "$BE_COV_DIR"
+    BE_RC=0
+    if [ "$FB_USE_STUB" = true ]; then
+      MECHATRON_BACKEND=ffi \
+      MECHATRON_BACKEND_SCREEN='nolib[vt]' \
+      MECHATRON_FB_STUB_W=$FB_W \
+      MECHATRON_FB_STUB_H=$FB_H \
+      MECHATRON_FB_STUB_BPP=$FB_BPP \
+      MECHATRON_SKIP_UNIT=1 \
+      LD_PRELOAD="$(pwd)/test/fb-stub.so" \
+        run_bun "nolib-vt-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+          --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+          --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+        || BE_RC=$?
+    else
+      MECHATRON_BACKEND=ffi \
+      MECHATRON_BACKEND_SCREEN='nolib[vt]' \
+      MECHATRON_SKIP_UNIT=1 \
+        run_bun "nolib-vt-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+          --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+          --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+        || BE_RC=$?
+    fi
+    guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-vt-fb" \
+      "bun test for nolib-vt-fb (framebuffer) exited ${BE_RC} without producing a JUnit report."
+    [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+    [ "$FB_USE_STUB" = true ] && sudo rm -f /dev/fb0
+  fi
+fi
+
+
+# ── Linux-only: FFI with dlopen-block LD_PRELOAD shim ─────────────
+if [ "$RUNNER_OS" = "Linux" ]; then
+  for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
+    label="${variant%%:*}"
+    block="${variant#*:}"
+    JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-${label}.xml"
+    BE_COV_DIR="$COV_DIR/ffi-${label}"
+    mkdir -p "$BE_COV_DIR"
+    BE_RC=0
+    MECHATRON_BACKEND=ffi \
+    MECHATRON_BLOCK_DLOPEN="$block" \
+    MECHATRON_SKIP_UNIT=1 \
+    LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
+      run_bun "ffi-$label" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+        --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+        --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+      || BE_RC=$?
+    guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-${label}" \
+      "bun test for ffi-${label} (LD_PRELOAD dlopen-block $block) exited ${BE_RC} without producing a JUnit report."
+    [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+  done
+fi
+
+# ── Linux-only: nolib[sh] clipboard (xclip subprocess path) ──────
+if [ "$RUNNER_OS" = "Linux" ] && command -v xclip >/dev/null 2>&1; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-sh-clipboard.xml"
+  BE_COV_DIR="$COV_DIR/nolib-sh-clipboard"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-sh-clipboard" \
+    "bun test for nolib-sh-clipboard (xclip subprocess) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── macOS-only: nolib[sh] clipboard (pbcopy/pbpaste subprocess path) ─
+if [ "$RUNNER_OS" = "macOS" ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-sh-clipboard.xml"
+  BE_COV_DIR="$COV_DIR/nolib-sh-clipboard"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-sh-clipboard" \
+    "bun test for nolib-sh-clipboard (pbcopy/pbpaste subprocess) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── Linux-only: nolib[x11] clipboard (xproto selections protocol) ─
+# Pin clipboard to nolib[x11] so the xproto-based ICCCM SELECTION
+# protocol path in lib/nolib/clipboard.ts is exercised under Xvfb,
+# rather than the subprocess fallback. Verifies the architectural
+# guarantee that explicit backend preference is honored.
+if [ "$RUNNER_OS" = "Linux" ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-x11-clipboard.xml"
+  BE_COV_DIR="$COV_DIR/nolib-x11-clipboard"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_CLIPBOARD='nolib[x11]' \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "nolib-x11-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-x11-clipboard" \
+    "bun test for nolib-x11-clipboard (xproto selections) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── Linux-only: AT-SPI2 portal coverage ──────────────────────────
+# Boot the AT-SPI2 registry so atspiAvailable() / atspiListWindows()
+# can complete without throwing. With the registry up, the unit-test
+# path in test/portal.js exercises the full bus-discovery + connection
+# path (lib/portal/atspi.ts coverage rises ~30%).
+if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-atspi.xml"
+  BE_COV_DIR="$COV_DIR/ffi-atspi"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  /usr/libexec/at-spi-bus-launcher --launch-immediately &
+  ATSPI_PID=$!
+  sleep 1
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "ffi-atspi" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  kill "$ATSPI_PID" 2>/dev/null || true
+  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-atspi" \
+    "bun test for ffi-atspi exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# Detect GNOME Shell version once — used by both portal and gext cells to
+# choose between ESM (>=45) and legacy extension format.
+if [ "$RUNNER_OS" = "Linux" ]; then
+  GNOME_SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)
+else
+  GNOME_SHELL_VER=0
+fi
+
+# ── Linux-only: nolib[portal] via Wayland (gnome-shell --headless) ────
+# Tests the standard freedesktop portal code path for keyboard, mouse,
+# and screen. A minimal GJS portal backend (portal-autoaccept) replaces
+# xdg-desktop-portal-gnome for the RemoteDesktop interface, auto-approving
+# sessions without showing a dialog (headless Mutter's virtual input
+# can't reach Wayland clients). The mechatron extension is still loaded
+# for the gext test cell that follows.
+if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"
+  BE_COV_DIR="$COV_DIR/nolib-portal"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+
+  TOKENS_FILE="${RUNNER_TEMP:-/tmp}/mechatron-portal-tokens"
+  EXT_UUID="mechatron@mechatronic.dev"
+
+  echo ">>> [portal] GNOME Shell version: $GNOME_SHELL_VER ($(gnome-shell --version 2>/dev/null))"
+
+  # Install a portal backend definition that routes RemoteDesktop to our
+  # auto-accept GJS service. xdg-desktop-portal only loads .portal files
+  # from /usr/share/xdg-desktop-portal/portals/ (ignores XDG_DATA_DIRS).
+  sudo tee /usr/share/xdg-desktop-portal/portals/ci-autoaccept.portal > /dev/null <<'PORTALEOF'
+[portal]
+DBusName=org.freedesktop.impl.portal.ci.autoaccept
+Interfaces=org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;
+UseIn=gnome
+PORTALEOF
+  # Remove RemoteDesktop and ScreenCast from the GNOME portal so our
+  # autoaccept backend is the only one claiming these interfaces. This
+  # is the only routing mechanism for xdg-desktop-portal < 1.15
+  # (Ubuntu 22.04) which lacks portals.conf support.
+  sudo sed -i 's/org\.freedesktop\.impl\.portal\.RemoteDesktop;//g; s/org\.freedesktop\.impl\.portal\.ScreenCast;//g; s/org\.freedesktop\.impl\.portal\.Screenshot;//g' \
+    /usr/share/xdg-desktop-portal/portals/gnome.portal 2>/dev/null || true
+  # Update gnome-portals.conf for xdg-desktop-portal >= 1.15.
+  if [ -f /usr/share/xdg-desktop-portal/gnome-portals.conf ]; then
+    sudo cp /usr/share/xdg-desktop-portal/gnome-portals.conf \
+            /usr/share/xdg-desktop-portal/gnome-portals.conf.bak
+    sudo tee /usr/share/xdg-desktop-portal/gnome-portals.conf > /dev/null <<'CONFEOF'
+[preferred]
+default=gnome;gtk;
+org.freedesktop.impl.portal.Secret=gnome-keyring;
+org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept;
+org.freedesktop.impl.portal.ScreenCast=ci-autoaccept;
+org.freedesktop.impl.portal.Screenshot=ci-autoaccept;
+CONFEOF
+  fi
+
+  # GJS script: minimal portal backend that auto-approves RemoteDesktop
+  # sessions without showing a dialog. In headless Mutter, virtual keyboard
+  # events don't reach Wayland clients, so we can't dismiss the GNOME
+  # portal dialog. Instead we replace the GNOME backend for RemoteDesktop.
+  PORTAL_AUTOACCEPT="${RUNNER_TEMP:-/tmp}/portal-autoaccept.js"
+  cat > "$PORTAL_AUTOACCEPT" <<'AUTOACCEPT_HEREDOC'
+const { Gio, GLib } = imports.gi;
+const BUS_NAME = "org.freedesktop.impl.portal.ci.autoaccept";
+const XML = `<node>
+  <interface name="org.freedesktop.impl.portal.RemoteDesktop">
+    <method name="CreateSession">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="SelectDevices">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="Start">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <property name="AvailableDeviceTypes" type="u" access="read"/>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.impl.portal.Screenshot">
+    <method name="Screenshot">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.impl.portal.Session">
+    <method name="Close"><arg type="u" direction="out"/><arg type="a{sv}" direction="out"/></method>
+    <signal name="Closed"/>
+  </interface>
+</node>`;
+const ni = Gio.DBusNodeInfo.new_for_xml(XML);
+const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
+const loop = new GLib.MainLoop(null, false);
+let n = 0;
+let shotN = 0;
+function takeScreenshot(inv) {
+  const fname = "/tmp/ci-autoaccept-shot-" + (++shotN) + ".png";
+  try {
+    const Cairo = imports.cairo;
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, 1920, 1080);
+    const cr = new Cairo.Context(surface);
+    cr.setSourceRGBA(0.2, 0.3, 0.4, 1.0);
+    cr.paint();
+    surface.writeToPNG(fname);
+    const uri = "file://" + fname;
+    print("[portal-autoaccept] Screenshot -> " + uri);
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"uri": new GLib.Variant("s", uri)}]));
+  } catch(e) {
+    print("[portal-autoaccept] Screenshot error: " + e);
+    inv.return_value(new GLib.Variant("(ua{sv})", [2, {}]));
+  }
+}
+function onCall(c, s, p, iface, method, params, inv) {
+  print("[portal-autoaccept] " + iface + "." + method);
+  if (iface === "org.freedesktop.impl.portal.Screenshot" && method === "Screenshot") {
+    takeScreenshot(inv);
+    return;
+  }
+  if (method === "CreateSession") {
+    const sh = params.deep_unpack()[1];
+    try { c.register_object(sh, ni.interfaces[2], onCall, null, null); } catch(e) {}
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"session_id": new GLib.Variant("s", "auto_" + (++n))}]));
+  } else if (method === "SelectDevices") {
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
+  } else if (method === "Start") {
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"devices": new GLib.Variant("u", 3)}]));
+  } else if (method === "Close") {
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
+  } else {
+    inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
+  }
+}
+function onProp(c, s, p, iface, prop) {
+  if (prop === "AvailableDeviceTypes") return new GLib.Variant("u", 3);
+  if (prop === "version") return new GLib.Variant("u", 2);
+  return null;
+}
+bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[0], onCall, onProp, null);
+bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[1], onCall, onProp, null);
+Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept] ready"), () => loop.quit());
+loop.run();
+AUTOACCEPT_HEREDOC
+
+  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER PORTAL_AUTOACCEPT
+  dbus-run-session -- bash -c '
+    set -x
+    export XDG_SESSION_TYPE=wayland
+    export XDG_CURRENT_DESKTOP=GNOME
+
+    if [ -z "$XDG_RUNTIME_DIR" ]; then
+      export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+      mkdir -p "$XDG_RUNTIME_DIR"
+      chmod 700 "$XDG_RUNTIME_DIR"
+    fi
+
+    # Install the mechatron extension for the gext test cell.
+    EXT_TOKEN=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+    echo "$EXT_TOKEN" > "$TOKENS_FILE"
+    chmod 600 "$TOKENS_FILE"
+    export MECHATRON_TOKENS_FILE="$TOKENS_FILE"
+    export MECHATRON_GNOME_TOKEN="$EXT_TOKEN"
+
+    EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+    mkdir -p "$EXT_DIR"
+    cp -r extensions/mechatron/* "$EXT_DIR/"
+    if [ "${GNOME_SHELL_VER:-0}" -lt 45 ]; then
+      cp extensions/mechatron/extension-legacy.js "$EXT_DIR/extension.js"
+    fi
+    mkdir -p "$HOME/.config/dconf"
+    EXT_LIST="[\"$EXT_UUID\"]"
+    gsettings set org.gnome.shell enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || dconf write /org/gnome/shell/enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || true
+    gsettings set org.gnome.shell disable-user-extensions false 2>/dev/null || true
+
+    # PipeWire must be running before gnome-shell so Mutter registers
+    # RemoteDesktop/ScreenCast D-Bus interfaces.
+    pipewire &
+    PW_PID=$!
+    sleep 0.5
+    if command -v wireplumber >/dev/null 2>&1; then
+      wireplumber &
+      WP_PID=$!
+    elif command -v pipewire-media-session >/dev/null 2>&1; then
+      pipewire-media-session &
+      WP_PID=$!
+    else
+      WP_PID=""
+    fi
+    sleep 0.5
+
+    gnome-shell --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
+    SHELL_PID=$!
+
+    for _ in $(seq 1 100); do
+      WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | head -1 | xargs -r basename)
+      [ -n "$WAYLAND_DISPLAY" ] && break
+      sleep 0.1
+    done
+    export WAYLAND_DISPLAY
+
+    if [ -z "$WAYLAND_DISPLAY" ]; then
+      echo ">>> warning: gnome-shell did not create a Wayland socket within 10s"
+      kill "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+      exit 1
+    fi
+    echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+
+    dbus-update-activation-environment \
+      XDG_RUNTIME_DIR WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+      MECHATRON_TOKENS_FILE \
+      2>/dev/null || true
+
+    # Wait for gnome-shell + Mutter + extension.
+    SHELL_OK="" MUTTER_OK="" EXT_OK=""
+    for i in $(seq 1 120); do
+      BUS_LIST=$(busctl --user list 2>/dev/null)
+      if [ -z "$SHELL_OK" ] && echo "$BUS_LIST" | grep -q "org.gnome.Shell"; then
+        SHELL_OK=1; echo ">>> org.gnome.Shell registered after ${i}*0.5s"
+      fi
+      if [ -z "$MUTTER_OK" ]; then
+        if echo "$BUS_LIST" | grep -q "org.gnome.Mutter.ServiceChannel"; then
+          MUTTER_OK=1; echo ">>> org.gnome.Mutter.ServiceChannel registered after ${i}*0.5s"
+        elif echo "$BUS_LIST" | grep -q "org.gnome.Mutter.RemoteDesktop"; then
+          MUTTER_OK=1; echo ">>> org.gnome.Mutter.RemoteDesktop registered after ${i}*0.5s"
+        fi
+      fi
+      if [ -z "$EXT_OK" ] && echo "$BUS_LIST" | grep -q "dev.mechatronic.Shell"; then
+        EXT_OK=1; echo ">>> mechatron extension registered after ${i}*0.5s"
+      fi
+      [ -n "$SHELL_OK" ] && [ -n "$MUTTER_OK" ] && [ -n "$EXT_OK" ] && break
+      sleep 0.5
+    done
+
+    if [ -z "$EXT_OK" ]; then
+      echo ">>> ERROR: mechatron extension never registered on D-Bus!"
+      echo ">>> Extension will not be available to auto-approve portal dialogs."
+      echo ">>> GNOME_SHELL_VER=$GNOME_SHELL_VER; current bus state:"
+      busctl --user list 2>/dev/null | head -30 || true
+    fi
+
+    echo ">>> PipeWire socket check:"
+    ls -la "$XDG_RUNTIME_DIR"/pipewire* 2>/dev/null || echo "(no pipewire socket)"
+
+    # Start the GJS auto-accept portal backend (the .portal file and
+    # gnome-portals.conf were installed into /usr/share above).
+    AUTOACCEPT_PID=""
+    if command -v gjs >/dev/null 2>&1; then
+      gjs "$PORTAL_AUTOACCEPT" &
+      AUTOACCEPT_PID=$!
+      for i in $(seq 1 20); do
+        busctl --user list 2>/dev/null | grep -q "ci.autoaccept" && break
+        sleep 0.25
+      done
+      echo ">>> portal-autoaccept backend started (pid=$AUTOACCEPT_PID)"
+    else
+      echo ">>> WARNING: gjs not found — portal dialog will not be auto-approved"
+    fi
+
+    # Wait for org.freedesktop.portal.Desktop (auto-activated by ibus
+    # during gnome-shell startup).  If it does not appear, trigger it.
+    for i in $(seq 1 20); do
+      if busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
+        echo ">>> org.freedesktop.portal.Desktop registered after ${i}*0.5s"
+        break
+      fi
+      sleep 0.5
+    done
+    if ! busctl --user list 2>/dev/null | grep "org.freedesktop.portal.Desktop" | grep -qv "activatable"; then
+      echo ">>> portal.Desktop not found, triggering activation..."
+      busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+        org.freedesktop.DBus.Peer Ping 2>/dev/null || true
+      sleep 2
+    fi
+
+    # Keep xdg-desktop-portal alive (it has a GApplication idle timeout).
+    (while true; do
+      busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+        org.freedesktop.DBus.Peer Ping 2>/dev/null || true
+      sleep 3
+    done) &
+    PINGER_PID=$!
+
+    # Pre-grant screenshot permission so xdp calls our ci-autoaccept
+    # backend directly instead of showing an Access dialog.
+    busctl --user call org.freedesktop.impl.portal.PermissionStore \
+      /org/freedesktop/impl/portal/PermissionStore \
+      org.freedesktop.impl.portal.PermissionStore SetPermission \
+      sbssas "screenshot" true "screenshot" "" 1 "yes" 2>/dev/null || true
+
+    echo ">>> Bus state:"
+    busctl --user list 2>/dev/null | grep -E "(portal|autoaccept)" | head -20
+
+    MECHATRON_BACKEND="nolib[portal]" \
+    MECHATRON_SKIP_UNIT=1 \
+      "$BUN" test test/bun.test.ts \
+        --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+        --reporter=junit --reporter-outfile="$JUNIT_FILE"
+    RC=$?
+
+    kill $PINGER_PID ${AUTOACCEPT_PID:+"$AUTOACCEPT_PID"} "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+    exit $RC
+  ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
+    "nolib-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+# ── Linux-only: full GNOME Shell + Mechatron extension (Wayland) ──
+# Boots gnome-shell --headless as a Wayland compositor and loads the
+# mechatron extension, exercising the gext variant for window management
+# AND keyboard/mouse input injection (via Clutter virtual devices).
+# PipeWire is required so Mutter initialises its RemoteDesktop/ScreenCast
+# D-Bus interfaces. GNOME 45+ uses ES modules (extension.js); GNOME 42-44
+# uses the legacy init() format (extension-legacy.js).
+if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-gext.xml"
+  BE_COV_DIR="$COV_DIR/nolib-gext"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+
+  TOKENS_FILE="$RUNNER_TEMP/mechatron-tokens"
+  EXT_UUID="mechatron@mechatronic.dev"
+
+  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER
+  dbus-run-session -- bash -c '
+    set -x
+    export XDG_SESSION_TYPE=wayland
+    export XDG_CURRENT_DESKTOP=GNOME
+
+    if [ -z "$XDG_RUNTIME_DIR" ]; then
+      export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+      mkdir -p "$XDG_RUNTIME_DIR"
+      chmod 700 "$XDG_RUNTIME_DIR"
+    fi
+
+    export MECHATRON_TOKENS_FILE="$TOKENS_FILE"
+
+    # Provision a token for the extension to validate against.
+    EXT_TOKEN=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+    echo "$EXT_TOKEN" > "$TOKENS_FILE"
+    chmod 600 "$TOKENS_FILE"
+    export MECHATRON_GNOME_TOKEN="$EXT_TOKEN"
+
+    # Install the extension. On GNOME 42-44, swap in the legacy format.
+    EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+    mkdir -p "$EXT_DIR"
+    cp -r extensions/mechatron/* "$EXT_DIR/"
+    if [ "${GNOME_SHELL_VER:-0}" -lt 45 ]; then
+      echo ">>> GNOME Shell $GNOME_SHELL_VER < 45: using legacy extension format"
+      cp extensions/mechatron/extension-legacy.js "$EXT_DIR/extension.js"
+    fi
+
+    mkdir -p "$HOME/.config/dconf"
+    EXT_LIST="[\"$EXT_UUID\"]"
+    gsettings set org.gnome.shell enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || dconf write /org/gnome/shell/enabled-extensions "$EXT_LIST" 2>/dev/null \
+      || echo ">>> warning: could not pre-enable extension via gsettings/dconf"
+    gsettings set org.gnome.shell disable-user-extensions false 2>/dev/null || true
+
+    # PipeWire must be running before gnome-shell so Mutter initialises
+    # its RemoteDesktop/ScreenCast D-Bus interfaces.
+    pipewire &
+    PW_PID=$!
+    sleep 0.5
+    if command -v wireplumber >/dev/null 2>&1; then
+      wireplumber &
+      WP_PID=$!
+    elif command -v pipewire-media-session >/dev/null 2>&1; then
+      pipewire-media-session &
+      WP_PID=$!
+    else
+      WP_PID=""
+    fi
+    sleep 0.5
+
+    gnome-shell --headless --virtual-monitor 1920x1080 --wayland --no-x11 &
+    SHELL_PID=$!
+
+    # Wait for Wayland socket.
+    for _ in $(seq 1 100); do
+      WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | head -1 | xargs -r basename)
+      [ -n "$WAYLAND_DISPLAY" ] && break
+      sleep 0.1
+    done
+    export WAYLAND_DISPLAY
+    echo ">>> WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+
+    dbus-update-activation-environment \
+      XDG_RUNTIME_DIR WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+      2>/dev/null || true
+
+    # Wait for the extension to register its D-Bus name.
+    for i in $(seq 1 120); do
+      if busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
+        echo ">>> mechatron extension registered on D-Bus after ${i}*0.5s"
+        break
+      fi
+      sleep 0.5
+      [ $((i % 20)) -eq 0 ] && echo ">>> still waiting for extension... ($i/120)"
+    done
+
+    if ! busctl --user list 2>/dev/null | grep -q "dev.mechatronic.Shell"; then
+      echo ">>> warning: extension never registered; current bus state:"
+      busctl --user list 2>/dev/null | head -50 || true
+      kill "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+      exit 1
+    fi
+
+    busctl --user call dev.mechatronic.Shell \
+      /dev/mechatronic/Shell dev.mechatronic.Shell.Window \
+      Ping || echo ">>> Ping failed"
+
+    # Use gext for window + keyboard + mouse (all via extension D-Bus).
+    MECHATRON_BACKEND="nolib[gext]" \
+    MECHATRON_SKIP_UNIT=1 \
+      "$BUN" test test/bun.test.ts \
+        --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+        --reporter=junit --reporter-outfile="$JUNIT_FILE"
+    RC=$?
+
+    kill "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
+    exit $RC
+  ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-gext" \
+    "nolib-gext test (gnome-shell + mechatron extension) exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
+if [ "$RUNNER_OS" = "macOS" ]; then
+  sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$COV_DIR" 2>/dev/null || true
+fi
+
+# Merge per-backend lcov.info files into a single coverage/lcov.info.
+node -e "
+  const fs = require('fs'), path = require('path');
+  const covDir = process.argv[1];
+  const files = {};
+  const fnSeen = {}, brSeen = {};
+  for (const sub of fs.readdirSync(covDir)) {
+    const p = path.join(covDir, sub, 'lcov.info');
+    if (!fs.existsSync(p)) continue;
+    let sf = null;
+    for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
+      if (line.startsWith('SF:')) {
+        sf = line.slice(3);
+        if (!files[sf]) files[sf] = { da: {}, fn: [], fnda: {}, brda: [] };
+      } else if (sf === null) continue;
+      else if (line.startsWith('DA:')) {
+        const [ln, hits] = line.slice(3).split(',').map(Number);
+        files[sf].da[ln] = (files[sf].da[ln] || 0) + (hits || 0);
+      } else if (line.startsWith('FN:')) {
+        if (!fnSeen[sf+'|'+line]) { fnSeen[sf+'|'+line] = 1; files[sf].fn.push(line); }
+      } else if (line.startsWith('FNDA:')) {
+        const m = line.slice(5).split(',');
+        const name = m.slice(1).join(',');
+        files[sf].fnda[name] = (files[sf].fnda[name] || 0) + Number(m[0] || 0);
+      } else if (line === 'end_of_record') sf = null;
+    }
+  }
+  const out = [];
+  for (const [sf, info] of Object.entries(files)) {
+    out.push('TN:', 'SF:' + sf);
+    for (const fn of info.fn) out.push(fn);
+    for (const [name, h] of Object.entries(info.fnda)) out.push('FNDA:' + h + ',' + name);
+    for (const ln of Object.keys(info.da).map(Number).sort((a, b) => a - b)) {
+      out.push('DA:' + ln + ',' + info.da[ln]);
+    }
+    out.push('end_of_record');
+  }
+  fs.writeFileSync(path.join(covDir, 'lcov.info'), out.join('\n') + '\n');
+" "$COV_DIR"
+
+exit "$OVERALL_RC"

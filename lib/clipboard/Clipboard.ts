@@ -1,29 +1,29 @@
 import { Image } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 
 export const Clipboard = {
-  clear(): boolean {
+  async clear(): Promise<boolean> {
     return getNative("clipboard").clipboard_clear();
   },
 
-  hasText(): boolean {
+  async hasText(): Promise<boolean> {
     return getNative("clipboard").clipboard_hasText();
   },
 
-  getText(): string {
+  async getText(): Promise<string> {
     return getNative("clipboard").clipboard_getText();
   },
 
-  setText(text: string): boolean {
+  async setText(text: string): Promise<boolean> {
     if (typeof text !== "string") throw new TypeError("Invalid arguments");
     return getNative("clipboard").clipboard_setText(text);
   },
 
-  hasImage(): boolean {
+  async hasImage(): Promise<boolean> {
     return getNative("clipboard").clipboard_hasImage();
   },
 
-  getImage(image: Image): boolean {
+  async getImage(image: Image): Promise<boolean> {
     const result = getNative("clipboard").clipboard_getImage();
     if (!result) return false;
     image.destroy();
@@ -33,27 +33,13 @@ export const Clipboard = {
     return true;
   },
 
-  setImage(image: Image): boolean {
+  async setImage(image: Image): Promise<boolean> {
     const data = image.getData();
     if (!data) return false;
     return getNative("clipboard").clipboard_setImage(image.getWidth(), image.getHeight(), data);
   },
 
-  getSequence(): number {
+  async getSequence(): Promise<number> {
     return getNative("clipboard").clipboard_getSequence();
-  },
-
-  // --- Promise-based variants for modern async callers ---
-  async getTextAsync(): Promise<string> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.getText())));
-  },
-  async setTextAsync(text: string): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.setText(text))));
-  },
-  async getImageAsync(image: Image): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.getImage(image))));
-  },
-  async setImageAsync(image: Image): Promise<boolean> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Clipboard.setImage(image))));
   },
 };

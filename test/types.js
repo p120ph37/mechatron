@@ -11,7 +11,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert) {
+module.exports = function (mechatron, log, assert, waitFor) {
 
 	function testTypes() {
 		log("  Types... ");
@@ -707,8 +707,8 @@ module.exports = function (mechatron, log, assert) {
 		return true;
 	}
 
-	return {
-		testTypes: testTypes,
-		testTimer: testTimer,
-	};
+	return [
+		{ name: "types", functions: [], unit: true, test: testTypes },
+		{ name: "timer", functions: [], unit: true, test: testTimer },
+	];
 };

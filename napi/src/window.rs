@@ -312,13 +312,6 @@ unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: 
     }
 }
 
-// Public helper for process.rs (Linux only)
-#[cfg(target_os = "linux")]
-pub unsafe fn enum_windows_with_pid(root: Window, pattern: Option<&regex::Regex>, pid: i32, results: &mut Vec<u64>) {
-    load_atoms();
-    enum_windows(root, pattern, pid, results);
-}
-
 // --- NAPI exports (Linux) ---
 
 #[cfg(target_os = "linux")]

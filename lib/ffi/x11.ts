@@ -132,6 +132,8 @@ let _display: Pointer = null;
 let _xtestAvailable = false;
 let _xrandrAvailable = false;
 
+const _dlopenHandles: any[] = [];
+
 // Keep a strong reference to the error-handler JSCallback — if it's GC'd
 // while Xlib still holds the function pointer, the next X error becomes a
 // SIGSEGV.  One handler per process is sufficient; Xlib stores the latest
@@ -240,6 +242,7 @@ function tryDlopen(): void {
       XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
     });
     _x11 = x11.symbols;
+    _dlopenHandles.push(x11);
   } catch (_) {
     _x11 = null;
     return;
@@ -254,6 +257,7 @@ function tryDlopen(): void {
       XTestFakeButtonEvent: { args: [T.ptr, T.u32, T.i32, T.u64], returns: T.i32 },
     });
     _xtest = xtest.symbols;
+    _dlopenHandles.push(xtest);
   } catch (_) {
     _xtest = null;
   }
@@ -270,6 +274,7 @@ function tryDlopen(): void {
       XRRFreeMonitors:   { args: [T.u64],                      returns: T.i32 },
     });
     _xrandr = xrr.symbols;
+    _dlopenHandles.push(xrr);
   } catch (_) {
     _xrandr = null;
   }

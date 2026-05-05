@@ -6,3 +6,4 @@ export { Color } from "./Color";
 export { Hash } from "./Hash";
 export { Image } from "./Image";
 export { Timer } from "./Timer";
+export { Ptr } from "./Ptr";

@@ -1,5 +1,4 @@
-import { Window } from "../window";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import type { Module } from "./Module";
 
 export interface ModuleData {
@@ -22,26 +21,26 @@ export class Process {
     }
   }
 
-  open(pid: number): boolean {
+  async open(pid: number): Promise<boolean> {
     const valid = getNative("process").process_open(pid);
     this._pid = valid ? pid : 0;
     return valid;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     getNative("process").process_close(this._pid);
     this._pid = 0;
   }
 
-  isValid(): boolean {
+  async isValid(): Promise<boolean> {
     return getNative("process").process_isValid(this._pid);
   }
 
-  is64Bit(): boolean {
+  async is64Bit(): Promise<boolean> {
     return getNative("process").process_is64Bit(this._pid);
   }
 
-  isDebugged(): boolean {
+  async isDebugged(): Promise<boolean> {
     return getNative("process").process_isDebugged(this._pid);
   }
 
@@ -49,7 +48,7 @@ export class Process {
     return this._pid;
   }
 
-  getHandle(): number {
+  async getHandle(): Promise<number> {
     const native = getNative("process");
     if (typeof native.process_getHandle === "function") {
       return native.process_getHandle(this._pid);
@@ -57,28 +56,27 @@ export class Process {
     return 0;
   }
 
-  getName(): string {
+  async getName(): Promise<string> {
     return getNative("process").process_getName(this._pid);
   }
 
-  getPath(): string {
+  async getPath(): Promise<string> {
     return getNative("process").process_getPath(this._pid);
   }
 
-  exit(): void {
+  async exit(): Promise<void> {
     getNative("process").process_exit(this._pid);
   }
 
-  kill(): void {
+  async kill(): Promise<void> {
     getNative("process").process_kill(this._pid);
   }
 
-  hasExited(): boolean {
+  async hasExited(): Promise<boolean> {
     return getNative("process").process_hasExited(this._pid);
   }
 
-  getModules(regex?: string): Module[] {
-    // Lazy require to avoid a cycle with Module (which imports Process).
+  async getModules(regex?: string): Promise<Module[]> {
     const { Module: ModuleClass } = require("./Module") as typeof import("./Module");
     const raw: ModuleData[] = getNative("process").process_getModules(this._pid, regex);
     return raw.map((data) => {
@@ -87,15 +85,6 @@ export class Process {
       mod._proc = this;
       return mod;
     });
-  }
-
-  async getModulesAsync(regex?: string): Promise<Module[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.getModules(regex))));
-  }
-
-  getWindows(regex?: string): Window[] {
-    const handles: number[] = getNative("process").process_getWindows(this._pid, regex);
-    return handles.map((h) => new Window(h));
   }
 
   eq(other: Process | number): boolean {
@@ -113,20 +102,16 @@ export class Process {
     return new Process(this._pid);
   }
 
-  static getList(regex?: string): Process[] {
+  static async getList(regex?: string): Promise<Process[]> {
     const pids: number[] = getNative("process").process_getList(regex);
     return pids.map((pid) => new Process(pid));
   }
 
-  static async getListAsync(regex?: string): Promise<Process[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Process.getList(regex))));
-  }
-
-  static getCurrent(): Process {
+  static async getCurrent(): Promise<Process> {
     return new Process(getNative("process").process_getCurrent());
   }
 
-  static isSys64Bit(): boolean {
+  static async isSys64Bit(): Promise<boolean> {
     return getNative("process").process_isSys64Bit();
   }
 

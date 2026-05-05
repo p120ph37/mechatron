@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             arch: x64
           - os: ubuntu-22.04-arm
             arch: arm64
@@ -78,7 +78,32 @@ jobs:
         # x11-utils / x11-apps: xmessage ships in x11-utils on Debian-based
         #   runners; we use it as a lightweight, mapped test window so
         #   window_getList() has something to enumerate.
-        run: sudo apt-get update && sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+          # Clipboard tools for nolib[sh] subprocess clipboard variant
+          # (xclip for X11, wl-clipboard for Wayland).
+          sudo apt-get install -y xclip wl-clipboard
+          # Wayland/portal packages for nolib[portal] tests.
+          # PipeWire is required so Mutter registers RemoteDesktop/ScreenCast
+          # D-Bus interfaces; without it xdg-desktop-portal-gnome falls back
+          # to settings-only mode. wireplumber is separate because Ubuntu 22.04
+          # ships pipewire-media-session instead (ci-run-tests.sh handles both).
+          sudo apt-get install -y mutter xdg-desktop-portal xdg-desktop-portal-gnome \
+            pipewire pipewire-bin 2>/dev/null || true
+          sudo apt-get install -y wireplumber 2>/dev/null || true
+          # AT-SPI bus for portal/atspi.ts coverage when GNOME extension
+          # isn't available (the xdg-desktop-portal-gnome package installs
+          # at-spi2-core but doesn't auto-launch it; we start it lazily
+          # in test/ci-run-tests.sh).
+          sudo apt-get install -y at-spi2-core 2>/dev/null || true
+          # Full GNOME Shell — gives us a real Shell process that can load
+          # the mechatron extension and answer the dev.mechatronic.Shell
+          # D-Bus interface, exercising lib/gext/window.ts and
+          # lib/gext/installer.ts beyond the unit-test stubs (drives the
+          # nolib-gext CI cell). gjs is the Shell extension runtime;
+          # dbus-x11 lets us launch session buses for headless tests.
+          sudo apt-get install -y gnome-shell gjs dbus-x11 gnome-screenshot 2>/dev/null || true
 
       - if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: softwareupdate --install-rosetta --agree-to-license || true
@@ -193,290 +218,53 @@ jobs:
             test/memory-child.c -o "test/memory-child$EXT"
           ls -la "test/memory-child$EXT"
 
-      - name: Build dlopen-block LD_PRELOAD shim
+      - name: Enable /dev/uinput
         if: runner.os == 'Linux'
-        # Compile the selective dlopen-interception shim used to force the
-        # FFI backend's "library unavailable" catch arms (lib/ffi/x11.ts
-        # :220, :234, :245) to fire without uninstalling libXtst /
-        # libXrandr from the runner.  See test/dlopen-block.c.
+        # Expose /dev/uinput to the test process so lib/ffi/uinput.ts can
+        # run its full open + UI_SET_*BIT + UI_DEV_SETUP + UI_DEV_CREATE
+        # dance.  Without this the ioctl paths (~150 LOC of FFI glue) sit
+        # uncovered.  GitHub's ubuntu-* runners ship the `uinput` kernel
+        # module but don't load it at boot and leave the device node
+        # root-only; we modprobe the module and chmod 0666 the node
+        # (simpler and more reliable than a udev rule + group change,
+        # which would need a relogin to take effect).  If the module
+        # can't be loaded on this runner image, we still proceed — the
+        # test harness skips the uinput-live assertions and only
+        # exercises the !ready branches (which is the default state for
+        # most of mechatron's consumers anyway).
+        run: |
+          sudo modprobe uinput || echo "modprobe uinput failed (module may be builtin or unavailable)"
+          # Wait briefly for the device node to appear; udev sometimes
+          # takes a tick after modprobe returns.
+          for _ in $(seq 1 50); do
+            [ -c /dev/uinput ] && break
+            sleep 0.1
+          done
+          if [ -c /dev/uinput ]; then
+            sudo chmod 0666 /dev/uinput
+            ls -l /dev/uinput
+          else
+            echo "WARNING: /dev/uinput not available on this runner"
+            uname -a
+            lsmod | grep -i uinput || true
+          fi
+
+      - name: Build LD_PRELOAD shims
+        if: runner.os == 'Linux'
+        # dlopen-block: force FFI loader "library unavailable" catch arms
+        # to fire without uninstalling libXtst / libXrandr.
+        # fb-stub: fake /dev/fb0 ioctl responses so the framebuffer
+        # capture path can be tested against a synthetic pixel file.
         run: |
           clang -shared -fPIC -ldl -o test/dlopen-block.so test/dlopen-block.c
-          ls -la test/dlopen-block.so
+          clang -shared -fPIC -ldl -o test/fb-stub.so test/fb-stub.c
+          ls -la test/dlopen-block.so test/fb-stub.so
 
       - name: Run tests
-        run: |
-          # Test runner selection per matrix cell:
-          #   - Windows ia32: legacy node runner (Bun has no 32-bit Windows build).
-          #   - macOS x64 on arm64 Sequoia runner: download bun-darwin-x64-baseline
-          #     and run it under Rosetta 2 (`arch -x86_64`).  macOS 15 Rosetta
-          #     emulates AVX/AVX2/BMI/F16C, which prior releases didn't.
-          #   - everything else: host Bun installed by oven-sh/setup-bun above.
-          # Coverage is skipped for Windows ia32 — its code path is identical
-          # to the host-arch napi cell.
-          #
-          # Bun's `--coverage` collects JavaScriptCore coverage natively, which
-          # is the only way to attribute coverage to lib/ffi/*.ts (c8 only sees
-          # V8, so the legacy node runner produces 0% coverage on FFI files).
-
-          JUNIT_DIR="${RUNNER_TEMP}/junit"
-          COV_DIR="${RUNNER_TEMP}/coverage"
-          mkdir -p "$JUNIT_DIR" "$COV_DIR"
-          TEST_LOG="${RUNNER_TEMP}/test-output.txt"
-          : > "$TEST_LOG"
-
-          run_and_log() { "$@" 2>&1 | tee -a "$TEST_LOG"; return "${PIPESTATUS[0]}"; }
-
-          # run_bun LABEL JUNIT_FILE -- <bun test command> ...
-          # Wraps run_and_log with: (1) a visible progress marker so CI
-          # logs show exactly which invocation the script is on, and
-          # (2) a single retry when bun exits non-zero with an empty
-          # JUnit file (i.e. crashed before a single testcase could
-          # execute).  The ubuntu-22.04-arm runner has intermittently
-          # killed bun at --coverage instrumentation setup time with
-          # zero stdout/stderr; a single retry clears this without
-          # masking real test failures (which always produce testcases
-          # and thus skip the retry).
-          run_bun() {
-            local LABEL="$1"; shift
-            local JUNIT_FILE="$1"; shift
-            [ "$1" = "--" ] && shift
-            local ATTEMPT RC OUT_BEFORE OUT_AFTER
-            OUT_BEFORE=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-            for ATTEMPT in 1 2; do
-              echo ">>> [$LABEL] attempt $ATTEMPT: $*" | tee -a "$TEST_LOG"
-              RC=0
-              run_and_log "$@" || RC=$?
-              if [ "$RC" = 0 ]; then return 0; fi
-              OUT_AFTER=$(wc -c < "$TEST_LOG" 2>/dev/null || echo 0)
-              # If bun produced any testcase output, this is a real
-              # test failure — don't retry.  Otherwise it's a startup
-              # crash on a pristine junit file; retry once.
-              if [ -s "$JUNIT_FILE" ] && grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
-                echo ">>> [$LABEL] failed with test output (rc=$RC), not retrying" | tee -a "$TEST_LOG"
-                return "$RC"
-              fi
-              if [ "$ATTEMPT" = 2 ]; then
-                echo ">>> [$LABEL] retry also failed (rc=$RC), giving up" | tee -a "$TEST_LOG"
-                return "$RC"
-              fi
-              echo ">>> [$LABEL] startup crash (rc=$RC, bytes=${OUT_AFTER}-${OUT_BEFORE}), retrying once" | tee -a "$TEST_LOG"
-              # Clear the empty junit so the second attempt gets a
-              # clean file and our "no testcase" detection works below.
-              rm -f "$JUNIT_FILE"
-              sleep 2
-            done
-          }
-
-          # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
-          if [ "${{ matrix.arch }}" = "ia32" ]; then
-            NODE_VERSION=$(node -v)
-            curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
-            unzip -q "node-${NODE_VERSION}-win-x86.zip"
-            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}.xml"
-            run_and_log ./node-${NODE_VERSION}-win-x86/node test/test.js all --backend napi --junit "$JUNIT_FILE"
-            exit "$?"
-          fi
-
-          BUN="$(command -v bun)"
-
-          # ── Per-OS test wrapper (xvfb / sudo / none) ──────────────────────
-          # Linux: we manage Xvfb + openbox + a mapped client window ourselves
-          # instead of `xvfb-run` so the WM and test window persist across both
-          # the napi and ffi backend invocations.  Without a WM, EWMH atoms
-          # (_NET_WORKAREA, _NET_WM_STATE, _NET_ACTIVE_WINDOW) never appear
-          # and lib/ffi/{window,screen,x11}.ts paths that depend on them are
-          # unreachable.  Without a mapped client, window_getList() is empty
-          # and every per-window helper (title, bounds, state) sits idle.
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            export DISPLAY=:99
-            Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
-            XVFB_PID=$!
-            # Wait for the X server to accept connections
-            for _ in $(seq 1 50); do
-              xdpyinfo -display :99 >/dev/null 2>&1 && break
-              sleep 0.1
-            done
-            openbox &
-            OPENBOX_PID=$!
-            # Give openbox a moment to own the root window and publish EWMH atoms
-            sleep 0.5
-            # A persistent mapped window so window_getList() has real data.
-            # -timeout 600 auto-dismisses after 10 minutes in case cleanup is
-            # skipped; -name gives us a stable title to match against regexes.
-            xmessage -timeout 600 -name MechatronTestWindow "mechatron test client" &
-            XMESSAGE_PID=$!
-            sleep 0.3
-            # xmessage doesn't publish _NET_WM_PID on its own, but
-            # lib/ffi/window.ts:winIsValid treats _NET_WM_PID presence
-            # as the "is this a real window" heuristic — mirroring
-            # the napi backend.  Without the atom, every Linux-only
-            # helper (getTitle/getBounds/setTopMost/...) is skipped
-            # during enumeration and window.ts coverage sits at ~42%.
-            # Inject the atom post-hoc via xprop so the full Linux
-            # path is exercised.  xprop is in x11-utils (installed
-            # above).
-            XMSG_WIN=$(xwininfo -root -tree 2>/dev/null | grep MechatronTestWindow | head -1 | awk '{print $1}')
-            if [ -n "$XMSG_WIN" ]; then
-              xprop -id "$XMSG_WIN" -f _NET_WM_PID 32c -set _NET_WM_PID "$XMESSAGE_PID" 2>/dev/null || true
-            fi
-            cleanup_x() {
-              kill "$XMESSAGE_PID" "$OPENBOX_PID" "$XVFB_PID" 2>/dev/null || true
-            }
-            trap cleanup_x EXIT
-            WRAP=()
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            WRAP=(sudo -E)
-          else
-            WRAP=()
-          fi
-
-          # ── macOS x64 on arm64 runner: swap in x64 Bun under Rosetta ──────
-          # The host-arch Bun (arm64) loads arm64 native modules, which don't
-          # match the matrix-arch (x64) prebuilds.  Download Bun's x64
-          # baseline tarball and invoke it via `arch -x86_64` so Rosetta 2
-          # translates the x86_64 code (including JIT output) to arm64.
-          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ] && [ "${{ runner.arch }}" != "X64" ]; then
-            curl -sL "https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-x64-baseline.zip" -o /tmp/bun-x64.zip
-            unzip -q /tmp/bun-x64.zip -d /tmp/
-            X64_BUN="/tmp/bun-darwin-x64-baseline/bun"
-            chmod +x "$X64_BUN"
-            BUN="$X64_BUN"
-            # Prepend `arch -x86_64` so child process runs under Rosetta.
-            WRAP+=(arch -x86_64)
-            # Grant TCC for this binary too
-            TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
-            for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_BUN',1,2,4,1,0);" 2>/dev/null || true
-            done
-            sudo launchctl stop com.apple.tccd 2>/dev/null || true
-            sleep 1
-          fi
-
-          # ── Backends per platform ─────────────────────────────────────────
-          BACKENDS=(napi ffi)
-
-          # ── Run each backend in its own bun process (loader caches the
-          #    backend choice on first access) ────────────────────────────────
-          OVERALL_RC=0
-          for be in "${BACKENDS[@]}"; do
-            JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-$be.xml"
-            BE_COV_DIR="$COV_DIR/$be"
-            mkdir -p "$BE_COV_DIR"
-            BE_RC=0
-            MECHATRON_BACKEND="$be" \
-              run_bun "$be" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-                --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-                --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-              || BE_RC=$?
-            # If bun test crashed at module-load (e.g. native-level abort) it
-            # may leave a junit file with 0 testcases, or none at all.  The
-            # summary aggregator then silently counts 0 tests for that
-            # backend and the PR comment looks green.  Guard against this:
-            # when the backend is expected to run and produced no usable
-            # junit, synthesize a failure entry so the summary surfaces the
-            # startup crash instead of hiding it.
-            if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
-              MSG="bun test for MECHATRON_BACKEND=${be} exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run (see test-output.txt artifact)."
-              {
-                printf '<?xml version="1.0" encoding="UTF-8"?>\n'
-                printf '<testsuites tests="1" failures="1">\n'
-                printf '  <testsuite name="%s-backend" tests="1" failures="1">\n' "$be"
-                printf '    <testcase name="%s backend startup" classname="backend" time="0">\n' "$be"
-                printf '      <failure message="%s"/>\n' "$MSG"
-                printf '    </testcase>\n'
-                printf '  </testsuite>\n'
-                printf '</testsuites>\n'
-              } > "$JUNIT_FILE"
-            fi
-            [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-          done
-
-          # ── Linux-only: FFI with selected libraries denied via LD_PRELOAD
-          #    dlopen-block shim.  Drives coverage of the FFI loader's
-          #    library-unavailable catch arms (lib/ffi/x11.ts:234 libXtst,
-          #    :245 libXrandr) without needing to uninstall the libraries.
-          #    Each variant is its own bun process so the loader re-runs
-          #    tryDlopen() with the new LD_PRELOAD policy.  JUnit and lcov
-          #    feed into the same aggregators as the base backends.
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
-              label="${variant%%:*}"
-              block="${variant#*:}"
-              JUNIT_FILE="$JUNIT_DIR/mechatron-${{ matrix.os }}-${{ matrix.arch }}-ffi-${label}.xml"
-              BE_COV_DIR="$COV_DIR/ffi-${label}"
-              mkdir -p "$BE_COV_DIR"
-              BE_RC=0
-              MECHATRON_BACKEND=ffi \
-              MECHATRON_BLOCK_DLOPEN="$block" \
-              LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
-                run_bun "ffi-$label" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-                  --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-                  --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-                || BE_RC=$?
-              if [ "$BE_RC" != 0 ] && ! grep -q "<testcase" "$JUNIT_FILE" 2>/dev/null; then
-                MSG="bun test for ffi-${label} (LD_PRELOAD dlopen-block $block) exited ${BE_RC} without producing a JUnit report - the backend crashed before tests could run."
-                {
-                  printf '<?xml version="1.0" encoding="UTF-8"?>\n'
-                  printf '<testsuites tests="1" failures="1">\n'
-                  printf '  <testsuite name="ffi-%s-backend" tests="1" failures="1">\n' "$label"
-                  printf '    <testcase name="ffi-%s backend startup" classname="backend" time="0">\n' "$label"
-                  printf '      <failure message="%s"/>\n' "$MSG"
-                  printf '    </testcase>\n'
-                  printf '  </testsuite>\n'
-                  printf '</testsuites>\n'
-                } > "$JUNIT_FILE"
-              fi
-              [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-            done
-          fi
-
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            sudo chown -R "$(whoami)" "$JUNIT_DIR" "$TEST_LOG" "$COV_DIR" 2>/dev/null || true
-          fi
-
-          # Merge per-backend lcov.info files into a single coverage/lcov.info,
-          # summing line hits where the same source line is recorded by both
-          # backends.  Keeps the test-summary aggregator simple (one file).
-          node -e "
-            const fs = require('fs'), path = require('path');
-            const covDir = process.argv[1];
-            const files = {};
-            const fnSeen = {}, brSeen = {};
-            for (const sub of fs.readdirSync(covDir)) {
-              const p = path.join(covDir, sub, 'lcov.info');
-              if (!fs.existsSync(p)) continue;
-              let sf = null;
-              for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
-                if (line.startsWith('SF:')) {
-                  sf = line.slice(3);
-                  if (!files[sf]) files[sf] = { da: {}, fn: [], fnda: {}, brda: [] };
-                } else if (sf === null) continue;
-                else if (line.startsWith('DA:')) {
-                  const [ln, hits] = line.slice(3).split(',').map(Number);
-                  files[sf].da[ln] = (files[sf].da[ln] || 0) + (hits || 0);
-                } else if (line.startsWith('FN:')) {
-                  if (!fnSeen[sf+'|'+line]) { fnSeen[sf+'|'+line] = 1; files[sf].fn.push(line); }
-                } else if (line.startsWith('FNDA:')) {
-                  const m = line.slice(5).split(',');
-                  const name = m.slice(1).join(',');
-                  files[sf].fnda[name] = (files[sf].fnda[name] || 0) + Number(m[0] || 0);
-                } else if (line === 'end_of_record') sf = null;
-              }
-            }
-            const out = [];
-            for (const [sf, info] of Object.entries(files)) {
-              out.push('TN:', 'SF:' + sf);
-              for (const fn of info.fn) out.push(fn);
-              for (const [name, h] of Object.entries(info.fnda)) out.push('FNDA:' + h + ',' + name);
-              for (const ln of Object.keys(info.da).map(Number).sort((a, b) => a - b)) {
-                out.push('DA:' + ln + ',' + info.da[ln]);
-              }
-              out.push('end_of_record');
-            }
-            fs.writeFileSync(path.join(covDir, 'lcov.info'), out.join('\n') + '\n');
-          " "$COV_DIR"
-
-          exit "$OVERALL_RC"
+        run: bash test/ci-run-tests.sh
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+          MATRIX_OS: ${{ matrix.os }}
 
       - name: Run mechatron-robot-js conformance tests
         run: |
@@ -532,6 +320,9 @@ jobs:
             ${{ runner.temp }}/test-output.txt
             ${{ runner.temp }}/junit/
             ${{ runner.temp }}/coverage/
+            ${{ runner.temp }}/exercised/
+            ${{ runner.temp }}/node-reports/
+            ${{ runner.temp }}/portal-screenshots/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v7

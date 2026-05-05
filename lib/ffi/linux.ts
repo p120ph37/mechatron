@@ -38,6 +38,7 @@ interface Libc {
 let _opened = false;
 let _ffi: BunFFI | null = null;
 let _libc: Libc | null = null;
+let _dlopenHandle: any = null;
 
 function tryDlopen(): void {
   if (_opened) return;
@@ -57,6 +58,7 @@ function tryDlopen(): void {
         getpid:            { args: [], returns: T.i32 },
       });
       _libc = lib.symbols;
+      _dlopenHandle = lib;
       return;
     } catch (_) { /* try next */ }
   }

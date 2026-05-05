@@ -22,7 +22,7 @@ import {
 } from "./x11";
 import { user32, kernel32, gdi32, winFFI } from "./win";
 import { cg, macFFI, BITMAP_INFO_BGRA_PMA } from "./mac";
-import { cstr } from "./bun";
+import { cstr, bp } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -240,7 +240,7 @@ function winSynchronize(): ScreenInfo[] | null {
       });
       return 1;
     },
-    { args: [T.u64, T.u64, T.ptr, T.u64], returns: T.i32 },
+    { args: [T.u64, T.u64, T.ptr, T.i64], returns: T.i32 },
   );
 
   try {
@@ -340,7 +340,7 @@ function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle
 
   const id = CG.CGMainDisplayID();
   const cgImg = CG.CGDisplayCreateImage(id);
-  if (!cgImg || cgImg === 0n) return null;
+  if (!cgImg) return null;
   try {
     const fullH = Number(CG.CGImageGetHeight(cgImg));
     const fullW = Number(CG.CGImageGetWidth(cgImg));
@@ -359,11 +359,11 @@ function macGrabScreen(x: number, y: number, w: number, h: number, _windowHandle
     const cs = CG.CGColorSpaceCreateDeviceRGB();
     if (!cs) return null;
     const ctx = CG.CGBitmapContextCreate(
-      F.ptr(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
+      bp(pixels), BigInt(w), BigInt(h), 8n, BigInt(w * 4),
       cs, BITMAP_INFO_BGRA_PMA,
     );
     CG.CGColorSpaceRelease(cs);
-    if (!ctx || ctx === 0n) return null;
+    if (!ctx) return null;
     try {
       // Draw the full display image at an offset so that display pixel
       // (x, y) ends up at context (0, 0) in memory order (top-left).
@@ -396,4 +396,8 @@ export function screen_grabScreen(x: number, y: number, w: number, h: number, wi
   if (IS_WIN) return winGrabScreen(x, y, w, h, windowHandle);
   if (IS_MAC) return macGrabScreen(x, y, w, h, windowHandle);
   return null;
+}
+
+if (IS_LINUX && !getDisplay()) {
+  throw new Error("ffi/screen: requires libX11 on Linux");
 }

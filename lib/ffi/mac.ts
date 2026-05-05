@@ -33,97 +33,117 @@
  * `NSScreen.frame`) use napi-provided fallbacks or degrade gracefully.
  */
 
-import { getBunFFI, cstr, type BunFFI, type Pointer } from "./bun";
+import { getBunFFI, bp, cstr, cstrCached, type BunFFI, type Pointer } from "./bun";
 
 // ── Interfaces ────────────────────────────────────────────────────────
 
 interface CoreGraphics {
   // Event sources + keyboard/mouse events
-  CGEventSourceCreate: (stateID: number) => Pointer;
-  CGEventCreate: (source: Pointer) => Pointer;
-  CGEventCreateKeyboardEvent: (source: Pointer, vk: number, keyDown: number) => Pointer;
-  CGEventCreateMouseEvent: (source: Pointer, type: number, x: number, y: number, button: number) => Pointer;
-  CGEventCreateScrollWheelEvent2: (source: Pointer, units: number, wheelCount: number, w1: number, w2: number, w3: number) => Pointer;
-  CGEventPost: (tap: number, event: Pointer) => void;
-  CGEventSourceKeyState: (stateID: number, key: number) => number;
-  CGEventSourceButtonState: (stateID: number, button: number) => number;
-  CGEventSetType: (event: Pointer, type: number) => void;
-  CGEventSetIntegerValueField: (event: Pointer, field: number, value: bigint) => void;
+  CGEventSourceCreate: (stateID: number) => bigint;
+  CGEventCreate: (source: bigint) => bigint;
+  CGEventCreateKeyboardEvent: (source: bigint, vk: number, keyDown: boolean) => bigint;
+  CGEventCreateMouseEvent: (source: bigint, type: number, x: number, y: number, button: number) => bigint;
+  CGEventCreateScrollWheelEvent2: (source: bigint, units: number, wheelCount: number, w1: number, w2: number, w3: number) => bigint;
+  CGEventPost: (tap: number, event: bigint) => void;
+  CGEventSourceKeyState: (stateID: number, key: number) => boolean;
+  CGEventSourceButtonState: (stateID: number, button: number) => boolean;
+  CGEventSetType: (event: bigint, type: number) => void;
+  CGEventSetIntegerValueField: (event: bigint, field: number, value: bigint) => void;
   // Cursor
   CGWarpMouseCursorPosition: (x: number, y: number) => number;
-  CGAssociateMouseAndMouseCursorPosition: (connected: number) => number;
+  CGAssociateMouseAndMouseCursorPosition: (connected: boolean) => number;
   // Displays
   CGMainDisplayID: () => number;
-  CGGetActiveDisplayList: (max: number, displays: Pointer, count: Pointer) => number;
+  CGGetActiveDisplayList: (max: number, displays: bigint, count: bigint) => number;
   CGDisplayPixelsWide: (id: number) => bigint;
   CGDisplayPixelsHigh: (id: number) => bigint;
-  CGDisplayIsActive: (id: number) => number;
-  CGDisplayCreateImage: (id: number) => Pointer;
+  CGDisplayIsActive: (id: number) => boolean;
+  CGDisplayCreateImage: (id: number) => bigint;
   // Bitmap / image
   CGBitmapContextCreate: (
-    data: Pointer, width: bigint, height: bigint,
+    data: bigint, width: bigint, height: bigint,
     bitsPerComponent: bigint, bytesPerRow: bigint,
-    space: Pointer, bitmapInfo: number,
-  ) => Pointer;
-  CGBitmapContextGetData: (ctx: Pointer) => Pointer;
-  CGBitmapContextCreateImage: (ctx: Pointer) => Pointer;
-  CGContextDrawImage: (ctx: Pointer, rx: number, ry: number, rw: number, rh: number, image: Pointer) => void;
-  CGContextRelease: (ctx: Pointer) => void;
-  CGImageRelease: (image: Pointer) => void;
-  CGImageGetWidth: (image: Pointer) => bigint;
-  CGImageGetHeight: (image: Pointer) => bigint;
-  CGColorSpaceCreateDeviceRGB: () => Pointer;
-  CGColorSpaceRelease: (space: Pointer) => void;
+    space: bigint, bitmapInfo: number,
+  ) => bigint;
+  CGBitmapContextGetData: (ctx: bigint) => bigint;
+  CGBitmapContextCreateImage: (ctx: bigint) => bigint;
+  CGContextDrawImage: (ctx: bigint, rx: number, ry: number, rw: number, rh: number, image: bigint) => void;
+  CGContextRelease: (ctx: bigint) => void;
+  CGImageRelease: (image: bigint) => void;
+  CGImageGetWidth: (image: bigint) => bigint;
+  CGImageGetHeight: (image: bigint) => bigint;
+  CGColorSpaceCreateDeviceRGB: () => bigint;
+  CGColorSpaceRelease: (space: bigint) => void;
+  // Window list
+  CGWindowListCopyWindowInfo: (option: number, relativeToWindow: number) => bigint;
 }
 
 interface CoreFoundation {
-  CFRelease: (cf: Pointer) => void;
-  CFStringCreateMutable: (alloc: Pointer, maxLength: bigint) => Pointer;
-  CFStringAppendCString: (s: Pointer, cstr: Pointer, encoding: number) => void;
-  CFStringGetCString: (s: Pointer, buf: Pointer, size: bigint, encoding: number) => number;
-  CFStringGetLength: (s: Pointer) => bigint;
+  CFRelease: (cf: bigint) => void;
+  CFStringCreateMutable: (alloc: bigint, maxLength: bigint) => bigint;
+  CFStringAppendCString: (s: bigint, cstr: bigint, encoding: number) => void;
+  CFStringGetCString: (s: bigint, buf: bigint, size: bigint, encoding: number) => number;
+  CFStringGetLength: (s: bigint) => bigint;
   CFStringGetMaximumSizeForEncoding: (len: bigint, encoding: number) => bigint;
+  CFArrayGetCount: (theArray: bigint) => bigint;
+  CFArrayGetValueAtIndex: (theArray: bigint, idx: bigint) => bigint;
+  CFDictionaryGetValue: (theDict: bigint, key: bigint) => bigint;
+  CFNumberGetValue: (cfNum: bigint, theType: bigint, valuePtr: bigint) => number;
+  CFBooleanGetValue: (boolean: bigint) => number;
+  CFNumberCreate: (alloc: bigint, theType: bigint, valuePtr: bigint) => bigint;
+}
+
+interface Accessibility {
+  AXIsProcessTrusted: () => number;
+  AXUIElementCreateApplication: (pid: number) => bigint;
+  AXUIElementCreateSystemWide: () => bigint;
+  AXUIElementCopyAttributeValue: (elem: bigint, attr: bigint, value: bigint) => number;
+  AXUIElementSetAttributeValue: (elem: bigint, attr: bigint, value: bigint) => number;
+  AXUIElementPerformAction: (elem: bigint, action: bigint) => number;
+  _AXUIElementGetWindow: (elem: bigint, wid: bigint) => number;
+  AXValueCreate: (type: number, value: bigint) => bigint;
+  AXValueGetValue: (value: bigint, type: number, out: bigint) => number;
 }
 
 interface Objc {
-  objc_getClass: (name: Pointer) => Pointer;
-  sel_registerName: (name: Pointer) => Pointer;
+  objc_getClass: (name: bigint) => bigint;
+  sel_registerName: (name: bigint) => bigint;
   /** Base pointer to objc_msgSend; wrap with CFunction per call site. */
-  objc_msgSend: (receiver: Pointer, selector: Pointer) => Pointer;
-  objc_autoreleasePoolPush: () => Pointer;
-  objc_autoreleasePoolPop: (pool: Pointer) => void;
+  objc_msgSend: (receiver: bigint, selector: bigint) => bigint;
+  objc_autoreleasePoolPush: () => bigint;
+  objc_autoreleasePoolPop: (pool: bigint) => void;
 }
 
 interface Libc {
   // libproc
-  proc_pidpath: (pid: number, buf: Pointer, bufsize: number) => number;
-  proc_name: (pid: number, buf: Pointer, bufsize: number) => number;
-  proc_listallpids: (buf: Pointer, bufsize: number) => number;
-  proc_pidinfo: (pid: number, flavor: number, arg: bigint, buf: Pointer, bufsize: number) => number;
+  proc_pidpath: (pid: number, buf: bigint, bufsize: number) => number;
+  proc_name: (pid: number, buf: bigint, bufsize: number) => number;
+  proc_listallpids: (buf: bigint, bufsize: number) => number;
+  proc_pidinfo: (pid: number, flavor: number, arg: bigint, buf: bigint, bufsize: number) => number;
   // POSIX
   kill: (pid: number, sig: number) => number;
   sysconf: (name: number) => bigint;
   getpid: () => number;
-  realpath: (path: Pointer, resolved: Pointer) => Pointer;
+  realpath: (path: bigint, resolved: bigint) => bigint;
   // mach
   mach_task_self: () => number;
-  task_for_pid: (target_tport: number, pid: number, t: Pointer) => number;
-  mach_vm_read_overwrite: (target: number, addr: bigint, size: bigint, data: bigint, outsize: Pointer) => number;
+  task_for_pid: (target_tport: number, pid: number, t: bigint) => number;
+  mach_vm_read_overwrite: (target: number, addr: bigint, size: bigint, data: bigint, outsize: bigint) => number;
   mach_vm_write: (target: number, addr: bigint, data: bigint, cnt: number) => number;
   mach_vm_protect: (target: number, addr: bigint, size: bigint, setMax: number, newProt: number) => number;
-  mach_vm_region: (target: number, addr: Pointer, size: Pointer, flavor: number, info: Pointer, cnt: Pointer, obj: Pointer) => number;
-  task_info: (target: number, flavor: number, info: Pointer, cnt: Pointer) => number;
+  mach_vm_region: (target: number, addr: bigint, size: bigint, flavor: number, info: bigint, cnt: bigint, obj: bigint) => number;
+  task_info: (target: number, flavor: number, info: bigint, cnt: bigint) => number;
   task_get_exception_ports: (
     task: number, mask: number,
-    masks: Pointer, cnt: Pointer,
-    ports: Pointer, behaviors: Pointer, flavors: Pointer,
+    masks: bigint, cnt: bigint,
+    ports: bigint, behaviors: bigint, flavors: bigint,
   ) => number;
-  uname: (buf: Pointer) => number;
-  free: (ptr: Pointer) => void;
+  uname: (buf: bigint) => number;
+  free: (ptr: bigint) => void;
   // dynamic-loader lookup — needed to resolve DATA symbols like
   // NSPasteboardTypeString (bun:ffi.dlopen wraps only function symbols).
-  dlopen: (path: Pointer, flags: number) => Pointer;
-  dlsym: (handle: Pointer, name: Pointer) => Pointer;
+  dlopen: (path: bigint, flags: number) => bigint;
+  dlsym: (handle: bigint, name: bigint) => bigint;
 }
 
 // ── Paths ─────────────────────────────────────────────────────────────
@@ -138,7 +158,12 @@ let _cg: CoreGraphics | null = null;
 let _cf: CoreFoundation | null = null;
 let _objc: Objc | null = null;
 let _libc: Libc | null = null;
+let _ax: Accessibility | null = null;
 let _appkitLoaded = false;
+
+// Prevent GC from collecting DlopenResult objects — Bun 1.3.13 frees
+// JIT thunks on finalization, corrupting function pointers we still use.
+const _dlopenHandles: any[] = [];
 
 // ── Load ──────────────────────────────────────────────────────────────
 
@@ -158,64 +183,84 @@ function tryDlopen(): void {
 
   try {
     const lib = _ffi.dlopen<CoreGraphics>(CG_PATH, {
-      CGEventSourceCreate:                  { args: [T.u32], returns: T.ptr },
-      CGEventCreate:                        { args: [T.ptr], returns: T.ptr },
-      CGEventCreateKeyboardEvent:           { args: [T.ptr, T.u16, T.i32], returns: T.ptr },
+      CGEventSourceCreate:                  { args: [T.u32], returns: T.i64 },
+      CGEventCreate:                        { args: [T.i64], returns: T.i64 },
+      CGEventCreateKeyboardEvent:           { args: [T.i64, T.u16, T.bool], returns: T.i64 },
       // CGPoint passed as two f64s (SysV/AAPCS HFA or separate args — same ABI).
-      CGEventCreateMouseEvent:              { args: [T.ptr, T.u32, T.f64, T.f64, T.u32], returns: T.ptr },
+      CGEventCreateMouseEvent:              { args: [T.i64, T.u32, T.f64, T.f64, T.u32], returns: T.i64 },
       // Non-variadic scroll helper — bun:ffi can't dispatch to variadics.
-      CGEventCreateScrollWheelEvent2:       { args: [T.ptr, T.u32, T.u32, T.i32, T.i32, T.i32], returns: T.ptr },
-      CGEventPost:                          { args: [T.u32, T.ptr], returns: T.void },
-      CGEventSourceKeyState:                { args: [T.u32, T.u16], returns: T.i32 },
-      CGEventSourceButtonState:             { args: [T.u32, T.u32], returns: T.i32 },
-      CGEventSetType:                       { args: [T.ptr, T.u32], returns: T.void },
-      CGEventSetIntegerValueField:          { args: [T.ptr, T.u32, T.i64], returns: T.void },
+      CGEventCreateScrollWheelEvent2:       { args: [T.i64, T.u32, T.u32, T.i32, T.i32, T.i32], returns: T.i64 },
+      CGEventPost:                          { args: [T.u32, T.i64], returns: T.void },
+      CGEventSourceKeyState:                { args: [T.u32, T.u16], returns: T.bool },
+      CGEventSourceButtonState:             { args: [T.u32, T.u32], returns: T.bool },
+      CGEventSetType:                       { args: [T.i64, T.u32], returns: T.void },
+      CGEventSetIntegerValueField:          { args: [T.i64, T.u32, T.i64], returns: T.void },
       CGWarpMouseCursorPosition:            { args: [T.f64, T.f64], returns: T.i32 },
-      CGAssociateMouseAndMouseCursorPosition: { args: [T.i32], returns: T.i32 },
+      CGAssociateMouseAndMouseCursorPosition: { args: [T.bool], returns: T.i32 },
       CGMainDisplayID:                      { args: [], returns: T.u32 },
-      CGGetActiveDisplayList:               { args: [T.u32, T.ptr, T.ptr], returns: T.i32 },
+      CGGetActiveDisplayList:               { args: [T.u32, T.i64, T.i64], returns: T.i32 },
       CGDisplayPixelsWide:                  { args: [T.u32], returns: T.u64 },
       CGDisplayPixelsHigh:                  { args: [T.u32], returns: T.u64 },
-      CGDisplayIsActive:                    { args: [T.u32], returns: T.i32 },
-      CGDisplayCreateImage:                 { args: [T.u32], returns: T.ptr },
-      CGBitmapContextCreate:                { args: [T.ptr, T.u64, T.u64, T.u64, T.u64, T.ptr, T.u32], returns: T.ptr },
-      CGBitmapContextGetData:               { args: [T.ptr], returns: T.ptr },
-      CGBitmapContextCreateImage:           { args: [T.ptr], returns: T.ptr },
+      CGDisplayIsActive:                    { args: [T.u32], returns: T.bool },
+      CGDisplayCreateImage:                 { args: [T.u32], returns: T.i64 },
+      CGBitmapContextCreate:                { args: [T.i64, T.u64, T.u64, T.u64, T.u64, T.i64, T.u32], returns: T.i64 },
+      CGBitmapContextGetData:               { args: [T.i64], returns: T.i64 },
+      CGBitmapContextCreateImage:           { args: [T.i64], returns: T.i64 },
       // CGRect passed as 4 f64 args.
-      CGContextDrawImage:                   { args: [T.ptr, T.f64, T.f64, T.f64, T.f64, T.ptr], returns: T.void },
-      CGContextRelease:                     { args: [T.ptr], returns: T.void },
-      CGImageRelease:                       { args: [T.ptr], returns: T.void },
-      CGImageGetWidth:                      { args: [T.ptr], returns: T.u64 },
-      CGImageGetHeight:                     { args: [T.ptr], returns: T.u64 },
-      CGColorSpaceCreateDeviceRGB:          { args: [], returns: T.ptr },
-      CGColorSpaceRelease:                  { args: [T.ptr], returns: T.void },
+      CGContextDrawImage:                   { args: [T.i64, T.f64, T.f64, T.f64, T.f64, T.i64], returns: T.void },
+      CGContextRelease:                     { args: [T.i64], returns: T.void },
+      CGImageRelease:                       { args: [T.i64], returns: T.void },
+      CGImageGetWidth:                      { args: [T.i64], returns: T.u64 },
+      CGImageGetHeight:                     { args: [T.i64], returns: T.u64 },
+      CGColorSpaceCreateDeviceRGB:          { args: [], returns: T.i64 },
+      CGColorSpaceRelease:                  { args: [T.i64], returns: T.void },
+      // CGWindowListOption (uint32_t), CGWindowID (uint32_t) → CFArrayRef
+      CGWindowListCopyWindowInfo:           { args: [T.u32, T.u32], returns: T.i64 },
     });
     _cg = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _cg = null; }
 
   try {
     const lib = _ffi.dlopen<CoreFoundation>(CF_PATH, {
-      CFRelease:                          { args: [T.ptr], returns: T.void },
-      CFStringCreateMutable:              { args: [T.ptr, T.i64], returns: T.ptr },
-      CFStringAppendCString:              { args: [T.ptr, T.ptr, T.u32], returns: T.void },
-      CFStringGetCString:                 { args: [T.ptr, T.ptr, T.u64, T.u32], returns: T.i32 },
-      CFStringGetLength:                  { args: [T.ptr], returns: T.i64 },
+      CFRelease:                          { args: [T.i64], returns: T.void },
+      CFStringCreateMutable:              { args: [T.i64, T.i64], returns: T.i64 },
+      CFStringAppendCString:              { args: [T.i64, T.i64, T.u32], returns: T.void },
+      // i64 first arg so tagged CFString pointers pass through.
+      CFStringGetCString:                 { args: [T.i64, T.i64, T.i64, T.u32], returns: T.i32 },
+      CFStringGetLength:                  { args: [T.i64], returns: T.i64 },
       CFStringGetMaximumSizeForEncoding:  { args: [T.i64, T.u32], returns: T.i64 },
+      // CFIndex CFArrayGetCount(CFArrayRef) — CFIndex is signed long (i64 on 64-bit)
+      CFArrayGetCount:                    { args: [T.i64], returns: T.i64 },
+      // const void * CFArrayGetValueAtIndex(CFArrayRef, CFIndex)
+      CFArrayGetValueAtIndex:             { args: [T.i64, T.i64], returns: T.i64 },
+      // const void * CFDictionaryGetValue(CFDictionaryRef, const void *key)
+      // Returns T.i64 — tagged pointers have the high bit set; i64 lets the
+      // signed bigint flow directly to other i64-typed args without the
+      // "Unable to convert … to a pointer" rejection that T.i64 causes.
+      CFDictionaryGetValue:               { args: [T.i64, T.i64], returns: T.i64 },
+      // Boolean CFNumberGetValue(CFNumberRef, CFNumberType, void *) — Boolean is unsigned char (u8)
+      // First arg is i64 (not ptr) so tagged CFNumber pointers pass through.
+      CFNumberGetValue:                   { args: [T.i64, T.i64, T.i64], returns: T.u8 },
+      CFBooleanGetValue:                  { args: [T.i64], returns: T.u8 },
+      CFNumberCreate:                     { args: [T.i64, T.i64, T.i64], returns: T.i64 },
     });
     _cf = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _cf = null; }
 
   try {
     const lib = _ffi.dlopen<Objc>(OBJC_PATH, {
-      objc_getClass:              { args: [T.ptr], returns: T.ptr },
-      sel_registerName:           { args: [T.ptr], returns: T.ptr },
+      objc_getClass:              { args: [T.i64], returns: T.i64 },
+      sel_registerName:           { args: [T.i64], returns: T.i64 },
       // Generic 0-arg msgSend.  Typed per-signature wrappers are built
       // on demand via `msgSendTyped()` which re-dlopens objc_msgSend.
-      objc_msgSend:               { args: [T.ptr, T.ptr], returns: T.ptr },
-      objc_autoreleasePoolPush:   { args: [], returns: T.ptr },
-      objc_autoreleasePoolPop:    { args: [T.ptr], returns: T.void },
+      objc_msgSend:               { args: [T.i64, T.i64], returns: T.i64 },
+      objc_autoreleasePoolPush:   { args: [], returns: T.i64 },
+      objc_autoreleasePoolPop:    { args: [T.i64], returns: T.void },
     });
     _objc = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _objc = null; }
 
   // We dlopen AppKit only so the Objective-C runtime loads its classes
@@ -224,37 +269,56 @@ function tryDlopen(): void {
   // so we ask for `NSBeep` — a stable plain-C function the framework has
   // always exported.  We never actually call it.
   try {
-    _ffi.dlopen<{ NSBeep: () => void }>(AK_PATH, {
+    const akLib = _ffi.dlopen<{ NSBeep: () => void }>(AK_PATH, {
       NSBeep: { args: [], returns: T.void },
     });
+    _dlopenHandles.push(akLib);
     _appkitLoaded = true;
   } catch (_) { _appkitLoaded = false; }
 
   try {
     const lib = _ffi.dlopen<Libc>(LIBC_PATH, {
-      proc_pidpath:                 { args: [T.i32, T.ptr, T.u32], returns: T.i32 },
-      proc_name:                    { args: [T.i32, T.ptr, T.u32], returns: T.i32 },
-      proc_listallpids:             { args: [T.ptr, T.i32], returns: T.i32 },
-      proc_pidinfo:                 { args: [T.i32, T.i32, T.u64, T.ptr, T.i32], returns: T.i32 },
+      proc_pidpath:                 { args: [T.i32, T.i64, T.u32], returns: T.i32 },
+      proc_name:                    { args: [T.i32, T.i64, T.u32], returns: T.i32 },
+      proc_listallpids:             { args: [T.i64, T.i32], returns: T.i32 },
+      proc_pidinfo:                 { args: [T.i32, T.i32, T.u64, T.i64, T.i32], returns: T.i32 },
       kill:                         { args: [T.i32, T.i32], returns: T.i32 },
       sysconf:                      { args: [T.i32], returns: T.i64 },
       getpid:                       { args: [], returns: T.i32 },
-      realpath:                     { args: [T.ptr, T.ptr], returns: T.ptr },
+      realpath:                     { args: [T.i64, T.i64], returns: T.i64 },
       mach_task_self:               { args: [], returns: T.u32 },
-      task_for_pid:                 { args: [T.u32, T.i32, T.ptr], returns: T.i32 },
-      mach_vm_read_overwrite:       { args: [T.u32, T.u64, T.u64, T.u64, T.ptr], returns: T.i32 },
+      task_for_pid:                 { args: [T.u32, T.i32, T.i64], returns: T.i32 },
+      mach_vm_read_overwrite:       { args: [T.u32, T.u64, T.u64, T.u64, T.i64], returns: T.i32 },
       mach_vm_write:                { args: [T.u32, T.u64, T.u64, T.u32], returns: T.i32 },
       mach_vm_protect:              { args: [T.u32, T.u64, T.u64, T.i32, T.i32], returns: T.i32 },
-      mach_vm_region:               { args: [T.u32, T.ptr, T.ptr, T.i32, T.ptr, T.ptr, T.ptr], returns: T.i32 },
-      task_info:                    { args: [T.u32, T.u32, T.ptr, T.ptr], returns: T.i32 },
-      task_get_exception_ports:     { args: [T.u32, T.u32, T.ptr, T.ptr, T.ptr, T.ptr, T.ptr], returns: T.i32 },
-      uname:                        { args: [T.ptr], returns: T.i32 },
-      free:                         { args: [T.ptr], returns: T.void },
-      dlopen:                       { args: [T.ptr, T.i32], returns: T.ptr },
-      dlsym:                        { args: [T.ptr, T.ptr], returns: T.ptr },
+      mach_vm_region:               { args: [T.u32, T.i64, T.i64, T.i32, T.i64, T.i64, T.i64], returns: T.i32 },
+      task_info:                    { args: [T.u32, T.u32, T.i64, T.i64], returns: T.i32 },
+      task_get_exception_ports:     { args: [T.u32, T.u32, T.i64, T.i64, T.i64, T.i64, T.i64], returns: T.i32 },
+      uname:                        { args: [T.i64], returns: T.i32 },
+      free:                         { args: [T.i64], returns: T.void },
+      dlopen:                       { args: [T.i64, T.i32], returns: T.i64 },
+      dlsym:                        { args: [T.i64, T.i64], returns: T.i64 },
     });
     _libc = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) { _libc = null; }
+
+  const AX_PATH = "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices";
+  try {
+    const lib = _ffi.dlopen<Accessibility>(AX_PATH, {
+      AXIsProcessTrusted:              { args: [], returns: T.u8 },
+      AXUIElementCreateApplication:    { args: [T.i32], returns: T.i64 },
+      AXUIElementCreateSystemWide:     { args: [], returns: T.i64 },
+      AXUIElementCopyAttributeValue:   { args: [T.i64, T.i64, T.i64], returns: T.i32 },
+      AXUIElementSetAttributeValue:    { args: [T.i64, T.i64, T.i64], returns: T.i32 },
+      AXUIElementPerformAction:        { args: [T.i64, T.i64], returns: T.i32 },
+      _AXUIElementGetWindow:           { args: [T.i64, T.i64], returns: T.i32 },
+      AXValueCreate:                   { args: [T.u32, T.i64], returns: T.i64 },
+      AXValueGetValue:                 { args: [T.i64, T.u32, T.i64], returns: T.u8 },
+    });
+    _ax = lib.symbols;
+    _dlopenHandles.push(lib);
+  } catch (_) { _ax = null; }
 }
 
 // ── Public accessors ──────────────────────────────────────────────────
@@ -263,6 +327,7 @@ export function cg(): CoreGraphics | null { tryDlopen(); return _cg; }
 export function cf(): CoreFoundation | null { tryDlopen(); return _cf; }
 export function objc(): Objc | null { tryDlopen(); return _objc; }
 export function libc(): Libc | null { tryDlopen(); return _libc; }
+export function ax(): Accessibility | null { tryDlopen(); return _ax; }
 export function macFFI(): BunFFI | null { tryDlopen(); return _ffi; }
 export function hasAppKit(): boolean { tryDlopen(); return _appkitLoaded; }
 
@@ -289,12 +354,25 @@ export const kCGScrollEventUnitPixel = 1;
 // can't read CGEventGetLocation — struct-by-value return is unsupported).
 export const kCGMouseEventButtonNumber = 3;
 
+// CGWindowListCopyWindowInfo option flags
+export const kCGWindowListOptionOnScreenOnly = 1 << 0;
+export const kCGWindowListExcludeDesktopElements = 1 << 4;
+export const kCGNullWindowID = 0;
+
 // CGImage bitmap info: little-endian 32-bit BGRA, premultiplied-first alpha.
 // Equivalent to (kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst).
 export const BITMAP_INFO_BGRA_PMA = (2 << 12) | 2;
 
 // kCFStringEncodingUTF8
 export const kCFStringEncodingUTF8 = 0x08000100;
+
+// kCFNumberSInt32Type
+export const kCFNumberSInt32Type = 3;
+export const kCFNumberFloat64Type = 13;
+
+// AXValue types
+export const kAXValueCGPointType = 1;
+export const kAXValueCGSizeType = 2;
 
 // ── Constants (mach / process) ───────────────────────────────────────
 
@@ -327,25 +405,27 @@ export const SIGKILL = 9;
 
 // ── Objective-C helpers ──────────────────────────────────────────────
 
-const _classCache = new Map<string, Pointer>();
-const _selCache = new Map<string, Pointer>();
+const _classCache = new Map<string, bigint>();
+const _selCache = new Map<string, bigint>();
 
-export function cls(name: string): Pointer {
-  if (_classCache.has(name)) return _classCache.get(name)!;
+export function cls(name: string): bigint {
+  const cached = _classCache.get(name);
+  if (cached !== undefined) return cached;
   const o = objc();
   const F = macFFI();
-  if (!o || !F) return null;
-  const p = o.objc_getClass(F.ptr(cstr(name)));
+  if (!o || !F) return 0n;
+  const p = o.objc_getClass(bp(cstrCached(name)));
   _classCache.set(name, p);
   return p;
 }
 
-export function sel(name: string): Pointer {
-  if (_selCache.has(name)) return _selCache.get(name)!;
+export function sel(name: string): bigint {
+  const cached = _selCache.get(name);
+  if (cached !== undefined) return cached;
   const o = objc();
   const F = macFFI();
-  if (!o || !F) return null;
-  const s = o.sel_registerName(F.ptr(cstr(name)));
+  if (!o || !F) return 0n;
+  const s = o.sel_registerName(bp(cstrCached(name)));
   _selCache.set(name, s);
   return s;
 }
@@ -373,6 +453,8 @@ export function msgSendTyped(args: number[], returns: number): ((...a: any[]) =>
       "/usr/lib/libobjc.A.dylib",
       { objc_msgSend: { args, returns } },
     );
+
+    _dlopenHandles.push(lib);
     const fn = lib.symbols.objc_msgSend;
     _msgSendCache.set(key, fn);
     return fn;
@@ -387,28 +469,28 @@ export function msgSendTyped(args: number[], returns: number): ((...a: any[]) =>
  * only wraps function symbols, so we call `dlsym` directly.
  *
  * We can't use RTLD_DEFAULT as the handle: that's `(void *)-2`, whose
- * 64-bit unsigned value (2^64-2) is above 2^63 and bun:ffi's T.ptr
+ * 64-bit unsigned value (2^64-2) is above 2^63 and bun:ffi's T.i64
  * bigint-to-pointer conversion rejects it with "Unable to convert … to
  * a pointer".  Instead, dlopen the containing dylib to get a real
  * heap-range handle and dlsym against that.
  */
 const RTLD_LAZY = 1;
-let _appkitHandle: Pointer = null;
-const _dataSymCache = new Map<string, Pointer>();
-export function resolveDataSymbol(name: string): Pointer {
-  if (_dataSymCache.has(name)) return _dataSymCache.get(name)!;
+let _appkitHandle = 0n;
+const _dataSymCache = new Map<string, bigint>();
+export function resolveDataSymbol(name: string): bigint {
+  const cached = _dataSymCache.get(name);
+  if (cached !== undefined) return cached;
   const lc = libc();
   const F = macFFI();
-  if (!lc || !F) return null;
+  if (!lc || !F) return 0n;
   if (!_appkitHandle) {
-    _appkitHandle = lc.dlopen(F.ptr(cstr(AK_PATH)), RTLD_LAZY);
-    if (!_appkitHandle) { _dataSymCache.set(name, null); return null; }
+    _appkitHandle = lc.dlopen(bp(cstr(AK_PATH)), RTLD_LAZY);
+    if (!_appkitHandle) { _dataSymCache.set(name, 0n); return 0n; }
   }
-  const addr = lc.dlsym(_appkitHandle, F.ptr(cstr(name)));
-  if (!addr) { _dataSymCache.set(name, null); return null; }
-  // `addr` points to the `void * const` slot; read through to the object.
-  const val = F.read.ptr(addr);
-  const ptr: Pointer = val === 0n ? null : (val as unknown as Pointer);
+  const addr = lc.dlsym(_appkitHandle, bp(cstr(name)));
+  if (!addr) { _dataSymCache.set(name, 0n); return 0n; }
+  const val = F.read.ptr(Number(addr));
+  const ptr = typeof val === "bigint" ? val : BigInt(val as number);
   _dataSymCache.set(name, ptr);
   return ptr;
 }
@@ -417,38 +499,36 @@ export function resolveDataSymbol(name: string): Pointer {
  * Build a CFString from a JS string.  Caller must CFRelease() the result.
  *
  * We deliberately avoid `CFStringCreateWithCString`, which returns a
- * *tagged pointer* for short ASCII strings on arm64 Darwin.  Tagged CFStrings
- * encode their class index in the top bits of the 64-bit pointer, producing
- * pointer values above 2^53 — which bun:ffi's `T.ptr` round-trip silently
- * truncates to JS number, corrupting the class-tag bits.  The ObjC runtime
- * then sees the corrupted pointer as an `__NSTaggedDate`, and
- * `[NSPasteboard writeObjects:]` rejects it for not conforming to
- * `NSPasteboardWriting`.  `CFStringCreateMutable` always returns a
- * heap-allocated pointer (low 48 bits, safely below 2^53), sidestepping the
- * whole class of bugs.
+ * *tagged pointer* for short ASCII strings on arm64 Darwin.
+ * `CFStringCreateMutable` always returns a heap-allocated object.
  */
-export function cfStringFromJS(s: string): Pointer {
+export function cfStringFromJS(s: string): bigint {
   const C = cf();
-  const F = macFFI();
-  if (!C || !F) return null;
-  const m = C.CFStringCreateMutable(null, 0n);
-  if (!m) return null;
-  C.CFStringAppendCString(m, F.ptr(cstr(s)), kCFStringEncodingUTF8);
+  if (!C) return 0n;
+  const m = C.CFStringCreateMutable(0n, 0n);
+  if (!m) return 0n;
+  C.CFStringAppendCString(m, bp(cstrCached(s)), kCFStringEncodingUTF8);
   return m;
 }
 
-/** Decode a CFStringRef to JS.  Does not release the CFString. */
-export function cfStringToJS(cfstr: Pointer): string {
+/**
+ * Decode a CFStringRef to JS.  Does not release the CFString.
+ * Accepts bigint (i64) so tagged CFString pointers pass through.
+ */
+let _cfStrBuf = new Uint8Array(256);
+const _utf8Dec = new TextDecoder("utf-8");
+
+export function cfStringToJS(cfstr: bigint): string {
   const C = cf();
   const F = macFFI();
   if (!C || !F || !cfstr) return "";
   const len = C.CFStringGetLength(cfstr);
-  const max = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8));
-  const buf = new Uint8Array(max + 1);
-  if (C.CFStringGetCString(cfstr, F.ptr(buf), BigInt(buf.byteLength), kCFStringEncodingUTF8) === 0) return "";
+  const need = Number(C.CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8)) + 1;
+  if (need > _cfStrBuf.length) _cfStrBuf = new Uint8Array(need);
+  if (C.CFStringGetCString(cfstr, bp(_cfStrBuf), BigInt(_cfStrBuf.byteLength), kCFStringEncodingUTF8) === 0) return "";
   let end = 0;
-  while (end < buf.length && buf[end] !== 0) end++;
-  return new TextDecoder("utf-8").decode(buf.subarray(0, end));
+  while (end < _cfStrBuf.length && _cfStrBuf[end] !== 0) end++;
+  return _utf8Dec.decode(_cfStrBuf.subarray(0, end));
 }
 
 /** Decode a NUL-terminated byte buffer up to `len` bytes as UTF-8. */
@@ -457,4 +537,30 @@ export function bufToStr(buf: Uint8Array, len?: number): string {
   const max = len === undefined ? buf.length : Math.min(len, buf.length);
   while (end < max && buf[end] !== 0) end++;
   return new TextDecoder("utf-8").decode(buf.subarray(0, end));
+}
+
+let _cfBoolTrue = 0n;
+let _cfBoolFalse = 0n;
+let _cfBoolInit = false;
+
+// dlsym returns a code/data-segment VA — Number() is safe because
+// read.ptr requires a JS number and VAs are within Number precision.
+export function cfBool(v: boolean): bigint {
+  if (!_cfBoolInit) {
+    _cfBoolInit = true;
+    const lc = libc();
+    const F = macFFI();
+    if (!lc || !F) return 0n;
+    const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+    const handle = lc.dlopen(bp(cstr(CF_PATH)), 1);
+    if (!handle) return 0n;
+    for (const [name, set] of [["kCFBooleanTrue", true], ["kCFBooleanFalse", false]] as const) {
+      const addr = lc.dlsym(handle, bp(cstr(name)));
+      if (!addr) continue;
+      const val = F.read.ptr(Number(addr));
+      const ptr = typeof val === "bigint" ? val : BigInt(val as number);
+      if (set) _cfBoolTrue = ptr; else _cfBoolFalse = ptr;
+    }
+  }
+  return v ? _cfBoolTrue : _cfBoolFalse;
 }

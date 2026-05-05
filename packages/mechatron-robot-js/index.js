@@ -56,13 +56,87 @@ var Memory   = callableClass(mech.Memory);
 // as top-level symbols instead).
 var Segment = callableClass(mech.Segment);
 var Stats   = callableClass(mech.Stats);
-var Region  = callableClass(mech.Region);
 
 // Attach nested references.  The outer wrapper is a Proxy around the raw
 // class, so assigning a property to it sets it on the underlying target.
 Module.Segment = Segment;
 Memory.Stats   = Stats;
+
+// BigInt→Number coercion for robot-js API contract.  Modern mechatron uses
+// bigint for pointer-sized fields (Region.start/stop/size, addresses returned
+// by getMinAddress/getMaxAddress/find).  robot-js 2.x exposed these as plain
+// numbers, so consumers may rely on strict equality (=== 0) or typeof checks.
+// Truncation is acceptable: robot-js never supported >53-bit addresses.
+function regionToNumber(region) {
+  if (region && typeof region.start === "bigint") {
+    region.start = Number(region.start);
+    region.stop  = Number(region.stop);
+    region.size  = Number(region.size);
+  }
+  return region;
+}
+
+var _getRegion = mech.Memory.prototype.getRegion;
+mech.Memory.prototype.getRegion = async function () {
+  return regionToNumber(await _getRegion.apply(this, arguments));
+};
+
+var _getRegions = mech.Memory.prototype.getRegions;
+mech.Memory.prototype.getRegions = async function () {
+  var regions = await _getRegions.apply(this, arguments);
+  for (var i = 0; i < regions.length; i++) regionToNumber(regions[i]);
+  return regions;
+};
+
+var _getMinAddress = mech.Memory.prototype.getMinAddress;
+mech.Memory.prototype.getMinAddress = async function () {
+  return Number(await _getMinAddress.apply(this, arguments));
+};
+
+var _getMaxAddress = mech.Memory.prototype.getMaxAddress;
+mech.Memory.prototype.getMaxAddress = async function () {
+  return Number(await _getMaxAddress.apply(this, arguments));
+};
+
+var _find = mech.Memory.prototype.find;
+mech.Memory.prototype.find = async function () {
+  var hits = await _find.apply(this, arguments);
+  for (var i = 0; i < hits.length; i++) hits[i] = Number(hits[i]);
+  return hits;
+};
+
+// Region constructor override — coerce bigint fields to number on creation.
+var _OrigRegion = mech.Region;
+var _RegionShim = function () {
+  var r = new _OrigRegion();
+  return regionToNumber(r);
+};
+_RegionShim.prototype = _OrigRegion.prototype;
+_RegionShim.compare = _OrigRegion.compare;
+var Region = callableClass(_RegionShim);
 Memory.Region  = Region;
+
+// Cache stubs — robot-js 2.x exposed caching on Memory but it was never
+// implemented beyond the NAPI layer.  Modern mechatron drops it entirely;
+// provide synchronous noop stubs here for ABI compatibility.
+mech.Memory.prototype.createCache = function () { return false; };
+mech.Memory.prototype.clearCache = function () {};
+mech.Memory.prototype.deleteCache = function () {};
+mech.Memory.prototype.isCaching = function () { return false; };
+mech.Memory.prototype.getCacheSize = function () { return 0; };
+
+// getWindows — moved out of the Process class in modern mechatron; the
+// window subsystem handles all window enumeration.  This shim uses
+// Window.getList + PID filtering to maintain the robot-js API shape.
+mech.Process.prototype.getWindows = async function (regex) {
+  var pid = this.getPID();
+  var wins = await mech.Window.getList(regex);
+  var out = [];
+  for (var i = 0; i < wins.length; i++) {
+    if (await wins[i].getPID() === pid) out.push(wins[i]);
+  }
+  return out;
+};
 
 // ---------------------------------------------------------------------------
 // Top-level time helpers (robot-js had mRobot.sleep / mRobot.clock)

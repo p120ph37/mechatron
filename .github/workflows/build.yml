@@ -56,10 +56,20 @@ jobs:
               const xmlFiles = fs.readdirSync(junitDir).filter(f => f.endsWith(".xml"));
               for (const xf of xmlFiles) {
                 const xml = fs.readFileSync(path.join(junitDir, xf), "utf8");
-                const re = /<testcase name="([^"]+)"[^>]*time="([^"]+)"[^>]*(\/\s*>|>[\s\S]*?<\/testcase>)/g;
+                // Match testcase as either self-closing or with body. Body
+                // capture must be non-greedy AND blocked from spanning into
+                // the next <testcase ...> opening tag (otherwise a self-
+                // closing testcase's body would extend up to the next
+                // </testcase>, dragging in failure/skipped markers from
+                // unrelated tests).
+                const re = /<testcase\s+([^>]*?)\s*(?:\/>|>((?:(?!<testcase\b)[\s\S])*?)<\/testcase>)/g;
                 let m;
                 while ((m = re.exec(xml)) !== null) {
-                  const name = m[1], time = m[2], body = m[3];
+                  const attrs = m[1], body = m[2] || "";
+                  const nameMatch = attrs.match(/name="([^"]*)"/);
+                  const timeMatch = attrs.match(/time="([^"]*)"/);
+                  const name = nameMatch ? nameMatch[1] : "?";
+                  const time = timeMatch ? timeMatch[1] : "0";
                   const skipped = body.includes("<skipped");
                   const failed = body.includes("<failure");
                   if (failed) { fail++; allPassed = false; }
@@ -92,29 +102,29 @@ jobs:
             const failStr = fail > 0 ? `, ${fail} failed` : "";
             comment += `<details>\n`;
             comment += `<summary>${status} <b>${platform}</b> — ${pass}/${total} passed${failStr}${skipStr}${covStr}</summary>\n\n`;
-            comment += `| Test | Status | Time |\n|------|--------|------|\n`;
-            comment += rows.join("\n") + "\n";
+            // Only list failed/skipped tests to keep the comment within
+            // GitHub's 65536-char limit.  Passing tests are just counted.
+            const notable = rows.filter(r => !r.includes(":white_check_mark:"));
+            if (notable.length > 0) {
+              comment += `| Test | Status | Time |\n|------|--------|------|\n`;
+              comment += notable.join("\n") + "\n";
+            } else {
+              comment += `All ${pass} tests passed.\n`;
+            }
 
             // Per-file coverage table; also feed into the combined aggregate.
             if (covPct) {
               try {
                 const lcov = fs.readFileSync(path.join(covDir, "lcov.info"), "utf8");
-                const files = {};
                 let cur = null, curNorm = null;
                 for (const line of lcov.split("\n")) {
                   if (line.startsWith("SF:")) {
                     curNorm = line.slice(3).replace(/^.*[\/\\]lib[\/\\]/, "lib/").replace(/\\/g, "/");
                     cur = curNorm;
-                    files[cur] = { hit: 0, total: 0 };
                     if (!combined[curNorm]) combined[curNorm] = { lines: {}, parsers: new Set() };
-                    // Remember which platform parsed this file — used below to
-                    // filter out "phantom uncovered" lines (see comment in
-                    // combined aggregation block).
                     combined[curNorm].parsers.add(platform);
                   } else if (line.startsWith("DA:") && cur) {
                     const [ln, hits] = line.slice(3).split(",").map(Number);
-                    files[cur].total++;
-                    if (hits > 0) files[cur].hit++;
                     const rec = combined[curNorm].lines[ln]
                       || (combined[curNorm].lines[ln] = { hits: 0, emitters: new Set() });
                     rec.hits += (hits || 0);
@@ -123,14 +133,6 @@ jobs:
                     cur = null; curNorm = null;
                   }
                 }
-                comment += `\n| File | Lines | Coverage |\n|------|------:|----------|\n`;
-                let tH = 0, tL = 0;
-                for (const [f, s] of Object.entries(files).sort()) {
-                  if (s.total === 0) continue;
-                  comment += `| ${f} | ${s.hit}/${s.total} | ${(100*s.hit/s.total).toFixed(1)}% |\n`;
-                  tH += s.hit; tL += s.total;
-                }
-                comment += `| **Total** | **${tH}/${tL}** | **${tL > 0 ? (100*tH/tL).toFixed(1) : "0"}%** |\n`;
               } catch (_) {}
             }
 
@@ -175,6 +177,48 @@ jobs:
 
           if (!anyResults) {
             comment += "_No test results found in artifacts._\n";
+          }
+
+          // ── Matrix cross-check: every "ok" cell must be exercised ───
+          const exFiles = [];
+          for (const dir of dirs) {
+            const exDir = path.join(resultsDir, dir, "exercised");
+            try {
+              for (const f of fs.readdirSync(exDir).filter(f => f.endsWith(".json"))) {
+                try { exFiles.push(JSON.parse(fs.readFileSync(path.join(exDir, f), "utf8"))); }
+                catch (_) {}
+              }
+            } catch (_) {}
+          }
+          if (exFiles.length > 0) {
+            const allOk = {};  // column -> Set<fn>
+            const allEx = {};  // column -> Set<fn>
+            for (const ef of exFiles) {
+              const col = ef.platform + "-" + ef.backend;
+              if (!allOk[col]) allOk[col] = new Set();
+              if (!allEx[col]) allEx[col] = new Set();
+              for (const fn of ef.okCells || []) allOk[col].add(fn);
+              for (const fn of ef.exercised || []) allEx[col].add(fn);
+            }
+            const gaps = [];
+            for (const [col, okSet] of Object.entries(allOk)) {
+              const exSet = allEx[col] || new Set();
+              for (const fn of okSet) {
+                if (!exSet.has(fn)) gaps.push({ col, fn });
+              }
+            }
+            if (gaps.length > 0) {
+              allPassed = false;
+              comment += `<details>\n<summary>:warning: <b>Matrix cross-check</b> — ${gaps.length} ok cell(s) not exercised</summary>\n\n`;
+              comment += `| Function | Column |\n|----------|--------|\n`;
+              for (const g of gaps.sort((a, b) => a.fn.localeCompare(b.fn) || a.col.localeCompare(b.col))) {
+                comment += `| ${g.fn} | ${g.col} |\n`;
+              }
+              comment += `\n</details>\n\n`;
+            } else {
+              const totalOk = Object.values(allOk).reduce((s, v) => s + v.size, 0);
+              comment += `:white_check_mark: **Matrix cross-check**: all ${totalOk} ok cells exercised across ${exFiles.length} backend runs.\n\n`;
+            }
           }
 
           const heading = allPassed && anyResults

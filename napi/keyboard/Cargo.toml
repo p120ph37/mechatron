@@ -12,6 +12,7 @@ napi-derive = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mechatron-shared = { path = "../shared" }
+libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [

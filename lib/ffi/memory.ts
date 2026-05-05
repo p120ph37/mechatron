@@ -6,12 +6,12 @@
  * WriteProcessMemory + VirtualProtectEx.  macOS: throws.
  *
  * Mirrors the napi-rs `memory_*` exports.  All addresses cross the FFI
- * boundary as JS numbers (f64), matching the napi adapter — values up to
- * 2^53 are exact, which covers all current 64-bit user-mode ranges.
+ * boundary as BigInt, matching the napi adapter.
  */
 
 import * as fs from "fs";
 
+import { bp } from "./bun";
 import { libc, libcFFI, _SC_PAGESIZE, makeIovec, makeRemoteIovec } from "./linux";
 import { kernel32, winFFI } from "./win";
 import {
@@ -31,9 +31,9 @@ const IS_MAC = process.platform === "darwin";
 export interface RegionInfo {
   valid: boolean;
   bound: boolean;
-  start: number;
-  stop: number;
-  size: number;
+  start: bigint;
+  stop: bigint;
+  size: bigint;
   readable: boolean;
   writable: boolean;
   executable: boolean;
@@ -44,7 +44,7 @@ export interface RegionInfo {
 
 function emptyRegion(): RegionInfo {
   return {
-    valid: false, bound: false, start: 0, stop: 0, size: 0,
+    valid: false, bound: false, start: 0n, stop: 0n, size: 0n,
     readable: false, writable: false, executable: false,
     access: 0, private: false, guarded: false,
   };
@@ -73,8 +73,8 @@ function parseMaps(pid: number): RegionInfo[] {
     if (parts.length < 2) continue;
     const [s, e] = parts[0].split("-");
     if (!s || !e) continue;
-    const start = parseInt(s, 16);
-    const stop = parseInt(e, 16);
+    const start = BigInt("0x" + s);
+    const stop = BigInt("0x" + e);
     const perms = parts[1] || "";
     const readable = perms.includes("r");
     const writable = perms.includes("w");
@@ -93,22 +93,22 @@ function parseMaps(pid: number): RegionInfo[] {
   return out;
 }
 
-function linuxRead(pid: number, addr: number, buf: Uint8Array): number {
+function linuxRead(pid: number, addr: bigint, buf: Uint8Array): number {
   const c = libc();
   const F = libcFFI();
   if (!c || !F || pid <= 0 || buf.length === 0) return 0;
   const local = makeIovec(F, buf);
-  const remote = makeRemoteIovec(BigInt(addr), buf.length);
+  const remote = makeRemoteIovec(addr, buf.length);
   const n = c.process_vm_readv(pid, F.ptr(local.iov) as any, 1n, F.ptr(remote) as any, 1n, 0n);
   return n < 0n ? 0 : Number(n);
 }
 
-function linuxWrite(pid: number, addr: number, buf: Uint8Array): number {
+function linuxWrite(pid: number, addr: bigint, buf: Uint8Array): number {
   const c = libc();
   const F = libcFFI();
   if (!c || !F || pid <= 0 || buf.length === 0) return 0;
   const local = makeIovec(F, buf);
-  const remote = makeRemoteIovec(BigInt(addr), buf.length);
+  const remote = makeRemoteIovec(addr, buf.length);
   const n = c.process_vm_writev(pid, F.ptr(local.iov) as any, 1n, F.ptr(remote) as any, 1n, 0n);
   return n < 0n ? 0 : Number(n);
 }
@@ -121,7 +121,7 @@ function macGetTask(pid: number): number {
   if (!m || !F || pid <= 0) return 0;
   const self = m.mach_task_self();
   const out = new Uint32Array(1);
-  if (m.task_for_pid(self, pid, F.ptr(out)) !== 0) return 0;
+  if (m.task_for_pid(self, pid, bp(out)) !== 0) return 0;
   return out[0];
 }
 
@@ -132,7 +132,7 @@ function macProcessExists(pid: number): boolean {
   if (m.kill(pid, 0) === 0) return true;
   // Fallback: proc_pidpath returns > 0 if the pid is valid.
   const buf = new Uint8Array(16);
-  return m.proc_pidpath(pid, F.ptr(buf), buf.length) > 0;
+  return m.proc_pidpath(pid, bp(buf), buf.length) > 0;
 }
 
 /**
@@ -140,7 +140,7 @@ function macProcessExists(pid: number): boolean {
  * whose `bound` flag is true when the queried address falls within the
  * region, or false when `mach_vm_region` skipped past an unmapped gap.
  */
-function macGetRegion(task: number, address: number): RegionInfo {
+function macGetRegion(task: number, address: bigint): RegionInfo {
   const r = emptyRegion();
   if (task === 0) return r;
   const m = mac();
@@ -153,20 +153,20 @@ function macGetRegion(task: number, address: number): RegionInfo {
   const info = new Uint8Array(36);
   const count = new Uint32Array([VM_REGION_BASIC_INFO_COUNT_64]);
   const port = new Uint32Array(1);
-  base[0] = BigInt(address);
+  base[0] = address;
   if (m.mach_vm_region(
-    task, F.ptr(base), F.ptr(size),
+    task, bp(base), bp(size),
     VM_REGION_BASIC_INFO_64,
-    F.ptr(info), F.ptr(count), F.ptr(port),
+    bp(info), bp(count), bp(port),
   ) !== 0) return r;
 
   const iv = new DataView(info.buffer);
   const protection = iv.getInt32(0, true);
   const shared = iv.getUint32(12, true);
-  const start = Number(base[0]);
-  const stop = start + Number(size[0]);
+  const start = base[0];
+  const stop = start + size[0];
 
-  if (stop > MAC_MAX_VM_64) return r;
+  if (stop > BigInt(MAC_MAX_VM_64)) return r;
 
   r.valid = true;
   r.start = address;
@@ -187,37 +187,37 @@ function macGetRegion(task: number, address: number): RegionInfo {
   return r;
 }
 
-function macRead(task: number, address: number, buf: Uint8Array): number {
+function macRead(task: number, address: bigint, buf: Uint8Array): number {
   const m = mac();
   const F = macFFI();
   if (!m || !F || task === 0 || buf.length === 0) return 0;
   const outSize = new BigUint64Array(1);
   const r = m.mach_vm_read_overwrite(
-    task, BigInt(address), BigInt(buf.length),
-    BigInt(F.ptr(buf) as any), F.ptr(outSize),
+    task, address, BigInt(buf.length),
+    bp(buf), bp(outSize),
   );
   return r === 0 ? Number(outSize[0]) : 0;
 }
 
-function macWrite(task: number, address: number, buf: Uint8Array): number {
+function macWrite(task: number, address: bigint, buf: Uint8Array): number {
   const m = mac();
   const F = macFFI();
   if (!m || !F || task === 0 || buf.length === 0) return 0;
-  const r = m.mach_vm_write(task, BigInt(address), BigInt(F.ptr(buf) as any), buf.length);
+  const r = m.mach_vm_write(task, address, bp(buf), buf.length);
   return r === 0 ? buf.length : 0;
 }
 
 /** Walk all VM regions, returning those that intersect [start, stop). */
-function macQueryRegions(task: number, start: number, stop: number): RegionInfo[] {
+function macQueryRegions(task: number, start: bigint, stop: bigint): RegionInfo[] {
   const out: RegionInfo[] = [];
   if (task === 0) return out;
-  let addr = Math.max(start, 0);
+  let addr = start < 0n ? 0n : start;
   for (;;) {
     if (addr >= stop) break;
     const r = macGetRegion(task, addr);
     if (!r.valid) break;
     if (r.bound) out.push(r);
-    if (r.stop === 0 || r.stop <= addr) break;
+    if (r.stop === 0n || r.stop <= addr) break;
     addr = r.stop;
   }
   return out;
@@ -272,32 +272,46 @@ function winProtectFlags(p: number): { readable: boolean; writable: boolean; exe
   return { readable, writable, executable, guarded, access };
 }
 
+function bitmaskToPageProtect(flags: number): number {
+  const r = (flags & 1) !== 0;
+  const w = (flags & 2) !== 0;
+  const x = (flags & 4) !== 0;
+  if (x) {
+    if (w) return PAGE_EXECUTE_READWRITE;
+    if (r) return PAGE_EXECUTE_READ;
+    return PAGE_EXECUTE;
+  }
+  if (w) return PAGE_READWRITE;
+  if (r) return PAGE_READONLY;
+  return PAGE_NOACCESS;
+}
+
 interface MBI {
-  baseAddress: number;
-  regionSize: number;
+  baseAddress: bigint;
+  regionSize: bigint;
   state: number;
   protect: number;
   type: number;
 }
 
-function winQuery(h: bigint, addr: number): MBI | null {
+function winQuery(h: bigint, addr: bigint): MBI | null {
   const k = kernel32();
   const F = winFFI();
   if (!k || !F) return null;
   const buf = new Uint8Array(MBI_SIZE);
-  const ret = k.VirtualQueryEx(h, BigInt(addr), F.ptr(buf), BigInt(MBI_SIZE));
+  const ret = k.VirtualQueryEx(h, addr, F.ptr(buf), BigInt(MBI_SIZE));
   if (ret === 0n) return null;
   const dv = new DataView(buf.buffer);
   return {
-    baseAddress: Number(dv.getBigUint64(0, true)),
-    regionSize:  Number(dv.getBigUint64(24, true)),
+    baseAddress: dv.getBigUint64(0, true),
+    regionSize:  dv.getBigUint64(24, true),
     state:       dv.getUint32(32, true),
     protect:     dv.getUint32(36, true),
     type:        dv.getUint32(40, true),
   };
 }
 
-function winQueryRegions(pid: number, start: number, stop: number): RegionInfo[] {
+function winQueryRegions(pid: number, start: bigint, stop: bigint): RegionInfo[] {
   const out: RegionInfo[] = [];
   const h = winOpen(pid, PROCESS_QUERY_INFORMATION);
   if (h === 0n) return out;
@@ -319,9 +333,8 @@ function winQueryRegions(pid: number, start: number, stop: number): RegionInfo[]
           access: f.access, private: mbi.type === MEM_PRIVATE, guarded: f.guarded,
         });
       }
-      const next = regionEnd;
-      if (next <= mbi.baseAddress) break;
-      addr = next;
+      if (regionEnd <= mbi.baseAddress) break;
+      addr = regionEnd;
     }
   } finally {
     winClose(h);
@@ -329,7 +342,7 @@ function winQueryRegions(pid: number, start: number, stop: number): RegionInfo[]
   return out;
 }
 
-function winRead(pid: number, addr: number, buf: Uint8Array): number {
+function winRead(pid: number, addr: bigint, buf: Uint8Array): number {
   const k = kernel32();
   const F = winFFI();
   if (!k || !F) return 0;
@@ -337,14 +350,14 @@ function winRead(pid: number, addr: number, buf: Uint8Array): number {
   if (h === 0n) return 0;
   try {
     const n = new BigUint64Array(1);
-    const ok = k.ReadProcessMemory(h, BigInt(addr), F.ptr(buf), BigInt(buf.length), F.ptr(n));
+    const ok = k.ReadProcessMemory(h, addr, F.ptr(buf), BigInt(buf.length), F.ptr(n));
     return ok !== 0 ? Number(n[0]) : 0;
   } finally {
     winClose(h);
   }
 }
 
-function winWrite(pid: number, addr: number, buf: Uint8Array): number {
+function winWrite(pid: number, addr: bigint, buf: Uint8Array): number {
   const k = kernel32();
   const F = winFFI();
   if (!k || !F) return 0;
@@ -352,30 +365,24 @@ function winWrite(pid: number, addr: number, buf: Uint8Array): number {
   if (h === 0n) return 0;
   try {
     const n = new BigUint64Array(1);
-    const ok = k.WriteProcessMemory(h, BigInt(addr), F.ptr(buf), BigInt(buf.length), F.ptr(n));
+    const ok = k.WriteProcessMemory(h, addr, F.ptr(buf), BigInt(buf.length), F.ptr(n));
     return ok !== 0 ? Number(n[0]) : 0;
   } finally {
     winClose(h);
   }
 }
 
-function winSysInfo(): { pageSize: number; minAddr: number; maxAddr: number } {
+function winSysInfo(): { pageSize: number; minAddr: bigint; maxAddr: bigint } {
   const k = kernel32();
   const F = winFFI();
-  if (!k || !F) return { pageSize: 4096, minAddr: 0, maxAddr: 0 };
+  if (!k || !F) return { pageSize: 4096, minAddr: 0n, maxAddr: 0n };
   const buf = new Uint8Array(48);
   k.GetSystemInfo(F.ptr(buf));
   const dv = new DataView(buf.buffer);
-  // SYSTEM_INFO on 64-bit:
-  //   wProcessorArchitecture(u16@0)
-  //   wReserved(u16@2)
-  //   dwPageSize(u32@4)
-  //   lpMinimumApplicationAddress(ptr@8)
-  //   lpMaximumApplicationAddress(ptr@16)
   return {
     pageSize: dv.getUint32(4, true),
-    minAddr:  Number(dv.getBigUint64(8, true)),
-    maxAddr:  Number(dv.getBigUint64(16, true)),
+    minAddr:  dv.getBigUint64(8, true),
+    maxAddr:  dv.getBigUint64(16, true),
   };
 }
 
@@ -420,7 +427,7 @@ export function memory_isValid(pid: number): boolean {
   return false;
 }
 
-export function memory_getRegion(pid: number, address: number): RegionInfo {
+export function memory_getRegion(pid: number, address: bigint): RegionInfo {
   if (IS_LINUX) {
     const regions = parseMaps(pid);
     for (const r of regions) {
@@ -463,9 +470,9 @@ export function memory_getRegion(pid: number, address: number): RegionInfo {
   return emptyRegion();
 }
 
-export function memory_getRegions(pid: number, start?: number, stop?: number): RegionInfo[] {
-  const startAddr = start || 0;
-  const stopAddr = stop || Number.MAX_SAFE_INTEGER;
+export function memory_getRegions(pid: number, start?: bigint, stop?: bigint): RegionInfo[] {
+  const startAddr = start ?? 0n;
+  const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
   if (IS_LINUX) {
     return parseMaps(pid).filter(r => r.stop > startAddr && r.start < stopAddr);
   }
@@ -475,12 +482,13 @@ export function memory_getRegions(pid: number, start?: number, stop?: number): R
   if (IS_MAC) {
     const task = macGetTask(pid);
     if (task === 0) return [];
-    return macQueryRegions(task, startAddr, Math.min(stopAddr, MAC_MAX_VM_64));
+    const macStop = stopAddr < BigInt(MAC_MAX_VM_64) ? stopAddr : BigInt(MAC_MAX_VM_64);
+    return macQueryRegions(task, startAddr, macStop);
   }
   return [];
 }
 
-export function memory_setAccess(pid: number, regionStart: number, readable: boolean, writable: boolean, executable: boolean): boolean {
+export function memory_setAccess(pid: number, regionStart: bigint, readable: boolean, writable: boolean, executable: boolean): boolean {
   if (IS_LINUX) return false;
   if (IS_MAC) {
     let access = 0;
@@ -498,12 +506,12 @@ export function memory_setAccess(pid: number, regionStart: number, readable: boo
     } else if (writable) access = PAGE_READWRITE;
     else if (readable) access = PAGE_READONLY;
     else access = PAGE_NOACCESS;
-    return memory_setAccessFlags(pid, regionStart, access);
+    return winSetAccessFlagsImpl(pid, regionStart, access);
   }
   return false;
 }
 
-export function memory_setAccessFlags(pid: number, regionStart: number, flags: number): boolean {
+export function memory_setAccessFlags(pid: number, regionStart: bigint, flags: number): boolean {
   if (IS_LINUX) return false;
   if (IS_MAC) {
     const m = mac();
@@ -512,25 +520,29 @@ export function memory_setAccessFlags(pid: number, regionStart: number, flags: n
     if (task === 0) return false;
     const region = macGetRegion(task, regionStart);
     if (!region.valid || !region.bound) return false;
-    return m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, flags | 0) === 0;
+    return m.mach_vm_protect(task, region.start, region.size, 0, flags | 0) === 0;
   }
   if (IS_WIN) {
-    const k = kernel32();
-    const F = winFFI();
-    if (!k || !F) return false;
-    const h = winOpen(pid, PROCESS_VM_OPERATION);
-    if (h === 0n) return false;
-    try {
-      const mbi = winQuery(h, regionStart);
-      if (!mbi || mbi.state !== MEM_COMMIT) return false;
-      const oldProt = new Uint32Array(1);
-      const ok = k.VirtualProtectEx(h, BigInt(mbi.baseAddress), BigInt(mbi.regionSize), flags >>> 0, F.ptr(oldProt));
-      return ok !== 0;
-    } finally {
-      winClose(h);
-    }
+    return winSetAccessFlagsImpl(pid, regionStart, bitmaskToPageProtect(flags));
   }
   return false;
+}
+
+function winSetAccessFlagsImpl(pid: number, regionStart: bigint, pageProtect: number): boolean {
+  const k = kernel32();
+  const F = winFFI();
+  if (!k || !F) return false;
+  const h = winOpen(pid, PROCESS_VM_OPERATION);
+  if (h === 0n) return false;
+  try {
+    const mbi = winQuery(h, regionStart);
+    if (!mbi || mbi.state !== MEM_COMMIT) return false;
+    const oldProt = new Uint32Array(1);
+    const ok = k.VirtualProtectEx(h, mbi.baseAddress, mbi.regionSize, pageProtect >>> 0, F.ptr(oldProt));
+    return ok !== 0;
+  } finally {
+    winClose(h);
+  }
 }
 
 export function memory_getPtrSize(pid: number): number {
@@ -538,16 +550,11 @@ export function memory_getPtrSize(pid: number): number {
     const m = mac();
     const F = macFFI();
     if (!m || !F || pid <= 0) return 0;
-    // proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO=13, 0, buf, 232) fills a
-    // 232-byte proc_bsdshortinfo.  Bit 0x04 of pbsi_flags (@offset 48) is
-    // P_LP64; on modern arm64 macOS the kernel doesn't reliably set it,
-    // so treat any successful call as 64-bit.
     const buf = new Uint8Array(232);
-    const ret = m.proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0n, F.ptr(buf), buf.length);
+    const ret = m.proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0n, bp(buf), buf.length);
     if (ret > 0) {
       const flags = new DataView(buf.buffer).getUint32(48, true);
       if ((flags & 0x04) !== 0) return 8;
-      // Fall back to "64-bit on modern macOS".
       return 8;
     }
     return 8;
@@ -582,24 +589,24 @@ export function memory_getPtrSize(pid: number): number {
   return 0;
 }
 
-export function memory_getMinAddress(pid: number): number {
+export function memory_getMinAddress(pid: number): bigint {
   if (IS_LINUX) {
     const regions = parseMaps(pid);
-    return regions.length > 0 ? regions[0].start : 0;
+    return regions.length > 0 ? regions[0].start : 0n;
   }
   if (IS_WIN) return winSysInfo().minAddr;
-  if (IS_MAC) return MAC_MIN_VM;
-  return 0;
+  if (IS_MAC) return BigInt(MAC_MIN_VM);
+  return 0n;
 }
 
-export function memory_getMaxAddress(pid: number): number {
+export function memory_getMaxAddress(pid: number): bigint {
   if (IS_LINUX) {
     const regions = parseMaps(pid);
-    return regions.length > 0 ? regions[regions.length - 1].stop : 0;
+    return regions.length > 0 ? regions[regions.length - 1].stop : 0n;
   }
   if (IS_WIN) return winSysInfo().maxAddr;
-  if (IS_MAC) return MAC_MAX_VM_64;
-  return 0;
+  if (IS_MAC) return BigInt(MAC_MAX_VM_64);
+  return 0n;
 }
 
 export function memory_getPageSize(_pid: number): number {
@@ -618,25 +625,25 @@ export function memory_getPageSize(_pid: number): number {
 
 export function memory_find(
   pid: number, pattern: string,
-  start?: number, stop?: number,
+  start?: bigint, stop?: bigint,
   limit?: number, _flags?: string,
-): number[] {
-  const startAddr = start || 0;
-  const stopAddr = stop || Number.MAX_SAFE_INTEGER;
+): bigint[] {
+  const startAddr = start ?? 0n;
+  const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
   const max = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
   const pat = parsePattern(pattern);
-  const out: number[] = [];
+  const out: bigint[] = [];
   if (pat.length === 0) return out;
 
   const macTask = IS_MAC ? macGetTask(pid) : 0;
   const regions = IS_LINUX ? parseMaps(pid)
     : IS_WIN ? winQueryRegions(pid, startAddr, stopAddr)
-    : IS_MAC ? macQueryRegions(macTask, startAddr, Math.min(stopAddr, MAC_MAX_VM_64))
+    : IS_MAC ? macQueryRegions(macTask, startAddr, stopAddr < BigInt(MAC_MAX_VM_64) ? stopAddr : BigInt(MAC_MAX_VM_64))
     : [];
 
   const reader = IS_LINUX ? linuxRead
     : IS_WIN ? winRead
-    : IS_MAC ? ((_pid: number, addr: number, buf: Uint8Array) => macRead(macTask, addr, buf))
+    : IS_MAC ? ((_pid: number, addr: bigint, buf: Uint8Array) => macRead(macTask, addr, buf))
     : null;
   if (!reader) return out;
 
@@ -646,9 +653,9 @@ export function memory_find(
     if (out.length >= max) break;
     if (!region.readable) continue;
     if (region.stop <= startAddr || region.start >= stopAddr) continue;
-    const readStart = Math.max(region.start, startAddr);
-    const readEnd = Math.min(region.stop, stopAddr);
-    const readSize = readEnd - readStart;
+    const readStart = region.start > startAddr ? region.start : startAddr;
+    const readEnd = region.stop < stopAddr ? region.stop : stopAddr;
+    const readSize = Number(readEnd - readStart);
     if (readSize <= 0 || readSize > CHUNK_CAP) continue;
     const buf = new Uint8Array(readSize);
     const got = reader(pid, readStart, buf);
@@ -656,13 +663,13 @@ export function memory_find(
     const hits = findInBuffer(buf, got, pat);
     for (const off of hits) {
       if (out.length >= max) break;
-      out.push(readStart + off);
+      out.push(readStart + BigInt(off));
     }
   }
   return out;
 }
 
-export function memory_readData(pid: number, address: number, length: number, flags?: number): Buffer | null {
+export function memory_readData(pid: number, address: bigint, length: number, flags?: number): Buffer | null {
   const len = length | 0;
   if (len <= 0) return null;
   const f = flags === undefined ? FLAG_DEFAULT : flags;
@@ -675,7 +682,7 @@ export function memory_readData(pid: number, address: number, length: number, fl
     }
     // SKIP_ERRORS / AUTO_ACCESS
     const buf = new Uint8Array(len);
-    const stop = address + len;
+    const stop = address + BigInt(len);
     const regions = parseMaps(pid);
     let bytes = 0;
     let a = address;
@@ -685,14 +692,14 @@ export function memory_readData(pid: number, address: number, length: number, fl
       if (idx >= regions.length) break;
       const region = regions[idx];
       if (region.start > a) {
-        const gapEnd = Math.min(region.start, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.start < stop ? region.start : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
         continue;
       }
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       if (region.readable) {
         const slice = new Uint8Array(regionLen);
         const n = linuxRead(pid, a, slice);
@@ -702,7 +709,7 @@ export function memory_readData(pid: number, address: number, length: number, fl
       a = end;
       idx++;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
   }
 
@@ -714,33 +721,32 @@ export function memory_readData(pid: number, address: number, length: number, fl
       const got = macRead(task, address, buf);
       return got > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
     }
-    // SkipErrors / AutoAccess — walk regions one at a time via mach_vm_region.
     const m = mac();
     const buf = new Uint8Array(len);
-    const stop = address + len;
+    const stop = address + BigInt(len);
     let bytes = 0;
     let a = address;
     while (a < stop) {
       const region = macGetRegion(task, a);
       if (!region.valid) break;
       if (!region.bound) {
-        const gapEnd = Math.min(region.stop, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.stop < stop ? region.stop : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
-        if (a === 0 || region.stop === 0) break;
+        if (a === 0n || region.stop === 0n) break;
         continue;
       }
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       let readable = region.readable;
       if (!readable && f === FLAG_AUTO_ACCESS && m) {
-        if (m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, VM_PROT_READ) === 0) {
+        if (m.mach_vm_protect(task, region.start, region.size, 0, VM_PROT_READ) === 0) {
           readable = true;
           const slice = new Uint8Array(regionLen);
           const n = macRead(task, a, slice);
           if (n > 0) buf.set(slice.subarray(0, n), offset);
-          m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, region.access | 0);
+          m.mach_vm_protect(task, region.start, region.size, 0, region.access | 0);
         }
       } else if (readable) {
         const slice = new Uint8Array(regionLen);
@@ -750,7 +756,7 @@ export function memory_readData(pid: number, address: number, length: number, fl
       bytes += regionLen;
       a = end;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
   }
 
@@ -761,21 +767,21 @@ export function memory_readData(pid: number, address: number, length: number, fl
       return got > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
     }
     const buf = new Uint8Array(len);
-    const stop = address + len;
+    const stop = address + BigInt(len);
     const regions = winQueryRegions(pid, address, stop);
     let bytes = 0;
     let a = address;
     for (const region of regions) {
       if (a >= stop) break;
       if (region.start > a) {
-        const gapEnd = Math.min(region.start, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.start < stop ? region.start : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
       }
       if (a >= stop) break;
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       let readable = region.readable;
       if (!readable && f === FLAG_AUTO_ACCESS) {
         const k = kernel32();
@@ -785,12 +791,12 @@ export function memory_readData(pid: number, address: number, length: number, fl
           if (h !== 0n) {
             try {
               const oldProt = new Uint32Array(1);
-              if (k.VirtualProtectEx(h, BigInt(a), BigInt(regionLen), PAGE_READONLY, F.ptr(oldProt)) !== 0) {
+              if (k.VirtualProtectEx(h, a, BigInt(regionLen), PAGE_READONLY, F.ptr(oldProt)) !== 0) {
                 readable = true;
                 const slice = new Uint8Array(regionLen);
                 const n = winRead(pid, a, slice);
                 if (n > 0) buf.set(slice.subarray(0, n), offset);
-                k.VirtualProtectEx(h, BigInt(a), BigInt(regionLen), oldProt[0], F.ptr(oldProt));
+                k.VirtualProtectEx(h, a, BigInt(regionLen), oldProt[0], F.ptr(oldProt));
               }
             } finally {
               winClose(h);
@@ -805,14 +811,14 @@ export function memory_readData(pid: number, address: number, length: number, fl
       bytes += regionLen;
       a = end;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
   }
 
   throw new Error("memory: not implemented on this platform");
 }
 
-export function memory_writeData(pid: number, address: number, data: Buffer | Uint8Array, flags?: number): number {
+export function memory_writeData(pid: number, address: bigint, data: Buffer | Uint8Array, flags?: number): number {
   const f = flags === undefined ? FLAG_DEFAULT : flags;
   const buf: Uint8Array = data;
   const len = buf.length;
@@ -820,7 +826,7 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
 
   if (IS_LINUX) {
     if (f === FLAG_DEFAULT) return linuxWrite(pid, address, buf);
-    const stop = address + len;
+    const stop = address + BigInt(len);
     const regions = parseMaps(pid);
     let bytes = 0;
     let a = address;
@@ -828,21 +834,21 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
       if (a >= stop) break;
       if (region.stop <= a) continue;
       if (region.start > a) {
-        const gapEnd = Math.min(region.start, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.start < stop ? region.start : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
       }
       if (a >= stop) break;
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       if (region.writable) {
         linuxWrite(pid, a, buf.subarray(offset, offset + regionLen));
       }
       bytes += regionLen;
       a = end;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes;
   }
 
@@ -851,28 +857,28 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
     if (task === 0) return 0;
     if (f === FLAG_DEFAULT) return macWrite(task, address, buf);
     const m = mac();
-    const stop = address + len;
+    const stop = address + BigInt(len);
     let bytes = 0;
     let a = address;
     while (a < stop) {
       const region = macGetRegion(task, a);
       if (!region.valid) break;
       if (!region.bound) {
-        const gapEnd = Math.min(region.stop, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.stop < stop ? region.stop : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
-        if (a === 0 || region.stop === 0) break;
+        if (a === 0n || region.stop === 0n) break;
         continue;
       }
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       let writable = region.writable;
       if (!writable && f === FLAG_AUTO_ACCESS && m) {
-        if (m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, VM_PROT_READ | VM_PROT_WRITE) === 0) {
+        if (m.mach_vm_protect(task, region.start, region.size, 0, VM_PROT_READ | VM_PROT_WRITE) === 0) {
           writable = true;
           macWrite(task, a, buf.subarray(offset, offset + regionLen));
-          m.mach_vm_protect(task, BigInt(region.start), BigInt(region.size), 0, region.access | 0);
+          m.mach_vm_protect(task, region.start, region.size, 0, region.access | 0);
         }
       } else if (writable) {
         macWrite(task, a, buf.subarray(offset, offset + regionLen));
@@ -880,27 +886,27 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
       bytes += regionLen;
       a = end;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes;
   }
 
   if (IS_WIN) {
     if (f === FLAG_DEFAULT) return winWrite(pid, address, buf);
-    const stop = address + len;
+    const stop = address + BigInt(len);
     const regions = winQueryRegions(pid, address, stop);
     let bytes = 0;
     let a = address;
     for (const region of regions) {
       if (a >= stop) break;
       if (region.start > a) {
-        const gapEnd = Math.min(region.start, stop);
-        bytes += gapEnd - a;
+        const gapEnd = region.start < stop ? region.start : stop;
+        bytes += Number(gapEnd - a);
         a = gapEnd;
       }
       if (a >= stop) break;
-      const end = Math.min(region.stop, stop);
-      const regionLen = end - a;
-      const offset = a - address;
+      const end = region.stop < stop ? region.stop : stop;
+      const regionLen = Number(end - a);
+      const offset = Number(a - address);
       let writable = region.writable;
       if (!writable && f === FLAG_AUTO_ACCESS) {
         const k = kernel32();
@@ -910,10 +916,10 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
           if (h !== 0n) {
             try {
               const oldProt = new Uint32Array(1);
-              if (k.VirtualProtectEx(h, BigInt(a), BigInt(regionLen), PAGE_READWRITE, F.ptr(oldProt)) !== 0) {
+              if (k.VirtualProtectEx(h, a, BigInt(regionLen), PAGE_READWRITE, F.ptr(oldProt)) !== 0) {
                 writable = true;
                 winWrite(pid, a, buf.subarray(offset, offset + regionLen));
-                k.VirtualProtectEx(h, BigInt(a), BigInt(regionLen), oldProt[0], F.ptr(oldProt));
+                k.VirtualProtectEx(h, a, BigInt(regionLen), oldProt[0], F.ptr(oldProt));
               }
             } finally {
               winClose(h);
@@ -926,17 +932,9 @@ export function memory_writeData(pid: number, address: number, data: Buffer | Ui
       bytes += regionLen;
       a = end;
     }
-    bytes += Math.max(0, stop - a);
+    bytes += Number(stop > a ? stop - a : 0n);
     return bytes;
   }
 
   throw new Error("memory: not implemented on this platform");
 }
-
-// ── Cache stubs (match napi behavior) ─────────────────────────────────
-
-export function memory_createCache(_pid: number, _addr: number, _size: number, _block: number, _max?: number, _flags?: number): boolean { return false; }
-export function memory_clearCache(_pid: number): void { /* no-op */ }
-export function memory_deleteCache(_pid: number): void { /* no-op */ }
-export function memory_isCaching(_pid: number): boolean { return false; }
-export function memory_getCacheSize(_pid: number): number { return 0; }
