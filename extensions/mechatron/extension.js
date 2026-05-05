@@ -378,79 +378,90 @@ export default class MechatronWMExtension extends Extension {
     const ext = this;
     const inputNodeInfo = Gio.DBusNodeInfo.new_for_xml(INPUT_IFACE_XML);
     const inputIfaceInfo = inputNodeInfo.interfaces[0];
-    this._dbusInput = Gio.DBusExportedObject.wrapJSObject(inputIfaceInfo, {
-      KeyboardKeysym(token, keysym, pressed) {
-        requireAuth(token);
-        ext._ensureVirtualDevices();
-        const time = inputTime();
-        const state = pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
-        ext._virtualKeyboard.notify_keyval(time, keysym, state);
-        return true;
-      },
 
-      KeyboardKey(token, key, pressed) {
-        requireAuth(token);
-        ext._ensureVirtualDevices();
-        const time = inputTime();
-        const state = pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
-        ext._virtualKeyboard.notify_key(time, key, state);
-        return true;
-      },
-
-      PointerButton(token, button, pressed) {
-        requireAuth(token);
-        ext._ensureVirtualDevices();
-        const time = inputTime();
-        const state = pressed ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED;
-        ext._virtualPointer.notify_button(time, button, state);
-        return true;
-      },
-
-      PointerMotionAbsolute(token, x, y) {
-        requireAuth(token);
-        ext._ensureVirtualDevices();
-        const time = inputTime();
-        ext._virtualPointer.notify_absolute_motion(time, x, y);
-        return true;
-      },
-
-      PointerMotion(token, dx, dy) {
-        requireAuth(token);
-        ext._ensureVirtualDevices();
-        const time = inputTime();
-        ext._virtualPointer.notify_relative_motion(time, dx, dy);
-        return true;
-      },
-
-      PointerAxisDiscrete(token, axis, steps) {
-        requireAuth(token);
-        ext._ensureVirtualDevices();
-        const time = inputTime();
-        const absSteps = Math.abs(steps);
-        let direction;
-        if (axis === 0) {
-          direction = steps > 0
-            ? Clutter.ScrollDirection.DOWN
-            : Clutter.ScrollDirection.UP;
-        } else {
-          direction = steps > 0
-            ? Clutter.ScrollDirection.RIGHT
-            : Clutter.ScrollDirection.LEFT;
+    // Use register_object instead of wrapJSObject so we control when the
+    // D-Bus reply is sent.  Input events dispatched through Clutter virtual
+    // devices are processed asynchronously on the GLib main loop; deferring
+    // the reply to the next idle callback ensures the event has been applied
+    // before the caller sees the response (analogous to XSync after XWarpPointer).
+    function deferReply(invocation, variant) {
+      GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+        invocation.return_value(variant);
+        return GLib.SOURCE_REMOVE;
+      });
+    }
+    const OK_TRUE = new GLib.Variant("(b)", [true]);
+    this._dbusInputRegId = Gio.DBus.session.register_object(
+      OBJECT_PATH,
+      inputIfaceInfo,
+      (conn, sender, path, iface, method, params, invocation) => {
+        try {
+          const args = params.deep_unpack();
+          if (method === "GetPointerPos") {
+            requireAuth(args[0]);
+            const [x, y] = global.get_pointer();
+            invocation.return_value(new GLib.Variant("(dd)", [x, y]));
+            return;
+          }
+          const token = args[0];
+          requireAuth(token);
+          ext._ensureVirtualDevices();
+          const time = inputTime();
+          switch (method) {
+            case "KeyboardKeysym": {
+              const state = args[2] ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
+              ext._virtualKeyboard.notify_keyval(time, args[1], state);
+              break;
+            }
+            case "KeyboardKey": {
+              const state = args[2] ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
+              ext._virtualKeyboard.notify_key(time, args[1], state);
+              break;
+            }
+            case "PointerButton": {
+              const state = args[2] ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED;
+              ext._virtualPointer.notify_button(time, args[1], state);
+              break;
+            }
+            case "PointerMotionAbsolute":
+              ext._virtualPointer.notify_absolute_motion(time, args[1], args[2]);
+              break;
+            case "PointerMotion":
+              ext._virtualPointer.notify_relative_motion(time, args[1], args[2]);
+              break;
+            case "PointerAxisDiscrete": {
+              const axis = args[1];
+              const steps = args[2];
+              const absSteps = Math.abs(steps);
+              let direction;
+              if (axis === 0) {
+                direction = steps > 0
+                  ? Clutter.ScrollDirection.DOWN
+                  : Clutter.ScrollDirection.UP;
+              } else {
+                direction = steps > 0
+                  ? Clutter.ScrollDirection.RIGHT
+                  : Clutter.ScrollDirection.LEFT;
+              }
+              for (let i = 0; i < absSteps; i++) {
+                ext._virtualPointer.notify_discrete_scroll(time, direction,
+                  Clutter.ScrollFinishFlags.NONE);
+              }
+              break;
+            }
+            default:
+              invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.UnknownMethod", method);
+              return;
+          }
+          deferReply(invocation, OK_TRUE);
+        } catch (e) {
+          invocation.return_dbus_error(
+            "org.freedesktop.DBus.Error.Failed", String(e));
         }
-        for (let i = 0; i < absSteps; i++) {
-          ext._virtualPointer.notify_discrete_scroll(time, direction,
-            Clutter.ScrollFinishFlags.NONE);
-        }
-        return true;
       },
-
-      GetPointerPos(token) {
-        requireAuth(token);
-        const [x, y] = global.get_pointer();
-        return [x, y];
-      },
-    });
-    this._dbusInput.export(Gio.DBus.session, OBJECT_PATH);
+      null, null,
+    );
 
     this._ownerId = Gio.bus_own_name(
       Gio.BusType.SESSION,
@@ -463,9 +474,9 @@ export default class MechatronWMExtension extends Extension {
   }
 
   disable() {
-    if (this._dbusInput) {
-      this._dbusInput.unexport();
-      this._dbusInput = null;
+    if (this._dbusInputRegId) {
+      Gio.DBus.session.unregister_object(this._dbusInputRegId);
+      this._dbusInputRegId = 0;
     }
     if (this._dbus) {
       this._dbus.unexport();

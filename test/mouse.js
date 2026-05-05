@@ -71,7 +71,6 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				assert(p.x === 100 && p.y === 200,
 					"setPos 100,200: got " + p.x + "," + p.y);
 				await Mouse.setPos(50, 50);
-				mechatron.Timer.sleep(10);
 				p = await Mouse.getPos();
 				assert(p.x === 50 && p.y === 50,
 					"setPos 50,50: got " + p.x + "," + p.y);
