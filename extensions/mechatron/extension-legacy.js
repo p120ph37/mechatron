@@ -359,13 +359,36 @@ class MechatronWMExtension {
     // Use register_object instead of wrapJSObject so we control when the
     // D-Bus reply is sent.  Input events dispatched through Clutter virtual
     // devices are processed asynchronously on the GLib main loop; deferring
-    // the reply to the next idle callback ensures the event has been applied
-    // before the caller sees the response (analogous to XSync after XWarpPointer).
+    // the reply ensures the event has been applied before the caller sees
+    // the response (analogous to XSync after XWarpPointer).
     function deferReply(invocation, variant) {
       GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
         invocation.return_value(variant);
         return GLib.SOURCE_REMOVE;
       });
+    }
+    // For PointerMotionAbsolute we additionally poll the actual pointer
+    // position until it matches the target (or a short timeout elapses).
+    // notify_absolute_motion goes through Clutter's input thread before
+    // landing in the main thread's seat state, so a single idle pass may
+    // not be enough on slow runners.
+    function deferReplyAfterWarp(invocation, targetX, targetY) {
+      const startTime = GLib.get_monotonic_time();
+      const TIMEOUT_US = 500 * 1000; // 500ms
+      const tick = () => {
+        const [px, py] = global.get_pointer();
+        if (Math.round(px) === Math.round(targetX) &&
+            Math.round(py) === Math.round(targetY)) {
+          invocation.return_value(OK_TRUE);
+          return GLib.SOURCE_REMOVE;
+        }
+        if (GLib.get_monotonic_time() - startTime > TIMEOUT_US) {
+          invocation.return_value(OK_TRUE);
+          return GLib.SOURCE_REMOVE;
+        }
+        return GLib.SOURCE_CONTINUE;
+      };
+      GLib.timeout_add(GLib.PRIORITY_DEFAULT, 5, tick);
     }
     const OK_TRUE = new GLib.Variant("(b)", [true]);
     this._dbusInputRegId = Gio.DBus.session.register_object(
@@ -402,7 +425,8 @@ class MechatronWMExtension {
             }
             case "PointerMotionAbsolute":
               ext._virtualPointer.notify_absolute_motion(time, args[1], args[2]);
-              break;
+              deferReplyAfterWarp(invocation, args[1], args[2]);
+              return;
             case "PointerMotion":
               ext._virtualPointer.notify_relative_motion(time, args[1], args[2]);
               break;
