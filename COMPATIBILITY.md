@@ -22,7 +22,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | linux-napi[portal] | Pre-built Rust .node binary | Linux/Wayland | libei + RemoteDesktop portal |
 | linux-ffi[x11] | bun:ffi | Linux (X11/EWMH) | Requires libX11; XTest for input |
 | linux-nolib[x11] | Pure TS (xproto wire) | Any OS with $DISPLAY | No native libraries at all |
-| linux-nolib[portal] | Pure TS (D-Bus) | Linux/Wayland | RemoteDesktop + ScreenCast portals; AT-SPI2 (read-only) for windows |
+| linux-nolib[portal] | Pure TS (D-Bus) | Linux/Wayland | RemoteDesktop + Screenshot portals; AT-SPI2 (read-only) for windows |
 | linux-nolib[gext] | Pure TS (D-Bus) | Linux/GNOME | Mechatron GNOME Shell extension; full window mgmt without portal popups |
 | linux-nolib[vt] | Pure TS (uinput + fb) | Linux VT / headless | /dev/uinput + /dev/fb0 |
 | linux-nolib[sh] | Pure TS (subprocess) | Linux | xclip/xsel/wl-copy; clipboard only |

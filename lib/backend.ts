@@ -14,7 +14,7 @@
  * Variants (apply to all backends on Linux):
  *   - **x11**:    X11-based (napi: libX11/libXtst, ffi: dlopen, nolib: xproto).
  *   - **portal**: Wayland portal (napi: libei, ffi: dlopen libei,
- *                 nolib: D-Bus RemoteDesktop + ScreenCast).
+ *                 nolib: D-Bus RemoteDesktop + Screenshot).
  *   - **vt**:     Device-level (nolib only: uinput + framebuffer).
  *
  * On non-Linux, variants are ignored — napi/ffi use native OS APIs directly.
