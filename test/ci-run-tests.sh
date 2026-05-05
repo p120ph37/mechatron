@@ -85,11 +85,29 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   NODE_VERSION=$(node -v)
   curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
   unzip -q "node-${NODE_VERSION}-win-x86.zip"
+  IA32_NODE="./node-${NODE_VERSION}-win-x86/node"
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}.xml"
   REPORT_DIR="${RUNNER_TEMP}/node-reports"
-  mkdir -p "$REPORT_DIR"
+  DUMP_DIR="${RUNNER_TEMP}/dumps"
+  mkdir -p "$REPORT_DIR" "$DUMP_DIR"
+
+  # Configure Windows Error Reporting to write a full minidump for any
+  # process crash into $DUMP_DIR.  This catches the intermittent
+  # shutdown segfault (napi-rs cdylib unload on ia32, see napi-rs #297
+  # and #1145) which Node's --report-on-fatalerror handler cannot —
+  # the crash happens after Node's main thread returns, in CRT/loader
+  # cleanup.  Requires admin (CI runners run as admin).
+  WIN_DUMP_DIR=$(cygpath -w "$DUMP_DIR" 2>/dev/null || echo "$DUMP_DIR")
+  reg add 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps' \
+    /v DumpFolder /t REG_EXPAND_SZ /d "$WIN_DUMP_DIR" /f >/dev/null
+  reg add 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps' \
+    /v DumpType /t REG_DWORD /d 2 /f >/dev/null
+  reg add 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps' \
+    /v DumpCount /t REG_DWORD /d 30 /f >/dev/null
+
+  # Canonical run — produces JUnit and is the cell's pass/fail status.
   RC=0
-  run_and_log ./node-${NODE_VERSION}-win-x86/node \
+  run_and_log "$IA32_NODE" \
     --report-on-fatalerror --report-directory="$REPORT_DIR" \
     test/test.js all --backend napi --junit "$JUNIT_FILE" \
     || RC=$?
@@ -102,8 +120,70 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
       cat "$rpt"
     done
   fi
+
+  # Diagnostic crash-bait loop: re-run the memory test up to 20 times
+  # without --junit (so the canonical XML is preserved) to surface the
+  # intermittent shutdown segfault even when the canonical run passed.
+  # First crash breaks the loop so we capture a clean dump for analysis.
+  echo ">>> [ia32] crash-bait loop (memory test, 20 iterations)"
+  BAIT_RC=0
+  for i in $(seq 1 20); do
+    iter_rc=0
+    "$IA32_NODE" test/test.js memory --backend napi >/dev/null 2>&1 || iter_rc=$?
+    if [ "$iter_rc" != 0 ]; then
+      echo ">>> [ia32] crash-bait iteration $i exited rc=$iter_rc"
+      BAIT_RC=$iter_rc
+      break
+    fi
+    [ $((i % 5)) -eq 0 ] && echo ">>> [ia32] crash-bait $i/20 clean"
+  done
+  if [ "$BAIT_RC" = 0 ]; then
+    echo ">>> [ia32] crash-bait loop completed 20/20 without crash"
+  fi
+
+  # Analyze any captured minidumps with cdb !analyze.  The Windows SDK's
+  # debugger ships in the GitHub-hosted runner image; pick the right
+  # arch-flavoured cdb that matches our ia32 binaries.
+  shopt -s nullglob
+  DUMPS=("$DUMP_DIR"/*.dmp)
+  shopt -u nullglob
+  if [ ${#DUMPS[@]} -gt 0 ]; then
+    CDB=""
+    for candidate in \
+      "C:/Program Files (x86)/Windows Kits/10/Debuggers/x86/cdb.exe" \
+      "C:/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe"; do
+      if [ -x "$candidate" ]; then CDB="$candidate"; break; fi
+    done
+    if [ -n "$CDB" ]; then
+      # Symbol path: our PDBs (next to the .node files) plus Microsoft's
+      # public symbol server for ntdll/kernel32 frames.
+      MECH_PDB_DIRS=$(pwd)/napi/keyboard
+      for s in mouse clipboard screen window process memory; do
+        MECH_PDB_DIRS="$MECH_PDB_DIRS;$(pwd)/napi/$s"
+      done
+      MS_SYMBOLS="srv*${RUNNER_TEMP}\\symbols*https://msdl.microsoft.com/download/symbols"
+      SYM_PATH="${MECH_PDB_DIRS};${MS_SYMBOLS}"
+      for dump in "${DUMPS[@]}"; do
+        echo "=== ia32 minidump analysis: $(basename "$dump") ==="
+        "$CDB" -y "$SYM_PATH" -lines -z "$dump" -c '!analyze -v; ~*kvn 30; lm vm; q' \
+          2>&1 | tee -a "$TEST_LOG" || true
+        echo "=== end minidump analysis ==="
+      done
+    else
+      echo ">>> [ia32] cdb.exe not found; minidumps preserved for offline analysis"
+    fi
+  else
+    echo ">>> [ia32] no minidumps captured"
+  fi
+
+  # Surface bait-loop crash in the cell exit code.  The canonical RC
+  # (with JUnit) is preserved; if it already failed, that wins.  If the
+  # canonical run passed but the bait loop triggered a crash, fail the
+  # cell anyway so the CI status reflects the captured dump.
+  if [ "$RC" = 0 ] && [ "$BAIT_RC" != 0 ]; then RC=$BAIT_RC; fi
+
   guard_junit "$RC" "$JUNIT_FILE" "ia32" \
-    "node exited rc=$RC after writing JUnit (likely a shutdown crash; see test-output.txt and node-reports)."
+    "node exited rc=$RC after writing JUnit (likely a shutdown crash; see test-output.txt, node-reports, and dumps)."
   exit "$RC"
 fi
 

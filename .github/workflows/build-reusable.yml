@@ -150,6 +150,11 @@ jobs:
           SUBS="keyboard mouse clipboard screen window process memory"
           cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
+            # Keep debug info on Windows ia32 so crash-dump !analyze can
+            # produce real stack frames for the intermittent shutdown
+            # segfault (see test/ci-run-tests.sh diagnostic loop).
+            export CARGO_PROFILE_RELEASE_DEBUG=2
+            export CARGO_PROFILE_RELEASE_STRIP=none
             CARGO_TARGET=i686-pc-windows-msvc
             cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
             TARGET_DIR="target/$CARGO_TARGET/release"
@@ -181,6 +186,15 @@ jobs:
             cp "$SRC" "$s/$DST_NAME"
             # Copy into packages/@mechatronic/napi-<sub>/ (for published layout)
             cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            # On Windows ia32, copy the .pdb alongside so the loaded .node
+            # has matching debug symbols available for crash-dump analysis.
+            if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.arch }}" = "ia32" ]; then
+              PDB_SRC="$TARGET_DIR/mechatron_${s}.pdb"
+              if [ -f "$PDB_SRC" ]; then
+                cp "$PDB_SRC" "$s/"
+                cp "$PDB_SRC" "../packages/@mechatronic/napi-${s}/"
+              fi
+            fi
             # Re-sign macOS binaries (strip="symbols" invalidates ad-hoc signature;
             # task_for_pid requires a valid signature even when running as root)
             if [ "${{ runner.os }}" = "macOS" ]; then
@@ -323,6 +337,7 @@ jobs:
             ${{ runner.temp }}/exercised/
             ${{ runner.temp }}/node-reports/
             ${{ runner.temp }}/portal-screenshots/
+            ${{ runner.temp }}/dumps/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v7
