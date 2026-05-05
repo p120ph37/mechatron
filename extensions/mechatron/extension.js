@@ -390,6 +390,39 @@ export default class MechatronWMExtension extends Extension {
         return GLib.SOURCE_REMOVE;
       });
     }
+    // For PointerMotionAbsolute we wait for the actual motion event to flow
+    // through the stage before replying.  notify_absolute_motion enqueues an
+    // event in Clutter's input queue that is dispatched asynchronously from
+    // the GLib main loop; the reply must be deferred until the event has
+    // been processed (and global.get_pointer() reflects the new position).
+    // Using captured-event with a coordinate match avoids polling.  A 500ms
+    // safety timeout prevents indefinite waits if the event is dropped (e.g.
+    // when the warp coordinates are clamped to monitor bounds).
+    function deferReplyAfterMotion(invocation, targetX, targetY) {
+      const stage = global.stage;
+      let handlerId = 0;
+      let timeoutId = 0;
+      const finish = () => {
+        if (handlerId) { stage.disconnect(handlerId); handlerId = 0; }
+        if (timeoutId) { GLib.source_remove(timeoutId); timeoutId = 0; }
+        invocation.return_value(OK_TRUE);
+      };
+      handlerId = stage.connect("captured-event", (_s, event) => {
+        if (event.type() === Clutter.EventType.MOTION) {
+          const [x, y] = event.get_coords();
+          if (Math.round(x) === Math.round(targetX) &&
+              Math.round(y) === Math.round(targetY)) {
+            finish();
+          }
+        }
+        return Clutter.EVENT_PROPAGATE;
+      });
+      timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+        timeoutId = 0;
+        finish();
+        return GLib.SOURCE_REMOVE;
+      });
+    }
     const OK_TRUE = new GLib.Variant("(b)", [true]);
     this._dbusInputRegId = Gio.DBus.session.register_object(
       OBJECT_PATH,
@@ -424,13 +457,8 @@ export default class MechatronWMExtension extends Extension {
               break;
             }
             case "PointerMotionAbsolute":
-              // warp_pointer is a synchronous backend call that updates
-              // the seat's pointer position before returning, so the next
-              // global.get_pointer() reads the new value immediately.
-              // Avoids the input-thread queueing race that affects
-              // notify_absolute_motion.
-              Meta.get_backend().warp_pointer(args[1], args[2]);
-              invocation.return_value(OK_TRUE);
+              ext._virtualPointer.notify_absolute_motion(time, args[1], args[2]);
+              deferReplyAfterMotion(invocation, args[1], args[2]);
               return;
             case "PointerMotion":
               ext._virtualPointer.notify_relative_motion(time, args[1], args[2]);
