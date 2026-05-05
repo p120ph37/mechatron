@@ -429,7 +429,7 @@ export default class MechatronWMExtension extends Extension {
               // global.get_pointer() reads the new value immediately.
               // Avoids the input-thread queueing race that affects
               // notify_absolute_motion.
-              Meta.Backend.get_default().warp_pointer(args[1], args[2]);
+              Meta.get_backend().warp_pointer(args[1], args[2]);
               invocation.return_value(OK_TRUE);
               return;
             case "PointerMotion":
