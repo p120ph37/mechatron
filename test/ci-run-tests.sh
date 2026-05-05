@@ -97,13 +97,18 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   # and #1145) which Node's --report-on-fatalerror handler cannot —
   # the crash happens after Node's main thread returns, in CRT/loader
   # cleanup.  Requires admin (CI runners run as admin).
+  #
+  # Use PowerShell rather than reg.exe because Git Bash's MSYS layer
+  # path-translates backslash-prefixed arguments, mangling the
+  # 'HKLM\SOFTWARE\...' key path before reg.exe sees it.
   WIN_DUMP_DIR=$(cygpath -w "$DUMP_DIR" 2>/dev/null || echo "$DUMP_DIR")
-  reg add 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps' \
-    /v DumpFolder /t REG_EXPAND_SZ /d "$WIN_DUMP_DIR" /f >/dev/null
-  reg add 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps' \
-    /v DumpType /t REG_DWORD /d 2 /f >/dev/null
-  reg add 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps' \
-    /v DumpCount /t REG_DWORD /d 30 /f >/dev/null
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "
+    \$k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps';
+    if (-not (Test-Path \$k)) { New-Item -Path \$k -Force | Out-Null };
+    Set-ItemProperty -Path \$k -Name DumpFolder -Value '$WIN_DUMP_DIR' -Type ExpandString;
+    Set-ItemProperty -Path \$k -Name DumpType   -Value 2  -Type DWord;
+    Set-ItemProperty -Path \$k -Name DumpCount  -Value 30 -Type DWord;
+  "
 
   # Canonical run — produces JUnit and is the cell's pass/fail status.
   RC=0
