@@ -1,14 +1,15 @@
 use napi::bindgen_prelude::*;
-use napi::NapiRaw;
 use napi_derive::napi;
 
-fn alloc_node_buffer(env: &Env, len: usize) -> Result<(Buffer, &'static mut [u8])> {
-    let mut js_buf = env.create_buffer(len)?;
-    let ptr = js_buf.as_mut().as_mut_ptr();
-    let raw_val = unsafe { js_buf.into_raw().raw() };
-    let buf = unsafe { Buffer::from_napi_value(env.raw(), raw_val) }?;
-    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
-    Ok((buf, slice))
+fn alloc_node_buffer(env: &Env, len: usize) -> Result<(Buffer, *mut u8)> {
+    let raw_env = env.raw();
+    let mut raw_value = std::ptr::null_mut();
+    let mut data_ptr = std::ptr::null_mut();
+    check_status!(unsafe {
+        napi::sys::napi_create_buffer(raw_env, len, &mut data_ptr, &mut raw_value)
+    })?;
+    let buf = unsafe { Buffer::from_napi_value(raw_env, raw_value) }?;
+    Ok((buf, data_ptr as *mut u8))
 }
 
 // ── Shared types (all platforms) ────────────────────────────────────────────
@@ -862,13 +863,14 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        let (buf, slice) = alloc_node_buffer(&env, len)?;
-        let read = read_process_memory(pid, addr, slice);
+        let (buf, ptr) = alloc_node_buffer(&env, len)?;
+        let read = read_process_memory(pid, addr, unsafe { std::slice::from_raw_parts_mut(ptr, len) });
         return if read > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let (buf, slice) = alloc_node_buffer(&env, len)?;
+    let (buf, ptr) = alloc_node_buffer(&env, len)?;
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
     slice.fill(0);
     let stop = addr + len as u64;
     let regions = parse_maps(pid);
@@ -882,7 +884,6 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
         if region_idx >= regions.len() { break; }
         let region = &regions[region_idx];
         if region.start > a {
-            // Gap: fill with zeros (already zeroed), advance to region start
             let gap_end = region.start.min(stop);
             bytes += (gap_end - a) as usize;
             a = gap_end;
@@ -916,13 +917,14 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        let (buf, slice) = alloc_node_buffer(&env, len)?;
-        let read = win_read_memory(pid, addr, slice);
+        let (buf, ptr) = alloc_node_buffer(&env, len)?;
+        let read = win_read_memory(pid, addr, unsafe { std::slice::from_raw_parts_mut(ptr, len) });
         return if read > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let (buf, slice) = alloc_node_buffer(&env, len)?;
+    let (buf, ptr) = alloc_node_buffer(&env, len)?;
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
     slice.fill(0);
     let stop = addr + len as u64;
     let regions = win_query_regions(pid, addr, stop);
@@ -986,13 +988,14 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        let (buf, slice) = alloc_node_buffer(&env, len)?;
-        let read = mac_read_memory(task, addr, slice);
+        let (buf, ptr) = alloc_node_buffer(&env, len)?;
+        let read = mac_read_memory(task, addr, unsafe { std::slice::from_raw_parts_mut(ptr, len) });
         return if read > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let (buf, slice) = alloc_node_buffer(&env, len)?;
+    let (buf, ptr) = alloc_node_buffer(&env, len)?;
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
     slice.fill(0);
     let stop = addr + len as u64;
     let mut bytes: usize = 0;
@@ -1004,7 +1007,6 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
         if !region.valid { break; }
 
         if !region.bound {
-            // Gap: fill with zeros, advance
             let gap_end = region.stop.min(stop);
             bytes += (gap_end - a) as usize;
             a = gap_end;
@@ -1021,7 +1023,6 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
                 if mach_vm_protect(task, region.start, region.size, 0, VM_PROT_READ) == 0 {
                     readable = true;
                     let _ = mac_read_memory(task, a, &mut slice[offset..offset + region_len]);
-                    // Restore original access
                     let _ = mach_vm_protect(task, region.start, region.size, 0, region.access as i32);
                 }
             }
