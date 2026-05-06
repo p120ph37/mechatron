@@ -1,19 +1,14 @@
 use napi::bindgen_prelude::*;
+use napi::NapiRaw;
 use napi_derive::napi;
 
-fn node_buffer(env: &Env, data: &[u8]) -> Result<Buffer> {
-    let raw_env = env.raw();
-    let mut raw_value = std::ptr::null_mut();
-    check_status!(unsafe {
-        napi::sys::napi_create_buffer_copy(
-            raw_env,
-            data.len(),
-            data.as_ptr() as *mut _,
-            std::ptr::null_mut(),
-            &mut raw_value,
-        )
-    })?;
-    unsafe { Buffer::from_napi_value(raw_env, raw_value) }
+fn alloc_node_buffer(env: &Env, len: usize) -> Result<(Buffer, &'static mut [u8])> {
+    let mut js_buf = env.create_buffer(len)?;
+    let ptr = js_buf.as_mut().as_mut_ptr();
+    let raw_val = unsafe { js_buf.into_raw().raw() };
+    let buf = unsafe { Buffer::from_napi_value(env.raw(), raw_val) }?;
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+    Ok((buf, slice))
 }
 
 // ── Shared types (all platforms) ────────────────────────────────────────────
@@ -867,13 +862,14 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        let mut buf = vec![0u8; len];
-        let read = read_process_memory(pid, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) };
+        let (buf, slice) = alloc_node_buffer(&env, len)?;
+        let read = read_process_memory(pid, addr, slice);
+        return if read > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let mut buf = vec![0u8; len];
+    let (buf, slice) = alloc_node_buffer(&env, len)?;
+    slice.fill(0);
     let stop = addr + len as u64;
     let regions = parse_maps(pid);
     let mut bytes: usize = 0;
@@ -899,9 +895,8 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
 
         // AutoAccess: no protection change available on Linux
         if readable {
-            let _ = read_process_memory(pid, a, &mut buf[offset..offset + region_len]);
+            let _ = read_process_memory(pid, a, &mut slice[offset..offset + region_len]);
         }
-        // else: already zeroed
 
         bytes += region_len;
         a = region.stop.min(stop);
@@ -910,7 +905,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     // Fill remaining gap
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 #[cfg(target_os = "windows")]
@@ -921,13 +916,14 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        let mut buf = vec![0u8; len];
-        let read = win_read_memory(pid, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) };
+        let (buf, slice) = alloc_node_buffer(&env, len)?;
+        let read = win_read_memory(pid, addr, slice);
+        return if read > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let mut buf = vec![0u8; len];
+    let (buf, slice) = alloc_node_buffer(&env, len)?;
+    slice.fill(0);
     let stop = addr + len as u64;
     let regions = win_query_regions(pid, addr, stop);
     let mut bytes: usize = 0;
@@ -955,7 +951,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
                     let mut old = PAGE_PROTECTION_FLAGS(0);
                     if VirtualProtectEx(h, a as usize as *const _, region_len, PAGE_READONLY, &mut old).is_ok() {
                         readable = true;
-                        let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+                        let _ = win_read_memory(pid, a, &mut slice[offset..offset + region_len]);
                         let _ = VirtualProtectEx(h, a as usize as *const _, region_len, old, &mut old);
                     }
                     let _ = CloseHandle(h);
@@ -964,20 +960,19 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
         }
 
         if readable && f != FLAG_AUTO_ACCESS {
-            let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+            let _ = win_read_memory(pid, a, &mut slice[offset..offset + region_len]);
         }
         // For AutoAccess with readable regions, just read normally
         if readable && f == FLAG_AUTO_ACCESS && region.readable {
-            let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+            let _ = win_read_memory(pid, a, &mut slice[offset..offset + region_len]);
         }
-        // else: already zeroed for SkipErrors
 
         bytes += region_len;
         a = region.stop.min(stop);
     }
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 #[cfg(target_os = "macos")]
@@ -991,13 +986,14 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        let mut buf = vec![0u8; len];
-        let read = mac_read_memory(task, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) };
+        let (buf, slice) = alloc_node_buffer(&env, len)?;
+        let read = mac_read_memory(task, addr, slice);
+        return if read > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let mut buf = vec![0u8; len];
+    let (buf, slice) = alloc_node_buffer(&env, len)?;
+    slice.fill(0);
     let stop = addr + len as u64;
     let mut bytes: usize = 0;
     let mut a = addr;
@@ -1024,7 +1020,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
             unsafe {
                 if mach_vm_protect(task, region.start, region.size, 0, VM_PROT_READ) == 0 {
                     readable = true;
-                    let _ = mac_read_memory(task, a, &mut buf[offset..offset + region_len]);
+                    let _ = mac_read_memory(task, a, &mut slice[offset..offset + region_len]);
                     // Restore original access
                     let _ = mach_vm_protect(task, region.start, region.size, 0, region.access as i32);
                 }
@@ -1032,9 +1028,8 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
         }
 
         if readable && !(f == FLAG_AUTO_ACCESS && !region.readable) {
-            let _ = mac_read_memory(task, a, &mut buf[offset..offset + region_len]);
+            let _ = mac_read_memory(task, a, &mut slice[offset..offset + region_len]);
         }
-        // else: already zeroed for SkipErrors
 
         bytes += region_len;
         a = region.stop.min(stop);
@@ -1042,7 +1037,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     }
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Ok(Either::A(buf)) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 // ── memory_writeData ────────────────────────────────────────────────────
