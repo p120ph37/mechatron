@@ -127,16 +127,55 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   fi
 
   # Diagnostic crash-bait loop: re-run the memory test up to 50 times
-  # without --junit (so the canonical XML is preserved) to surface the
-  # intermittent shutdown segfault even when the canonical run passed.
-  # First crash breaks the loop so we capture a clean dump for analysis.
+  # to surface the intermittent shutdown segfault.  Use procdump
+  # (Sysinternals) to capture a minidump — it attaches via debug API
+  # and catches exceptions that WER LocalDumps misses (the crash
+  # occurs in a context where WER/SEH are already torn down).
+  #
+  # procdump -e    = write dump on unhandled exception
+  # procdump -t    = write dump on process exit (fallback)
+  # procdump -ma   = full memory dump
+  # procdump -x    = launch-and-monitor mode
+  PROCDUMP=""
+  if command -v procdump >/dev/null 2>&1; then
+    PROCDUMP="procdump"
+  else
+    # GitHub Actions windows-2022 runners ship procdump in C:\tools
+    for candidate in \
+      "C:/tools/procdump.exe" \
+      "C:/tools/procdump/procdump.exe" \
+      "C:/ProgramData/chocolatey/bin/procdump.exe"; do
+      if [ -x "$candidate" ]; then PROCDUMP="$candidate"; break; fi
+    done
+  fi
+  if [ -z "$PROCDUMP" ]; then
+    echo ">>> [ia32] procdump not found, installing via choco"
+    choco install procdump -y --no-progress 2>&1 | tail -3
+    PROCDUMP="C:/ProgramData/chocolatey/bin/procdump.exe"
+  fi
+  echo ">>> [ia32] procdump: $PROCDUMP"
+
   echo ">>> [ia32] crash-bait loop (memory test, 50 iterations)"
   BAIT_RC=0
+  IA32_NODE_WIN=$(cygpath -w "$IA32_NODE" 2>/dev/null || echo "$IA32_NODE")
   for i in $(seq 1 50); do
     iter_rc=0
-    "$IA32_NODE" test/test.js memory --backend napi >/dev/null 2>&1 || iter_rc=$?
+    # procdump -e  : write dump on unhandled exception
+    # procdump -ma : full memory dump (not just mini)
+    # procdump -x  : launch+monitor mode (dir exe args...)
+    # procdump returns 1 when it writes a dump (exception caught).
+    "$PROCDUMP" -accepteula -e -ma -x "$(cygpath -w "$DUMP_DIR")" \
+      "$IA32_NODE_WIN" test/test.js memory --backend napi \
+      >>"$TEST_LOG" 2>&1 || iter_rc=$?
+    # procdump exit 1 = dump written (crash caught); 0 = clean exit.
     if [ "$iter_rc" != 0 ]; then
-      echo ">>> [ia32] crash-bait iteration $i exited rc=$iter_rc"
+      echo ">>> [ia32] crash-bait iteration $i: procdump exited rc=$iter_rc"
+      # Check if dump was actually written.
+      shopt -s nullglob
+      NEW_DUMPS=("$DUMP_DIR"/*.dmp)
+      shopt -u nullglob
+      echo ">>> [ia32] dumps in $DUMP_DIR: ${#NEW_DUMPS[@]} file(s)"
+      ls -la "$DUMP_DIR"/*.dmp 2>/dev/null || true
       BAIT_RC=$iter_rc
       break
     fi
