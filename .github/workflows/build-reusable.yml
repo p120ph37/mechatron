@@ -151,18 +151,12 @@ jobs:
           cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             # Keep debug info so crash-dump !analyze can produce real
-            # stack frames for the intermittent shutdown segfault
-            # (see test/ci-run-tests.sh diagnostic loop).
+            # stack frames if the DLL-pin workaround doesn't fully
+            # eliminate the shutdown segfault (see ci-run-tests.sh).
             export CARGO_PROFILE_RELEASE_DEBUG=2
             export CARGO_PROFILE_RELEASE_STRIP=none
             CARGO_TARGET=i686-pc-windows-msvc
-            # Build with -v to print linker invocations so we can
-            # verify LTO is actually disabled (Cargo.toml lto=false).
-            cargo build --release --target $CARGO_TARGET -v $(for s in $SUBS; do echo -n "-p mechatron-$s "; done) 2>&1 | tee /tmp/cargo-build.log
-            # Show linker lines — on MSVC, LTO manifests as /LTCG and
-            # /GL flags passed to link.exe or lld-link.
-            echo ">>> ia32 linker flags (checking for LTO):"
-            grep -oiE '/LTCG[^ ]*|/GL[^ ]*|linker-plugin-lto|-flto[^ ]*' /tmp/cargo-build.log | sort -u || echo "(none — LTO is disabled)"
+            cargo build --release --target $CARGO_TARGET $(for s in $SUBS; do echo -n "-p mechatron-$s "; done)
             TARGET_DIR="target/$CARGO_TARGET/release"
           elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch }}" = "x64" ]; then
             CARGO_TARGET=x86_64-apple-darwin

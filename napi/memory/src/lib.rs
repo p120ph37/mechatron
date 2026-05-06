@@ -1,3 +1,7 @@
+#[cfg(windows)]
+#[path = "../../src/win_pin.rs"]
+mod win_pin;
+
 #[cfg(target_os = "macos")]
 use mechatron_shared::mach as mach_mod;
 #[cfg(target_os = "macos")]
