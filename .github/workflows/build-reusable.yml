@@ -150,9 +150,12 @@ jobs:
           SUBS="keyboard mouse clipboard screen window process memory"
           cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
-            # Keep debug info on Windows ia32 so crash-dump !analyze can
-            # produce real stack frames for the intermittent shutdown
-            # segfault (see test/ci-run-tests.sh diagnostic loop).
+            # Disable LTO on Windows ia32 to avoid the napi-rs cdylib
+            # shutdown segfault triggered by LTO in 32-bit builds
+            # (napi-rs/napi-rs#297, napi-rs/napi-rs#1145).
+            export CARGO_PROFILE_RELEASE_LTO=false
+            # Keep debug info so crash-dump !analyze can produce real
+            # stack frames if the crash recurs (see ci-run-tests.sh).
             export CARGO_PROFILE_RELEASE_DEBUG=2
             export CARGO_PROFILE_RELEASE_STRIP=none
             CARGO_TARGET=i686-pc-windows-msvc

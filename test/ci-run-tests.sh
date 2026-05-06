@@ -126,13 +126,13 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
     done
   fi
 
-  # Diagnostic crash-bait loop: re-run the memory test up to 20 times
+  # Diagnostic crash-bait loop: re-run the memory test up to 50 times
   # without --junit (so the canonical XML is preserved) to surface the
   # intermittent shutdown segfault even when the canonical run passed.
   # First crash breaks the loop so we capture a clean dump for analysis.
-  echo ">>> [ia32] crash-bait loop (memory test, 20 iterations)"
+  echo ">>> [ia32] crash-bait loop (memory test, 50 iterations)"
   BAIT_RC=0
-  for i in $(seq 1 20); do
+  for i in $(seq 1 50); do
     iter_rc=0
     "$IA32_NODE" test/test.js memory --backend napi >/dev/null 2>&1 || iter_rc=$?
     if [ "$iter_rc" != 0 ]; then
@@ -140,10 +140,10 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
       BAIT_RC=$iter_rc
       break
     fi
-    [ $((i % 5)) -eq 0 ] && echo ">>> [ia32] crash-bait $i/20 clean"
+    [ $((i % 10)) -eq 0 ] && echo ">>> [ia32] crash-bait $i/50 clean"
   done
   if [ "$BAIT_RC" = 0 ]; then
-    echo ">>> [ia32] crash-bait loop completed 20/20 without crash"
+    echo ">>> [ia32] crash-bait loop completed 50/50 without crash"
   fi
 
   # Analyze any captured minidumps with cdb !analyze.  The Windows SDK's
