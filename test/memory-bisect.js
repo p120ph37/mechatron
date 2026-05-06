@@ -291,6 +291,61 @@ var cases = {
 			await entries[i].test();
 		}
 	},
+
+	// Heavy in-process cumulative cases — many ops in one process to
+	// build up GC pressure / JIT compilation pressure / napi state
+	// in the same way the full memory test does.
+
+	"many-reads-x100": async function () {
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r) throw new Error("no readable region");
+		var buf = Buffer.alloc(64);
+		for (var i = 0; i < 100; ++i) {
+			await mem.readData(r.start, buf, 64);
+		}
+		await proc.close();
+	},
+
+	"many-autoaccess-x50": async function () {
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r) throw new Error("no readable region");
+		var len = Number(r.size * 2n < 1048576n ? r.size * 2n : 1048576n);
+		var buf = Buffer.alloc(len);
+		for (var i = 0; i < 50; ++i) {
+			await mem.readData(r.start, buf, len, Memory.AUTO_ACCESS);
+		}
+		await proc.close();
+	},
+
+	"many-getRegions-x50": async function () {
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		for (var i = 0; i < 50; ++i) {
+			await mem.getRegions();
+		}
+		await proc.close();
+	},
+
+	"many-typed-x100": async function () {
+		// Lots of typed reads (each creates a Buffer or array internally).
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r || r.size < 64n) throw new Error("no big readable region");
+		for (var i = 0; i < 100; ++i) {
+			await mem.readInt8(r.start);
+			await mem.readInt32(r.start);
+			await mem.readReal64(r.start);
+		}
+		await proc.close();
+	},
 };
 
 (async function () {

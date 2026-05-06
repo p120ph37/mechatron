@@ -157,21 +157,27 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
 
   IA32_NODE_WIN=$(cygpath -w "$IA32_NODE" 2>/dev/null || echo "$IA32_NODE")
 
-  # Bisection harness: run each memory operation in isolation, 25 iters each.
-  # Identifies which specific operation triggers the V8 ThreadIsolation
-  # shutdown crash.  Tests that crash get a "CRASH" tag; tests that survive
-  # all iterations get "OK".
+  # Bisection harness: identify which memory op triggers the V8
+  # ThreadIsolation shutdown crash on ia32.  We've previously observed the
+  # full memory test surviving 50 iterations once and crashing at iteration
+  # 2/17 on others — crash rate is variable, so use high iteration counts.
+  #
+  # 'full' first as a control: confirms repro before bisecting.  If 'full'
+  # doesn't crash within its iteration budget, this whole run is variance.
   BAIT_RC=0
-  # 'full' is a control case — runs the actual test/memory.js test.
-  # If it crashes but individual cases don't, the trigger is cumulative.
+  # 'full' first as control (75 iters).  Then heavy/combination cases that
+  # exercise cumulative state buildup (50 iters each since each iter does
+  # many inner ops).  Skip trivially-passing simple cases (load, info,
+  # mem-current, getRegions, getRegion, simple read/write variants) — they
+  # all passed 25/25 in the prior run with zero crashes, so we have high
+  # confidence they aren't the trigger.
   BISECT_CASES=(
     full
-    load mem-current info getRegions getRegion
-    readData-default readData-skiperr readData-autoaccess
-    writeData-default writeData-autoaccess find setAccess
+    many-autoaccess-x50 many-reads-x100 many-typed-x100 many-getRegions-x50
     all-reads multi-reads setAccess-then-autoaccess
+    readData-autoaccess setAccess
   )
-  BISECT_ITERS=25
+  BISECT_ITERS=75
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
   declare -A BISECT_RESULT
   for case_name in "${BISECT_CASES[@]}"; do
