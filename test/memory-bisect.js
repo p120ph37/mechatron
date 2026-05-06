@@ -222,6 +222,75 @@ var cases = {
 		await mem.setAccess(r, r.readable, r.writable, r.executable);
 		await proc.close();
 	},
+
+	// Combination cases — none of the individual ops above crashed,
+	// so the trigger must be cumulative / sequential.
+
+	"all-reads": async function () {
+		// Run every read variant on self.
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r) throw new Error("no readable region");
+		var len = Number(r.size * 2n < 1048576n ? r.size * 2n : 1048576n);
+		var buf = Buffer.alloc(len);
+		await mem.readData(r.start, buf, 16);
+		await mem.readData(r.start, buf, len, Memory.SKIP_ERRORS);
+		await mem.readData(r.start, buf, len, Memory.AUTO_ACCESS);
+		await mem.readInt8(r.start);
+		await mem.readInt16(r.start);
+		await mem.readInt32(r.start);
+		await mem.readInt64(r.start);
+		await mem.readReal32(r.start);
+		await mem.readReal64(r.start);
+		await proc.close();
+	},
+
+	"multi-reads": async function () {
+		// count>1 typed reads — these create arrays of values.
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r || r.size < 32n) throw new Error("no big readable region");
+		await mem.readInt8(r.start, 4);
+		await mem.readInt16(r.start, 2);
+		await mem.readInt32(r.start, 2);
+		await mem.readReal32(r.start, 2);
+		await mem.readReal64(r.start, 2);
+		await mem.readBool(r.start, 4);
+		await mem.readInt8(r.start, 2, 4); // with stride
+		await proc.close();
+	},
+
+	"setAccess-then-autoaccess": async function () {
+		// setAccess on self followed by AUTO_ACCESS read across regions.
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r) throw new Error("no readable region");
+		await mem.setAccess(r, r.readable, r.writable, r.executable);
+		var len = Number(r.size * 2n < 1048576n ? r.size * 2n : 1048576n);
+		await mem.readData(r.start, Buffer.alloc(len), len, Memory.AUTO_ACCESS);
+		await proc.close();
+	},
+
+	"full": async function () {
+		// Control case: run the actual test/memory.js test functions.
+		// If this crashes but individual cases don't, the trigger is
+		// in the cumulative/combination pattern.
+		var path = require("path");
+		var assert = function (c, msg) { if (!c) throw new Error(msg || "assert"); };
+		var log = function (s) { process.stdout.write(s); };
+		var waitFor = function () {};
+		var waitForAsync = function () {};
+		var entries = require("./memory")(mechatron, log, assert, waitFor, waitForAsync);
+		for (var i = 0; i < entries.length; ++i) {
+			await entries[i].test();
+		}
+	},
 };
 
 (async function () {

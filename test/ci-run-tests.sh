@@ -162,10 +162,14 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   # shutdown crash.  Tests that crash get a "CRASH" tag; tests that survive
   # all iterations get "OK".
   BAIT_RC=0
+  # 'full' is a control case — runs the actual test/memory.js test.
+  # If it crashes but individual cases don't, the trigger is cumulative.
   BISECT_CASES=(
+    full
     load mem-current info getRegions getRegion
     readData-default readData-skiperr readData-autoaccess
     writeData-default writeData-autoaccess find setAccess
+    all-reads multi-reads setAccess-then-autoaccess
   )
   BISECT_ITERS=25
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
