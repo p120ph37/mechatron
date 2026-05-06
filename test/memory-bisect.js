@@ -78,6 +78,15 @@ function v8Warmup() {
 	return p;
 }
 
+async function runFullMemoryTest() {
+	var assert = function (c, msg) { if (!c) throw new Error(msg || "assert"); };
+	var log = function (s) { process.stdout.write(s); };
+	var entries = require("./memory")(mechatron, log, assert, function () {}, function () {});
+	for (var i = 0; i < entries.length; ++i) {
+		await entries[i].test();
+	}
+}
+
 function pickReadable(regions) {
 	for (var i = 0; i < regions.length; ++i) {
 		var r = regions[i];
@@ -356,14 +365,62 @@ var cases = {
 		// Control case: run the actual test/memory.js test functions.
 		// If this crashes but individual cases don't, the trigger is
 		// in the cumulative/combination pattern.
-		var path = require("path");
+		await runFullMemoryTest();
+	},
+
+	// Bisect within test/memory.js by skipping individual sections.
+	// memory.js honours MECHATRON_BISECT_SKIP=section1,section2.
+	// If a "full-no-X" case stops crashing, X is needed for the crash.
+
+	"full-no-types": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "types";
+		await runFullMemoryTest();
+	},
+	"full-no-invalid": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "invalid";
+		await runFullMemoryTest();
+	},
+	"full-no-crossproc": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "crossproc";
+		await runFullMemoryTest();
+	},
+	"full-no-multivalue": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "multivalue";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged";
+		await runFullMemoryTest();
+	},
+	"full-no-setAccess": async function () {
+		// Skip just testSetAccess by running only entries that aren't it.
 		var assert = function (c, msg) { if (!c) throw new Error(msg || "assert"); };
 		var log = function (s) { process.stdout.write(s); };
-		var waitFor = function () {};
-		var waitForAsync = function () {};
-		var entries = require("./memory")(mechatron, log, assert, waitFor, waitForAsync);
+		var entries = require("./memory")(mechatron, log, assert, function(){}, function(){});
 		for (var i = 0; i < entries.length; ++i) {
+			if (entries[i].name === "memory setAccess") continue;
 			await entries[i].test();
+		}
+	},
+	"full-no-ctor": async function () {
+		var assert = function (c, msg) { if (!c) throw new Error(msg || "assert"); };
+		var log = function (s) { process.stdout.write(s); };
+		var entries = require("./memory")(mechatron, log, assert, function(){}, function(){});
+		for (var i = 0; i < entries.length; ++i) {
+			if (entries[i].name === "memory ctor") continue;
+			await entries[i].test();
+		}
+	},
+	"full-only-testMemory": async function () {
+		// Only run testMemory (the big one), skip ctor and setAccess.
+		var assert = function (c, msg) { if (!c) throw new Error(msg || "assert"); };
+		var log = function (s) { process.stdout.write(s); };
+		var entries = require("./memory")(mechatron, log, assert, function(){}, function(){});
+		for (var i = 0; i < entries.length; ++i) {
+			if (entries[i].name === "memory") {
+				await entries[i].test();
+				return;
+			}
 		}
 	},
 

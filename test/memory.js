@@ -12,6 +12,18 @@
 
 module.exports = function (mechatron, log, assert, waitFor) {
 
+	// Bisection support: set MECHATRON_BISECT_SKIP=section1,section2,...
+	// to skip named sections of testMemory.  Used by test/memory-bisect.js
+	// to narrow down the ia32 shutdown crash trigger.
+	var _skipSet = {};
+	if (process.env.MECHATRON_BISECT_SKIP) {
+		var _skipList = process.env.MECHATRON_BISECT_SKIP.split(",");
+		for (var _i = 0; _i < _skipList.length; ++_i) {
+			_skipSet[_skipList[_i].trim()] = true;
+		}
+	}
+	function bisectSkip(section) { return _skipSet[section] === true; }
+
 	async function testMemory() {
 		log("  Memory... ");
 
@@ -21,7 +33,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		// --- Segment (data type) ---
 		var Segment = mechatron.Segment;
-		if (Segment) {
+		if (Segment && !bisectSkip("types")) {
 			var seg = new Segment();
 			assert(seg.valid === false, "empty segment invalid");
 			assert(seg.base === 0, "empty segment base");
@@ -72,6 +84,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Module (data type only) ---
+		if (!bisectSkip("types")) {
 		var mod = new Module();
 		assert(mod.valid === false, "empty module invalid");
 		assert(mod.name === "", "empty module name");
@@ -101,8 +114,10 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		// Module static compare
 		assert(Module.compare(mod, modCl) === 0, "Module.compare eq");
+		} // end !bisectSkip("types")
 
 		// --- Invalid memory ---
+		if (!bisectSkip("invalid")) {
 		var mem = new Memory();
 		assert(!await mem.isValid(), "empty invalid");
 
@@ -122,10 +137,11 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		// Invalid find
 		assert((await mem.find("  ")).length === 0, "invalid find empty");
+		} // end !bisectSkip("invalid")
 
 		// --- Open current process ---
-		proc = await Process.getCurrent();
-		mem = new Memory(proc);
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
 		assert(await mem.isValid(), "current mem valid");
 
 		var ptrSize = await mem.getPtrSize();
@@ -248,6 +264,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
 
 		// --- Cross-process memory write verification ---
+		if (!bisectSkip("crossproc")) {
 		var _cp = require("child_process");
 		var _path = require("path");
 
@@ -401,6 +418,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			try { _child.stdin.end(); } catch (_) {}
 			try { _child.kill(); } catch (_) {}
 		}
+		} // end !bisectSkip("crossproc")
 
 		// --- task_for_pid failure path (macOS, non-root -> root process) ---
 		if (process.platform === "darwin" &&
@@ -438,7 +456,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Multi-value (count > 1) typed reads ---
-		if (readable && readable.size >= 32n) {
+		if (!bisectSkip("multivalue") && readable && readable.size >= 32n) {
 			var mv8 = await mem.readInt8(readable.start, 4);
 			assert(Array.isArray(mv8), "readInt8 count=4 returns array");
 			assert(mv8.length === 4, "readInt8 count=4 length");
@@ -464,7 +482,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Flag-bearing reads: SKIP_ERRORS / AUTO_ACCESS ---
-		if (readable) {
+		if (!bisectSkip("flagged") && readable) {
 			var spanStart = readable.start;
 			var spanLen = Number(readable.size * 2n < 1048576n ? readable.size * 2n : 1048576n);
 			var spanBuf = Buffer.alloc(spanLen);
