@@ -25,6 +25,59 @@ var mechatron = require("..");
 var Process = mechatron.Process;
 var Memory  = mechatron.Memory;
 
+// Force V8 to JIT-compile and tier-up a wide variety of code paths so that
+// many JIT pages exist by the time we exercise the suspect memory op.  The
+// hypothesis: the crash requires *vulnerable* V8 state (accumulated JIT
+// pages with ThreadIsolation tracking), not just *corrupt* state.  A
+// fresh-start node process running one trivial op may simply not have any
+// JIT pages to corrupt.  The full memory test naturally builds up this
+// state through dozens of function calls and assertions.
+function v8Warmup() {
+	// Tier-up threshold for TurboFan is roughly 10k calls of the same
+	// function shape.  We exercise many shapes to fan out JIT compilation.
+	function adder(a, b) { return a + b; }
+	function muller(a, b) { return a * b; }
+	function objWalker(o) {
+		var s = 0;
+		for (var k in o) s += o[k] | 0;
+		return s;
+	}
+	function arrSum(a) {
+		var s = 0;
+		for (var i = 0; i < a.length; ++i) s += a[i];
+		return s;
+	}
+	function strMaker(n) {
+		var s = "";
+		for (var i = 0; i < n; ++i) s += String.fromCharCode(65 + (i % 26));
+		return s;
+	}
+	function bigArr(n) {
+		var a = [];
+		for (var i = 0; i < n; ++i) a.push({ x: i, y: i * 2, z: i * 3 });
+		return a;
+	}
+
+	for (var i = 0; i < 20000; ++i) {
+		adder(i, i + 1);
+		muller(i, i + 1);
+	}
+	for (var i = 0; i < 5000; ++i) {
+		objWalker({ a: i, b: i + 1, c: i + 2, d: i + 3 });
+	}
+	var arr = [];
+	for (var i = 0; i < 1000; ++i) arr.push(i);
+	for (var i = 0; i < 5000; ++i) arrSum(arr);
+	for (var i = 0; i < 1000; ++i) strMaker(50);
+	for (var i = 0; i < 100; ++i) bigArr(100);
+
+	// Async/Promise machinery — the full test is async-heavy.
+	async function asyncOp(x) { return x + 1; }
+	var p = Promise.resolve(0);
+	for (var i = 0; i < 1000; ++i) p = p.then(asyncOp);
+	return p;
+}
+
 function pickReadable(regions) {
 	for (var i = 0; i < regions.length; ++i) {
 		var r = regions[i];
@@ -78,6 +131,28 @@ async function withChild(fn) {
 var cases = {
 	"load": async function () {
 		// Just loading mechatron is enough — already done at top.
+	},
+
+	"warmup-only": async function () {
+		// Only the V8 warmup runs (already done by dispatcher); this
+		// case body is a no-op.  Tests whether the crash needs only
+		// vulnerable state (lots of JIT pages) and module load — no
+		// memory ops at all.
+	},
+
+	"no-warmup-readData-autoaccess": async function () {
+		// Same as readData-autoaccess but skips warmup (dispatcher
+		// detects 'no-warmup-' prefix).  Tests whether the suspect op
+		// alone triggers the crash without prior JIT page buildup.
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var regions = await mem.getRegions();
+		var r = pickReadable(regions);
+		if (!r) throw new Error("no readable region");
+		var len = Number(r.size * 2n < 1048576n ? r.size * 2n : 1048576n);
+		var buf = Buffer.alloc(len);
+		await mem.readData(r.start, buf, len, Memory.AUTO_ACCESS);
+		await proc.close();
 	},
 
 	"mem-current": async function () {
@@ -356,6 +431,12 @@ var cases = {
 		process.exit(2);
 	}
 	try {
+		// Build up V8 JIT pages before exercising the suspect op so
+		// the trigger has *vulnerable* state to corrupt.  Skip for
+		// 'no-warmup-*' variants and 'full' (which warms up naturally).
+		if (caseName.indexOf("no-warmup") !== 0 && caseName !== "full") {
+			await v8Warmup();
+		}
 		await fn();
 		process.stdout.write("OK\n");
 		process.exit(0);

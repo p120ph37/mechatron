@@ -171,11 +171,20 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   # mem-current, getRegions, getRegion, simple read/write variants) — they
   # all passed 25/25 in the prior run with zero crashes, so we have high
   # confidence they aren't the trigger.
+  # Bisection now includes a V8 warmup phase before each non-'full' case
+  # to build up JIT pages.  Hypothesis: the crash needs *vulnerable* V8
+  # state (many tracked JIT pages), not just *corrupt* state.  A trivial
+  # bisection case on a fresh process may have nothing to corrupt.
+  #
+  # 'warmup-only' = warmup + module load + exit (no memory ops at all)
+  # 'no-warmup-*' = same case body but skips warmup (control)
   BISECT_CASES=(
     full
+    warmup-only
     many-autoaccess-x50 many-reads-x100 many-typed-x100 many-getRegions-x50
     all-reads multi-reads setAccess-then-autoaccess
     readData-autoaccess setAccess
+    no-warmup-readData-autoaccess
   )
   BISECT_ITERS=75
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
