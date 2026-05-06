@@ -178,14 +178,21 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   #
   # 'warmup-only' = warmup + module load + exit (no memory ops at all)
   # 'no-warmup-*' = same case body but skips warmup (control)
-  # Within-test bisection: 'full' is the known-crashing baseline.
-  # 'full-no-X' progressively skips sections of test/memory.js.  The first
-  # variant that stops crashing identifies the trigger section.
+  # Sub-bisection within the "flagged" section (confirmed trigger from
+  # prior run: skipping it eliminated the crash entirely).  Section has
+  # 4 ops: SKIP_ERRORS read, AUTO_ACCESS read, SKIP_ERRORS write,
+  # AUTO_ACCESS write — all on self process.  Identify the specific op(s).
   BISECT_CASES=(
     full
-    full-no-ctor full-no-setAccess full-only-testMemory
-    full-no-types full-no-invalid full-no-crossproc
-    full-no-multivalue full-no-flagged
+    full-no-flagged
+    full-no-flagged-reads
+    full-no-flagged-writes
+    full-no-flagged-autoaccess
+    full-no-flagged-skiperr
+    full-no-flagged-read-skiperr
+    full-no-flagged-read-autoaccess
+    full-no-flagged-write-skiperr
+    full-no-flagged-write-autoaccess
   )
   BISECT_ITERS=75
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"

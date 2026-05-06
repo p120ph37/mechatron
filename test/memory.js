@@ -486,10 +486,14 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			var spanStart = readable.start;
 			var spanLen = Number(readable.size * 2n < 1048576n ? readable.size * 2n : 1048576n);
 			var spanBuf = Buffer.alloc(spanLen);
-			var gotSkip = await mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
-			assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
-			var gotAuto = await mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
-			assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
+			if (!bisectSkip("flagged-read-skiperr")) {
+				var gotSkip = await mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
+				assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
+			}
+			if (!bisectSkip("flagged-read-autoaccess")) {
+				var gotAuto = await mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
+				assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
+			}
 
 			var writable = null;
 			for (var j = 0; j < regions.length; ++j) {
@@ -500,10 +504,14 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			}
 			if (writable) {
 				var wBuf = Buffer.alloc(16);
-				var wroteSkip = await mem.writeData(writable.start, wBuf, 16, Memory.SKIP_ERRORS);
-				assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
-				var wroteAuto = await mem.writeData(writable.start, wBuf, 16, Memory.AUTO_ACCESS);
-				assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
+				if (!bisectSkip("flagged-write-skiperr")) {
+					var wroteSkip = await mem.writeData(writable.start, wBuf, 16, Memory.SKIP_ERRORS);
+					assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
+				}
+				if (!bisectSkip("flagged-write-autoaccess")) {
+					var wroteAuto = await mem.writeData(writable.start, wBuf, 16, Memory.AUTO_ACCESS);
+					assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
+				}
 			}
 		}
 

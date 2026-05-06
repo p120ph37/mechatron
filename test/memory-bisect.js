@@ -392,6 +392,42 @@ var cases = {
 		process.env.MECHATRON_BISECT_SKIP = "flagged";
 		await runFullMemoryTest();
 	},
+
+	// Sub-bisection within the "flagged" section (the confirmed trigger).
+	// The section has 4 ops: SKIP_ERRORS read, AUTO_ACCESS read,
+	// SKIP_ERRORS write, AUTO_ACCESS write — all on self process.
+	"full-no-flagged-read-skiperr": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-read-skiperr";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-read-autoaccess": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-read-autoaccess";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-write-skiperr": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-write-skiperr";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-write-autoaccess": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-write-autoaccess";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-reads": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-read-skiperr,flagged-read-autoaccess";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-writes": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-write-skiperr,flagged-write-autoaccess";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-autoaccess": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-read-autoaccess,flagged-write-autoaccess";
+		await runFullMemoryTest();
+	},
+	"full-no-flagged-skiperr": async function () {
+		process.env.MECHATRON_BISECT_SKIP = "flagged-read-skiperr,flagged-write-skiperr";
+		await runFullMemoryTest();
+	},
 	"full-no-setAccess": async function () {
 		// Skip just testSetAccess by running only entries that aren't it.
 		var assert = function (c, msg) { if (!c) throw new Error(msg || "assert"); };
