@@ -1,6 +1,21 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+fn node_buffer(env: &Env, data: &[u8]) -> Result<Buffer> {
+    let raw_env = env.raw();
+    let mut raw_value = std::ptr::null_mut();
+    check_status!(unsafe {
+        napi::sys::napi_create_buffer_copy(
+            raw_env,
+            data.len(),
+            data.as_ptr() as *mut _,
+            std::ptr::null_mut(),
+            &mut raw_value,
+        )
+    })?;
+    unsafe { Buffer::from_napi_value(raw_env, raw_value) }
+}
+
 // ── Shared types (all platforms) ────────────────────────────────────────────
 
 struct RegionInfo {
@@ -854,7 +869,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     if f == FLAG_DEFAULT {
         let mut buf = vec![0u8; len];
         let read = read_process_memory(pid, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+        return if read > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
@@ -895,7 +910,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     // Fill remaining gap
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 #[cfg(target_os = "windows")]
@@ -908,7 +923,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     if f == FLAG_DEFAULT {
         let mut buf = vec![0u8; len];
         let read = win_read_memory(pid, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+        return if read > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
@@ -962,7 +977,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     }
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 #[cfg(target_os = "macos")]
@@ -978,7 +993,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     if f == FLAG_DEFAULT {
         let mut buf = vec![0u8; len];
         let read = mac_read_memory(task, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+        return if read > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
@@ -1027,7 +1042,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: BigInt, length: f64, flags:
     }
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Ok(Either::A(node_buffer(&env, &buf)?)) } else { Ok(Either::B(env.get_null()?)) }
 }
 
 // ── memory_writeData ────────────────────────────────────────────────────
