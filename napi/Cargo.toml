@@ -12,7 +12,5 @@ members = [
 resolver = "2"
 
 [profile.release]
-# "thin" avoids an ia32 Windows segfault-at-shutdown triggered by full LTO
-# in napi-rs cdylib crates (napi-rs/napi-rs#297, napi-rs/napi-rs#1145).
-lto = "thin"
+lto = false
 strip = "symbols"
