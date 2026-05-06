@@ -155,35 +155,51 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   fi
   echo ">>> [ia32] procdump: $PROCDUMP"
 
-  echo ">>> [ia32] crash-bait loop (memory test, 50 iterations)"
-  BAIT_RC=0
   IA32_NODE_WIN=$(cygpath -w "$IA32_NODE" 2>/dev/null || echo "$IA32_NODE")
-  for i in $(seq 1 50); do
-    iter_rc=0
-    # procdump -e  : write dump on unhandled exception
-    # procdump -ma : full memory dump (not just mini)
-    # procdump -x  : launch+monitor mode (dir exe args...)
-    # procdump returns 1 when it writes a dump (exception caught).
-    "$PROCDUMP" -accepteula -e -ma -x "$(cygpath -w "$DUMP_DIR")" \
-      "$IA32_NODE_WIN" test/test.js memory --backend napi \
-      >>"$TEST_LOG" 2>&1 || iter_rc=$?
-    # procdump exit 1 = dump written (crash caught); 0 = clean exit.
-    if [ "$iter_rc" != 0 ]; then
-      echo ">>> [ia32] crash-bait iteration $i: procdump exited rc=$iter_rc"
-      # Check if dump was actually written.
-      shopt -s nullglob
-      NEW_DUMPS=("$DUMP_DIR"/*.dmp)
-      shopt -u nullglob
-      echo ">>> [ia32] dumps in $DUMP_DIR: ${#NEW_DUMPS[@]} file(s)"
-      ls -la "$DUMP_DIR"/*.dmp 2>/dev/null || true
-      BAIT_RC=$iter_rc
-      break
+
+  # Bisection harness: run each memory operation in isolation, 25 iters each.
+  # Identifies which specific operation triggers the V8 ThreadIsolation
+  # shutdown crash.  Tests that crash get a "CRASH" tag; tests that survive
+  # all iterations get "OK".
+  BAIT_RC=0
+  BISECT_CASES=(
+    load mem-current info getRegions getRegion
+    readData-default readData-skiperr readData-autoaccess
+    writeData-default writeData-autoaccess find setAccess
+  )
+  BISECT_ITERS=25
+  echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
+  declare -A BISECT_RESULT
+  for case_name in "${BISECT_CASES[@]}"; do
+    case_rc=0
+    crash_iter=0
+    echo "=== bisect case: $case_name ===" >>"$TEST_LOG"
+    for i in $(seq 1 $BISECT_ITERS); do
+      iter_rc=0
+      echo "--- $case_name iter $i ---" >>"$TEST_LOG"
+      "$PROCDUMP" -accepteula -e -ma -x "$(cygpath -w "$DUMP_DIR")" \
+        "$IA32_NODE_WIN" test/memory-bisect.js "$case_name" --backend napi \
+        >>"$TEST_LOG" 2>&1 || iter_rc=$?
+      if [ "$iter_rc" != 0 ]; then
+        case_rc=$iter_rc
+        crash_iter=$i
+        break
+      fi
+    done
+    if [ "$case_rc" = 0 ]; then
+      echo ">>> [ia32] bisect $case_name: OK ($BISECT_ITERS/$BISECT_ITERS)"
+      BISECT_RESULT[$case_name]="OK"
+    else
+      echo ">>> [ia32] bisect $case_name: CRASH (iter $crash_iter)"
+      BISECT_RESULT[$case_name]="CRASH@$crash_iter"
+      BAIT_RC=$case_rc
     fi
-    [ $((i % 10)) -eq 0 ] && echo ">>> [ia32] crash-bait $i/50 clean"
   done
-  if [ "$BAIT_RC" = 0 ]; then
-    echo ">>> [ia32] crash-bait loop completed 50/50 without crash"
-  fi
+
+  echo ">>> [ia32] bisection summary:"
+  for case_name in "${BISECT_CASES[@]}"; do
+    printf "  %-22s %s\n" "$case_name" "${BISECT_RESULT[$case_name]}"
+  done
 
   # Analyze any captured minidumps with cdb !analyze.  The Windows SDK's
   # debugger ships in the GitHub-hosted runner image; pick the right
