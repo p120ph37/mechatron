@@ -165,7 +165,7 @@ export class Memory {
   }
 
   async getRegion(address: bigint | number): Promise<Region> {
-    const r = getNative("memory").memory_getRegion(this._pid, toBigInt(address));
+    const r = await getNative("memory").memory_getRegion(this._pid, toBigInt(address));
     const region = new Region();
     region.valid = r.valid;
     region.bound = r.bound;
@@ -189,7 +189,7 @@ export class Memory {
     }
     const biStart = start !== undefined ? toBigInt(start) : undefined;
     const biStop = stop !== undefined ? toBigInt(stop) : undefined;
-    const regions: RawRegion[] = getNative("memory").memory_getRegions(this._pid, biStart, biStop);
+    const regions: RawRegion[] = await getNative("memory").memory_getRegions(this._pid, biStart, biStop);
     return regions.map((r) => {
       const region = new Region();
       region.valid = r.valid;
@@ -221,11 +221,11 @@ export class Memory {
   }
 
   async getMinAddress(): Promise<bigint> {
-    return BigInt(getNative("memory").memory_getMinAddress(this._pid));
+    return BigInt(await getNative("memory").memory_getMinAddress(this._pid));
   }
 
   async getMaxAddress(): Promise<bigint> {
-    return BigInt(getNative("memory").memory_getMaxAddress(this._pid));
+    return BigInt(await getNative("memory").memory_getMaxAddress(this._pid));
   }
 
   async getPageSize(): Promise<number> {
@@ -235,7 +235,7 @@ export class Memory {
   async find(pattern: string, start?: bigint | number, stop?: bigint | number, limit?: number, flags?: string): Promise<bigint[]> {
     const biStart = start !== undefined ? toBigInt(start) : undefined;
     const biStop = stop !== undefined ? toBigInt(stop) : undefined;
-    const results = getNative("memory").memory_find(this._pid, pattern, biStart, biStop, limit, flags);
+    const results = await getNative("memory").memory_find(this._pid, pattern, biStart, biStop, limit, flags);
     return results.map((v: bigint | number) => BigInt(v));
   }
 
@@ -243,7 +243,7 @@ export class Memory {
     const len = length !== undefined ? length : buffer.length;
     if (len === 0) return 0;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
-    const result = getNative("memory").memory_readData(this._pid, toBigInt(address), len, flags);
+    const result = await getNative("memory").memory_readData(this._pid, toBigInt(address), len, flags);
     if (!result) return 0;
     result.copy(buffer, 0, 0, len);
     return len;
@@ -254,7 +254,7 @@ export class Memory {
     if (len === 0) return 0;
     if (buffer.length < len) throw new RangeError("Buffer is too small");
     const buf = len === buffer.length ? buffer : buffer.subarray(0, len) as Buffer;
-    return getNative("memory").memory_writeData(this._pid, toBigInt(address), buf, flags);
+    return await getNative("memory").memory_writeData(this._pid, toBigInt(address), buf, flags);
   }
 
   /**
@@ -357,14 +357,14 @@ export class Memory {
     return new Memory(new Process(this._pid));
   }
 
-  private _readType(address: bigint, type: DataType, length: number, count?: number, stride?: number): any {
+  private async _readType(address: bigint, type: DataType, length: number, count?: number, stride?: number): Promise<any> {
     const native = getNative("memory");
     const c = count || 1;
     const s = stride || 0;
     if (c === 0 || length === 0) return null;
 
     if (c === 1) {
-      const buf = native.memory_readData(this._pid, address, length);
+      const buf = await native.memory_readData(this._pid, address, length);
       if (!buf) return null;
       switch (type) {
         case DataType.Int8:    return buf.readInt8(0);
@@ -382,7 +382,7 @@ export class Memory {
     const effectiveStride = s === 0 ? length : s;
     if (effectiveStride < length) throw new RangeError("Stride is too small");
     const totalSize = c * effectiveStride + length - effectiveStride;
-    const buf = native.memory_readData(this._pid, address, totalSize);
+    const buf = await native.memory_readData(this._pid, address, totalSize);
     if (!buf) return null;
 
     const result: any[] = [];
@@ -402,7 +402,7 @@ export class Memory {
     return result;
   }
 
-  private _writeType(address: bigint, value: any, type: DataType, length: number): boolean {
+  private async _writeType(address: bigint, value: any, type: DataType, length: number): Promise<boolean> {
     const native = getNative("memory");
     if (type === DataType.String) {
       const str = value as string;
@@ -411,7 +411,7 @@ export class Memory {
       if (len > str.length + 1) throw new RangeError("Length is too large");
       const buf = Buffer.alloc(len);
       buf.write(str, 0, len, "utf8");
-      return native.memory_writeData(this._pid, address, buf) === len;
+      return (await native.memory_writeData(this._pid, address, buf)) === len;
     }
     const buf = Buffer.alloc(length);
     switch (type) {
@@ -424,6 +424,6 @@ export class Memory {
       case DataType.Bool:    buf[0] = value ? 1 : 0; break;
       default: return false;
     }
-    return native.memory_writeData(this._pid, address, buf) === length;
+    return (await native.memory_writeData(this._pid, address, buf)) === length;
   }
 }

@@ -22,13 +22,13 @@ export class Process {
   }
 
   async open(pid: number): Promise<boolean> {
-    const valid = getNative("process").process_open(pid);
+    const valid = await getNative("process").process_open(pid);
     this._pid = valid ? pid : 0;
     return valid;
   }
 
   async close(): Promise<void> {
-    getNative("process").process_close(this._pid);
+    await getNative("process").process_close(this._pid);
     this._pid = 0;
   }
 
@@ -51,7 +51,7 @@ export class Process {
   async getHandle(): Promise<number> {
     const native = getNative("process");
     if (typeof native.process_getHandle === "function") {
-      return native.process_getHandle(this._pid);
+      return await native.process_getHandle(this._pid);
     }
     return 0;
   }
@@ -65,11 +65,11 @@ export class Process {
   }
 
   async exit(): Promise<void> {
-    getNative("process").process_exit(this._pid);
+    await getNative("process").process_exit(this._pid);
   }
 
   async kill(): Promise<void> {
-    getNative("process").process_kill(this._pid);
+    await getNative("process").process_kill(this._pid);
   }
 
   async hasExited(): Promise<boolean> {
@@ -78,7 +78,7 @@ export class Process {
 
   async getModules(regex?: string): Promise<Module[]> {
     const { Module: ModuleClass } = require("./Module") as typeof import("./Module");
-    const raw: ModuleData[] = getNative("process").process_getModules(this._pid, regex);
+    const raw: ModuleData[] = await getNative("process").process_getModules(this._pid, regex);
     return raw.map((data) => {
       const mod = new ModuleClass(data);
       mod._segments = null;
@@ -103,12 +103,12 @@ export class Process {
   }
 
   static async getList(regex?: string): Promise<Process[]> {
-    const pids: number[] = getNative("process").process_getList(regex);
+    const pids: number[] = await getNative("process").process_getList(regex);
     return pids.map((pid) => new Process(pid));
   }
 
   static async getCurrent(): Promise<Process> {
-    return new Process(getNative("process").process_getCurrent());
+    return new Process(await getNative("process").process_getCurrent());
   }
 
   static async isSys64Bit(): Promise<boolean> {
