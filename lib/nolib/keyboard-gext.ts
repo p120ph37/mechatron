@@ -8,7 +8,7 @@
  * getKeyState is unavailable (the extension is write-only).
  */
 
-import { gextKeyboardKeysym } from "../gext/input";
+import { gextKeyboardKeysym, gextGetKeyState } from "../gext/input";
 
 export async function keyboard_press(keycode: number): Promise<void> {
   return gextKeyboardKeysym(keycode, true);
@@ -18,6 +18,6 @@ export async function keyboard_release(keycode: number): Promise<void> {
   return gextKeyboardKeysym(keycode, false);
 }
 
-export async function keyboard_getKeyState(_keycode: number): Promise<boolean> {
-  return false;
+export async function keyboard_getKeyState(keycode: number): Promise<boolean> {
+  return gextGetKeyState(keycode);
 }

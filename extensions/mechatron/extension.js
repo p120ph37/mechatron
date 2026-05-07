@@ -168,6 +168,16 @@ const INPUT_IFACE_XML = `
       <arg type="d" direction="out" name="x"/>
       <arg type="d" direction="out" name="y"/>
     </method>
+    <method name="GetButtonState">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="i" direction="in" name="button"/>
+      <arg type="b" direction="out" name="pressed"/>
+    </method>
+    <method name="GetKeyState">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="in" name="keysym"/>
+      <arg type="b" direction="out" name="pressed"/>
+    </method>
   </interface>
 </node>
 `;
@@ -193,6 +203,25 @@ function requireAuth(token) {
   if (allowed.size === 0) throw new Error("No tokens configured in " + TOKEN_FILE);
   if (!allowed.has(token)) throw new Error("Unauthorized: invalid token");
 }
+
+// Modifier keysym → Clutter.ModifierType mask for GetKeyState.
+// Non-modifier keys are tracked via _pressedKeys shadow state.
+const KEYSYM_MOD_MASK = new Map([
+  [0xFFE1, 1],    // Shift_L   → SHIFT_MASK
+  [0xFFE2, 1],    // Shift_R   → SHIFT_MASK
+  [0xFFE3, 4],    // Control_L → CONTROL_MASK
+  [0xFFE4, 4],    // Control_R → CONTROL_MASK
+  [0xFFE5, 2],    // Caps_Lock → LOCK_MASK
+  [0xFFE9, 8],    // Alt_L     → MOD1_MASK
+  [0xFFEA, 8],    // Alt_R     → MOD1_MASK
+  [0xFFEB, 64],   // Super_L   → MOD4_MASK
+  [0xFFEC, 64],   // Super_R   → MOD4_MASK
+  [0xFF7F, 16],   // Num_Lock  → MOD2_MASK
+]);
+
+// Button index → Clutter.ModifierType mask for GetButtonState.
+// Button 0=left, 1=mid, 2=right (mechatron constants).
+const BUTTON_MOD_MASKS = [256, 512, 1024, 2048, 4096];
 
 function inputTime() {
   const t = global.get_current_time();
@@ -234,6 +263,7 @@ export default class MechatronWMExtension extends Extension {
   _ownerId = 0;
   _virtualKeyboard = null;
   _virtualPointer = null;
+  _pressedKeys = new Set();
 
   _ensureVirtualDevices() {
     if (!this._virtualKeyboard) {
@@ -436,13 +466,36 @@ export default class MechatronWMExtension extends Extension {
             invocation.return_value(new GLib.Variant("(dd)", [x, y]));
             return;
           }
+          if (method === "GetButtonState") {
+            requireAuth(args[0]);
+            const button = args[1];
+            const [, , mods] = global.get_pointer();
+            const mask = button >= 0 && button < BUTTON_MOD_MASKS.length ? BUTTON_MOD_MASKS[button] : 0;
+            invocation.return_value(new GLib.Variant("(b)", [(mods & mask) !== 0]));
+            return;
+          }
+          if (method === "GetKeyState") {
+            requireAuth(args[0]);
+            const keysym = args[1];
+            const modMask = KEYSYM_MOD_MASK.get(keysym);
+            if (modMask !== undefined) {
+              const [, , mods] = global.get_pointer();
+              invocation.return_value(new GLib.Variant("(b)", [(mods & modMask) !== 0]));
+            } else {
+              invocation.return_value(new GLib.Variant("(b)", [ext._pressedKeys.has(keysym)]));
+            }
+            return;
+          }
           const token = args[0];
           requireAuth(token);
           ext._ensureVirtualDevices();
           const time = inputTime();
           switch (method) {
             case "KeyboardKeysym": {
-              const state = args[2] ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
+              const pressed = !!args[2];
+              const state = pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED;
+              if (pressed) ext._pressedKeys.add(args[1]);
+              else ext._pressedKeys.delete(args[1]);
               ext._virtualKeyboard.notify_keyval(time, args[1], state);
               break;
             }
@@ -522,5 +575,6 @@ export default class MechatronWMExtension extends Extension {
     }
     this._virtualKeyboard = null;
     this._virtualPointer = null;
+    this._pressedKeys.clear();
   }
 }

@@ -195,6 +195,28 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			}
 		},
 
+		// --- Portal token state management ---
+		{
+			name: "Screen portal token get/set",
+			functions: ["screen_getPortalToken", "screen_setPortalToken"],
+			test: async function () {
+				var getNative = mechatron.getNative || mechatron._getNative;
+				var native = getNative("screen");
+				assert(typeof native.screen_getPortalToken === "function", "getPortalToken exists");
+				assert(typeof native.screen_setPortalToken === "function", "setPortalToken exists");
+
+				var initial = native.screen_getPortalToken();
+				assert(initial === null || typeof initial === "string", "initial token is null or string");
+
+				var testToken = "test_restore_token_" + Date.now();
+				native.screen_setPortalToken(testToken);
+				var stored = native.screen_getPortalToken();
+				assert(stored === testToken, "token round-trips");
+
+				native.screen_setPortalToken(initial);
+			}
+		},
+
 		// --- Framebuffer / DRM pure-encoding tests ---
 		{
 			name: "Framebuffer/DRM pure-encoding helpers",

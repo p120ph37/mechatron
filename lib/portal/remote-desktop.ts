@@ -20,16 +20,20 @@ const PORTAL_DEST = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH = "/org/freedesktop/portal/desktop";
 const RD_IFACE = "org.freedesktop.portal.RemoteDesktop";
 
+const SC_IFACE = "org.freedesktop.portal.ScreenCast";
 const DEVICE_KEYBOARD = 1;
 const DEVICE_POINTER = 2;
+const SOURCE_MONITOR = 1;
 
 export interface RemoteDesktopSession {
   conn: DBusConnection;
   sessionPath: string;
+  streamId: number;
 }
 
 let _session: RemoteDesktopSession | null = null;
 let _sessionPromise: Promise<RemoteDesktopSession> | null = null;
+let _needsScreenCast = false;
 
 export function remoteDesktopAvailable(): boolean {
   if (process.platform !== "linux") return false;
@@ -90,6 +94,29 @@ async function createSession(conn: DBusConnection): Promise<RemoteDesktopSession
 
   await selResponse;
 
+  if (_needsScreenCast) {
+    const srcToken = `mechatron_src_${process.pid}_${Date.now()}`;
+    const srcReqPath = requestPath(conn, srcToken);
+    const srcResponse = waitForResponse(conn, srcReqPath);
+
+    const srcOptions: Record<string, [string, any]> = {
+      "handle_token": ["s", srcToken],
+      "types": ["u", SOURCE_MONITOR],
+      "multiple": ["b", false],
+    };
+
+    await conn.call({
+      path: PORTAL_PATH,
+      interface: SC_IFACE,
+      member: "SelectSources",
+      destination: PORTAL_DEST,
+      signature: "oa{sv}",
+      body: [sessionPath, srcOptions],
+    });
+
+    await srcResponse;
+  }
+
   // Start
   const startToken = `mechatron_start_${process.pid}_${Date.now()}`;
   const startReqPath = requestPath(conn, startToken);
@@ -108,9 +135,17 @@ async function createSession(conn: DBusConnection): Promise<RemoteDesktopSession
     body: [sessionPath, "", startOptions],
   });
 
-  await startResponse;
+  const startResults = await startResponse;
 
-  return { conn, sessionPath };
+  let streamId = 0;
+  if (_needsScreenCast) {
+    const streams = startResults.get("streams") as any[];
+    if (streams && streams.length > 0) {
+      streamId = streams[0][0] as number;
+    }
+  }
+
+  return { conn, sessionPath, streamId };
 }
 
 export async function getSession(): Promise<RemoteDesktopSession> {
@@ -165,7 +200,15 @@ export async function notifyPointerButton(button: number, pressed: boolean): Pro
   });
 }
 
-export async function notifyPointerMotionAbsolute(streamId: number, x: number, y: number): Promise<void> {
+export async function notifyPointerMotionAbsolute(x: number, y: number, streamId?: number): Promise<void> {
+  if (!_needsScreenCast) {
+    _needsScreenCast = true;
+    if (_session) {
+      _session.conn.close();
+      _session = null;
+      _sessionPromise = null;
+    }
+  }
   const s = await getSession();
   await s.conn.call({
     path: PORTAL_PATH,
@@ -173,7 +216,7 @@ export async function notifyPointerMotionAbsolute(streamId: number, x: number, y
     member: "NotifyPointerMotionAbsolute",
     destination: PORTAL_DEST,
     signature: "oa{sv}udd",
-    body: [s.sessionPath, {}, streamId, x, y],
+    body: [s.sessionPath, {}, streamId ?? s.streamId, x, y],
     noReply: true,
   });
 }

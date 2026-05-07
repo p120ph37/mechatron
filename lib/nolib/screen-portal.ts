@@ -16,6 +16,16 @@ if (!remoteDesktopAvailable()) {
 interface RawRect { x: number; y: number; w: number; h: number; }
 interface ScreenInfo { bounds: RawRect; usable: RawRect; }
 
+let _portalToken: string | null = null;
+
+export function screen_getPortalToken(): string | null {
+  return _portalToken;
+}
+
+export function screen_setPortalToken(token: string | null): void {
+  _portalToken = token;
+}
+
 export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
   const monitors = await portalGetMonitors();
   if (!monitors) return null;

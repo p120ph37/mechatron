@@ -92,6 +92,23 @@ interface X11 {
   ) => Pointer;
   XDestroyImage: (img: Pointer) => number;
   XGetPixel: (img: Pointer, x: number, y: number) => bigint;
+  // Clipboard / selection
+  XCreateSimpleWindow: (
+    display: Pointer, parent: bigint,
+    x: number, y: number, width: number, height: number,
+    borderWidth: number, border: bigint, background: bigint,
+  ) => bigint;
+  XSelectInput: (display: Pointer, w: bigint, eventMask: bigint) => number;
+  XSetSelectionOwner: (display: Pointer, selection: bigint, owner: bigint, time: bigint) => number;
+  XGetSelectionOwner: (display: Pointer, selection: bigint) => bigint;
+  XConvertSelection: (
+    display: Pointer, selection: bigint, target: bigint,
+    property: bigint, requestor: bigint, time: bigint,
+  ) => number;
+  XPending: (display: Pointer) => number;
+  XNextEvent: (display: Pointer, eventReturn: Pointer) => number;
+  XFlush: (display: Pointer) => number;
+  XDeleteProperty: (display: Pointer, w: bigint, property: bigint) => number;
   // Error handler suppression
   XSetErrorHandler: (handler: Pointer) => Pointer;
 }
@@ -240,6 +257,21 @@ function tryDlopen(): void {
       XDestroyImage:          { args: [T.u64], returns: T.i32 },
       XGetPixel:              { args: [T.u64, T.i32, T.i32], returns: T.u64 },
       XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
+      XCreateSimpleWindow:    {
+        args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32, T.u32, T.u64, T.u64],
+        returns: T.u64,
+      },
+      XSelectInput:           { args: [T.ptr, T.u64, T.i64], returns: T.i32 },
+      XSetSelectionOwner:     { args: [T.ptr, T.u64, T.u64, T.u64], returns: T.i32 },
+      XGetSelectionOwner:     { args: [T.ptr, T.u64], returns: T.u64 },
+      XConvertSelection:      {
+        args: [T.ptr, T.u64, T.u64, T.u64, T.u64, T.u64],
+        returns: T.i32,
+      },
+      XPending:               { args: [T.ptr], returns: T.i32 },
+      XNextEvent:             { args: [T.ptr, T.ptr], returns: T.i32 },
+      XFlush:                 { args: [T.ptr], returns: T.i32 },
+      XDeleteProperty:        { args: [T.ptr, T.u64, T.u64], returns: T.i32 },
     });
     _x11 = x11.symbols;
     _dlopenHandles.push(x11);
@@ -374,6 +406,9 @@ export const IsViewable = 2;
 export const PropModeReplace = 0;
 
 // Event types
+export const SelectionRequest = 30;
+export const SelectionNotify = 31;
+export const SelectionClear = 29;
 export const ClientMessage = 33;
 
 // Property type Atoms (predefined)

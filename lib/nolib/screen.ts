@@ -22,3 +22,8 @@ const impl: typeof import("./screen-x11") =
 
 export const screen_synchronize = impl.screen_synchronize;
 export const screen_grabScreen  = impl.screen_grabScreen;
+
+export const screen_getPortalToken: () => string | null =
+  (impl as any).screen_getPortalToken ?? (() => null);
+export const screen_setPortalToken: (token: string) => void =
+  (impl as any).screen_setPortalToken ?? (() => {});

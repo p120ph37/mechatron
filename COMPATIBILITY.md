@@ -41,7 +41,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_getKeyState | ok | skip | ok | ok | skip | skip | skip | ok | ok | ok | ok |
+| keyboard_getKeyState | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
 
 ## Mouse
 
@@ -53,8 +53,8 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | mouse_getPos | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
-| mouse_setPos | ok | ok | ok | ok | skip | ok | ok | ok | ok | ok | ok |
-| mouse_getButtonState | ok | skip | ok | ok | skip | skip | skip | ok | ok | ok | ok |
+| mouse_setPos | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_getButtonState | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
 
 ## Window
 
@@ -108,8 +108,8 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | process_getCurrent | ok | ok | ok | ok | ok | ok | ok |
 | process_isSys64Bit | ok | ok | ok | ok | ok | ok | ok |
 | process_getList | ok | ok | ok | ok | ok | ok | ok |
-| process_getModules | ok | ok | skip | ok | ok | ok | ok |
-| process_getSegments | ok | ok | skip | ok | ok | ok | ok |
+| process_getModules | ok | ok | ok | ok | ok | ok | ok |
+| process_getSegments | ok | ok | ok | ok | ok | ok | ok |
 
 ## Screen
 
@@ -118,22 +118,22 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_getPortalToken | skip | ok | skip | skip | skip | skip | skip | skip | skip | skip |
-| screen_setPortalToken | skip | ok | skip | skip | skip | skip | skip | skip | skip | skip |
+| screen_getPortalToken | skip | ok | skip | skip | ok | skip | skip | skip | skip | skip |
+| screen_setPortalToken | skip | ok | skip | skip | ok | skip | skip | skip | skip | skip |
 
 ## Clipboard
 
 | Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
 |----------|------|------|------|------|------|------|------|------|------|------|
 | clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_clear | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_getText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_setText | ok | ok | skip | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_setImage | ok | ok | skip | skip | skip | ok | ok | ok | ok | skip |
-| clipboard_getSequence | ok | ok | skip | ok | ok | ok | ok | ok | ok | skip |
+| clipboard_clear | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_getText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_setText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasImage | ok | ok | ok | ok | skip | ok | ok | ok | ok | skip |
+| clipboard_getImage | ok | ok | ok | ok | skip | ok | ok | ok | ok | skip |
+| clipboard_setImage | ok | ok | ok | ok | skip | ok | ok | ok | ok | skip |
+| clipboard_getSequence | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
 
 ## Memory
 

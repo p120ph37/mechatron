@@ -118,18 +118,73 @@ export function process_getList(regex?: string): number[] {
   return pids;
 }
 
-export function process_getModules(_pid: number, _regex?: string): Array<{
+export function process_getModules(pid: number, regex?: string): Array<{
   valid: boolean; name: string; path: string; base: number; size: number; pid: number;
 }> {
-  // /proc/pid/maps parsing for module info
-  // This gives us loaded shared libraries with addresses
-  return [];
+  const maps = procReadFile(pid, "maps");
+  if (!maps) return [];
+  const pattern = regex ? new RegExp(regex) : null;
+  const modules = new Map<string, { base: number; end: number }>();
+  for (const line of maps.split("\n")) {
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length < 6) continue;
+    const path = parts.slice(5).join(" ");
+    if (!path || path.startsWith("[")) continue;
+    const [startHex, endHex] = parts[0].split("-");
+    const start = parseInt(startHex, 16);
+    const end = parseInt(endHex, 16);
+    const existing = modules.get(path);
+    if (existing) {
+      if (start < existing.base) existing.base = start;
+      if (end > existing.end) existing.end = end;
+    } else {
+      modules.set(path, { base: start, end });
+    }
+  }
+  const result: Array<{
+    valid: boolean; name: string; path: string; base: number; size: number; pid: number;
+  }> = [];
+  for (const [p, { base, end }] of modules) {
+    const slash = p.lastIndexOf("/");
+    const name = slash >= 0 ? p.substring(slash + 1) : p;
+    if (pattern && !pattern.test(name)) continue;
+    result.push({ valid: true, name, path: p, base, size: end - base, pid });
+  }
+  return result;
 }
 
-export function process_getSegments(_pid: number, _base: number): Array<{
+export function process_getSegments(pid: number, base: number): Array<{
   valid: boolean; base: number; size: number; name: string;
 }> {
-  return [];
+  const maps = procReadFile(pid, "maps");
+  if (!maps) return [];
+  const entries: Array<{ start: number; end: number; perms: string; path: string }> = [];
+  const modBases = new Map<string, number>();
+  for (const line of maps.split("\n")) {
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length < 6) continue;
+    const path = parts.slice(5).join(" ");
+    if (!path || path.startsWith("[")) continue;
+    const [startHex, endHex] = parts[0].split("-");
+    const start = parseInt(startHex, 16);
+    const end = parseInt(endHex, 16);
+    entries.push({ start, end, perms: parts[1], path });
+    const existing = modBases.get(path);
+    if (existing === undefined || start < existing) modBases.set(path, start);
+  }
+  let modulePath: string | null = null;
+  for (const [p, b] of modBases) {
+    if (b === base) { modulePath = p; break; }
+  }
+  if (!modulePath) return [];
+  const segments: Array<{ valid: boolean; base: number; size: number; name: string }> = [];
+  for (const e of entries) {
+    if (e.path !== modulePath) continue;
+    segments.push({ valid: true, base: e.start, size: e.end - e.start, name: e.perms });
+  }
+  return segments;
 }
 
 if (!IS_LINUX) {

@@ -10,6 +10,7 @@ import { evdevButton } from "../mouse/constants";
 import {
   gextPointerButton, gextPointerAxisDiscrete,
   gextPointerMotionAbsolute, gextGetPointerPos,
+  gextGetButtonState,
 } from "../gext/input";
 
 const AXIS_VERTICAL = 0;
@@ -41,6 +42,6 @@ export async function mouse_setPos(x: number, y: number): Promise<void> {
   return gextPointerMotionAbsolute(x, y);
 }
 
-export async function mouse_getButtonState(_button: number): Promise<boolean> {
-  return false;
+export async function mouse_getButtonState(button: number): Promise<boolean> {
+  return gextGetButtonState(button);
 }

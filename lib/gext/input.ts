@@ -72,6 +72,16 @@ export async function gextGetPointerPos(): Promise<{ x: number; y: number }> {
   return { x: result[0] as number, y: result[1] as number };
 }
 
+export async function gextGetButtonState(button: number): Promise<boolean> {
+  const result = await call("GetButtonState", "si", [_token, button]);
+  return result[0] as boolean;
+}
+
+export async function gextGetKeyState(keysym: number): Promise<boolean> {
+  const result = await call("GetKeyState", "su", [_token, keysym]);
+  return result[0] as boolean;
+}
+
 export function resetGextInput(): void {
   if (_conn) {
     _conn.close();

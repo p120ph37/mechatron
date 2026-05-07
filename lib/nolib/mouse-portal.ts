@@ -11,6 +11,7 @@ import { evdevButton } from "../mouse/constants";
 import {
   remoteDesktopAvailable,
   notifyPointerButton, notifyPointerAxisDiscrete,
+  notifyPointerMotionAbsolute,
 } from "../portal/remote-desktop";
 
 if (!remoteDesktopAvailable()) {
@@ -43,8 +44,8 @@ export async function mouse_getPos(): Promise<{ x: number; y: number }> {
   return { x: 0, y: 0 };
 }
 
-export async function mouse_setPos(_x: number, _y: number): Promise<void> {
-  // Portal API exposes only relative motion; absolute setPos is unsupported.
+export async function mouse_setPos(x: number, y: number): Promise<void> {
+  await notifyPointerMotionAbsolute(x, y);
 }
 
 export async function mouse_getButtonState(_button: number): Promise<boolean> {
