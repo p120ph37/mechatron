@@ -119,12 +119,12 @@ export function process_getList(regex?: string): number[] {
 }
 
 export function process_getModules(pid: number, regex?: string): Array<{
-  valid: boolean; name: string; path: string; base: number; size: number; pid: number;
+  valid: boolean; name: string; path: string; base: bigint; size: bigint; pid: number;
 }> {
   const maps = procReadFile(pid, "maps");
   if (!maps) return [];
   const pattern = regex ? new RegExp(regex) : null;
-  const modules = new Map<string, { base: number; end: number }>();
+  const modules = new Map<string, { base: bigint; end: bigint }>();
   for (const line of maps.split("\n")) {
     if (!line) continue;
     const parts = line.split(/\s+/);
@@ -132,8 +132,8 @@ export function process_getModules(pid: number, regex?: string): Array<{
     const path = parts.slice(5).join(" ");
     if (!path || path.startsWith("[")) continue;
     const [startHex, endHex] = parts[0].split("-");
-    const start = parseInt(startHex, 16);
-    const end = parseInt(endHex, 16);
+    const start = BigInt("0x" + startHex);
+    const end = BigInt("0x" + endHex);
     const existing = modules.get(path);
     if (existing) {
       if (start < existing.base) existing.base = start;
@@ -143,7 +143,7 @@ export function process_getModules(pid: number, regex?: string): Array<{
     }
   }
   const result: Array<{
-    valid: boolean; name: string; path: string; base: number; size: number; pid: number;
+    valid: boolean; name: string; path: string; base: bigint; size: bigint; pid: number;
   }> = [];
   for (const [p, { base, end }] of modules) {
     const slash = p.lastIndexOf("/");
@@ -154,13 +154,13 @@ export function process_getModules(pid: number, regex?: string): Array<{
   return result;
 }
 
-export function process_getSegments(pid: number, base: number): Array<{
-  valid: boolean; base: number; size: number; name: string;
+export function process_getSegments(pid: number, base: bigint): Array<{
+  valid: boolean; base: bigint; size: bigint; name: string;
 }> {
   const maps = procReadFile(pid, "maps");
   if (!maps) return [];
-  const entries: Array<{ start: number; end: number; perms: string; path: string }> = [];
-  const modBases = new Map<string, number>();
+  const entries: Array<{ start: bigint; end: bigint; perms: string; path: string }> = [];
+  const modBases = new Map<string, bigint>();
   for (const line of maps.split("\n")) {
     if (!line) continue;
     const parts = line.split(/\s+/);
@@ -168,8 +168,8 @@ export function process_getSegments(pid: number, base: number): Array<{
     const path = parts.slice(5).join(" ");
     if (!path || path.startsWith("[")) continue;
     const [startHex, endHex] = parts[0].split("-");
-    const start = parseInt(startHex, 16);
-    const end = parseInt(endHex, 16);
+    const start = BigInt("0x" + startHex);
+    const end = BigInt("0x" + endHex);
     entries.push({ start, end, perms: parts[1], path });
     const existing = modBases.get(path);
     if (existing === undefined || start < existing) modBases.set(path, start);
@@ -179,7 +179,7 @@ export function process_getSegments(pid: number, base: number): Array<{
     if (b === base) { modulePath = p; break; }
   }
   if (!modulePath) return [];
-  const segments: Array<{ valid: boolean; base: number; size: number; name: string }> = [];
+  const segments: Array<{ valid: boolean; base: bigint; size: bigint; name: string }> = [];
   for (const e of entries) {
     if (e.path !== modulePath) continue;
     segments.push({ valid: true, base: e.start, size: e.end - e.start, name: e.perms });

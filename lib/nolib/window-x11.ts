@@ -172,33 +172,40 @@ async function enumWindows(c: XConnection, win: number, pattern: RegExp | null, 
 }
 
 // ── Exports ─────────────────────────────────────────────────────────
+//
+// External signatures use `bigint` to match the new public Window API.
+// X11 XIDs are 32-bit so the internal X11 helpers continue to use number;
+// the conversion happens at the export boundary.
 
-export async function window_isValid(handle: number): Promise<boolean> {
-  return winIsValid(handle);
+export async function window_isValid(handle: bigint): Promise<boolean> {
+  return winIsValid(Number(handle));
 }
 
-export async function window_close(handle: number): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_close(handle: bigint): Promise<void> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return;
   const c = await getXConnection();
   if (!c) return;
-  c.destroyWindow(handle);
+  c.destroyWindow(h);
 }
 
-export async function window_isTopMost(handle: number): Promise<boolean> {
-  if (!(await winIsValid(handle))) return false;
+export async function window_isTopMost(handle: bigint): Promise<boolean> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return false;
   const c = await getXConnection();
   if (!c) return false;
-  return getWmState(c, handle, STATE_TOPMOST);
+  return getWmState(c, h, STATE_TOPMOST);
 }
 
-export async function window_isBorderless(handle: number): Promise<boolean> {
-  if (!(await winIsValid(handle))) return false;
+export async function window_isBorderless(handle: bigint): Promise<boolean> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return false;
   const c = await getXConnection();
   if (!c) return false;
   const wmHints = await c.internAtom("_MOTIF_WM_HINTS", true);
   if (wmHints === 0) return false;
   try {
-    const gp = await c.getProperty({ window: handle, property: wmHints });
+    const gp = await c.getProperty({ window: h, property: wmHints });
     if (gp.format !== 32 || gp.value.length < 12) return false;
     return gp.value.readUInt32LE(8) === 0;
   } catch {
@@ -206,29 +213,33 @@ export async function window_isBorderless(handle: number): Promise<boolean> {
   }
 }
 
-export async function window_isMinimized(handle: number): Promise<boolean> {
-  if (!(await winIsValid(handle))) return false;
+export async function window_isMinimized(handle: bigint): Promise<boolean> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return false;
   const c = await getXConnection();
   if (!c) return false;
-  return getWmState(c, handle, STATE_MINIMIZE);
+  return getWmState(c, h, STATE_MINIMIZE);
 }
 
-export async function window_isMaximized(handle: number): Promise<boolean> {
-  if (!(await winIsValid(handle))) return false;
+export async function window_isMaximized(handle: bigint): Promise<boolean> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return false;
   const c = await getXConnection();
   if (!c) return false;
-  return getWmState(c, handle, STATE_MAXIMIZE);
+  return getWmState(c, h, STATE_MAXIMIZE);
 }
 
-export async function window_setTopMost(handle: number, topMost: boolean): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setTopMost(handle: bigint, topMost: boolean): Promise<void> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return;
   const c = await getXConnection();
   if (!c) return;
-  await setWmState(c, handle, STATE_TOPMOST, topMost);
+  await setWmState(c, h, STATE_TOPMOST, topMost);
 }
 
-export async function window_setBorderless(handle: number, borderless: boolean): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setBorderless(handle: bigint, borderless: boolean): Promise<void> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return;
   const c = await getXConnection();
   if (!c) return;
   const wmHints = await c.internAtom("_MOTIF_WM_HINTS", false);
@@ -239,35 +250,38 @@ export async function window_setBorderless(handle: number, borderless: boolean):
   data.writeUInt32LE(borderless ? 0 : 1, 8);  // decorations
   data.writeUInt32LE(0, 12);
   data.writeUInt32LE(0, 16);
-  c.changeProperty({ window: handle, property: wmHints, type: wmHints, format: 32, mode: 0, data });
+  c.changeProperty({ window: h, property: wmHints, type: wmHints, format: 32, mode: 0, data });
 }
 
-export async function window_setMinimized(handle: number, minimized: boolean): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setMinimized(handle: bigint, minimized: boolean): Promise<void> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return;
   const c = await getXConnection();
   if (!c) return;
-  await setWmState(c, handle, STATE_MINIMIZE, minimized);
+  await setWmState(c, h, STATE_MINIMIZE, minimized);
 }
 
-export async function window_setMaximized(handle: number, maximized: boolean): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setMaximized(handle: bigint, maximized: boolean): Promise<void> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return;
   const c = await getXConnection();
   if (!c) return;
-  await setWmState(c, handle, STATE_MAXIMIZE, maximized);
+  await setWmState(c, h, STATE_MAXIMIZE, maximized);
 }
 
-export async function window_getProcess(handle: number): Promise<number> {
+export async function window_getProcess(handle: bigint): Promise<number> {
   return window_getPID(handle);
 }
 
-export async function window_getPID(handle: number): Promise<number> {
-  if (!(await winIsValid(handle))) return 0;
+export async function window_getPID(handle: bigint): Promise<number> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return 0;
   const c = await getXConnection();
   if (!c) return 0;
   const pidAtom = await c.internAtom("_NET_WM_PID", true);
   if (pidAtom === 0) return 0;
   try {
-    const gp = await c.getProperty({ window: handle, property: pidAtom });
+    const gp = await c.getProperty({ window: h, property: pidAtom });
     if (gp.format === 32 && gp.value.length >= 4) {
       return gp.value.readUInt32LE(0);
     }
@@ -275,46 +289,49 @@ export async function window_getPID(handle: number): Promise<number> {
   return 0;
 }
 
-export function window_getHandle(handle: number): number { return handle; }
+export function window_getHandle(handle: bigint): bigint { return handle; }
 
-export async function window_setHandle(_handle: number, newHandle: number): Promise<boolean> {
-  if (newHandle === 0) return true;
-  return winIsValid(newHandle);
+export async function window_setHandle(_handle: bigint, newHandle: bigint): Promise<boolean> {
+  if (newHandle === 0n) return true;
+  return winIsValid(Number(newHandle));
 }
 
-export async function window_getTitle(handle: number): Promise<string> {
-  if (!(await winIsValid(handle))) return "";
+export async function window_getTitle(handle: bigint): Promise<string> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return "";
   const c = await getXConnection();
   if (!c) return "";
   const nameAtom = await c.internAtom("_NET_WM_NAME", true);
   if (nameAtom !== 0) {
     try {
-      const gp = await c.getProperty({ window: handle, property: nameAtom });
+      const gp = await c.getProperty({ window: h, property: nameAtom });
       if (gp.value.length > 0) return gp.value.toString("utf8");
     } catch {}
   }
   try {
-    const gp = await c.getProperty({ window: handle, property: 39 /* WM_NAME */ });
+    const gp = await c.getProperty({ window: h, property: 39 /* WM_NAME */ });
     if (gp.value.length > 0) return gp.value.toString("utf8");
   } catch {}
   return "";
 }
 
-export async function window_setTitle(handle: number, title: string): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setTitle(handle: bigint, title: string): Promise<void> {
+  const h = Number(handle);
+  if (!(await winIsValid(h))) return;
   const c = await getXConnection();
   if (!c) return;
   const data = Buffer.from(title, "utf8");
-  c.changeProperty({ window: handle, property: 39 /* WM_NAME */, type: 31 /* STRING */, format: 8, mode: 0, data });
+  c.changeProperty({ window: h, property: 39 /* WM_NAME */, type: 31 /* STRING */, format: 8, mode: 0, data });
 }
 
-export async function window_getBounds(handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
-  if (!(await winIsValid(handle))) return { x: 0, y: 0, w: 0, h: 0 };
+export async function window_getBounds(handle: bigint): Promise<{ x: number; y: number; w: number; h: number }> {
+  const hh = Number(handle);
+  if (!(await winIsValid(hh))) return { x: 0, y: 0, w: 0, h: 0 };
   const c = await getXConnection();
   if (!c) return { x: 0, y: 0, w: 0, h: 0 };
   try {
-    const geom = await c.getGeometry(handle);
-    const frame = await getFrame(c, handle);
+    const geom = await c.getGeometry(hh);
+    const frame = await getFrame(c, hh);
     return {
       x: geom.x - frame.left,
       y: geom.y - frame.top,
@@ -326,13 +343,14 @@ export async function window_getBounds(handle: number): Promise<{ x: number; y: 
   }
 }
 
-export async function window_setBounds(handle: number, x: number, y: number, w: number, h: number): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setBounds(handle: bigint, x: number, y: number, w: number, h: number): Promise<void> {
+  const hh = Number(handle);
+  if (!(await winIsValid(hh))) return;
   const c = await getXConnection();
   if (!c) return;
-  const frame = await getFrame(c, handle);
+  const frame = await getFrame(c, hh);
   c.configureWindow({
-    window: handle,
+    window: hh,
     x: x + frame.left,
     y: y + frame.top,
     width: Math.max(1, w - frame.left - frame.right),
@@ -340,84 +358,89 @@ export async function window_setBounds(handle: number, x: number, y: number, w: 
   });
 }
 
-export async function window_getClient(handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
-  if (!(await winIsValid(handle))) return { x: 0, y: 0, w: 0, h: 0 };
+export async function window_getClient(handle: bigint): Promise<{ x: number; y: number; w: number; h: number }> {
+  const hh = Number(handle);
+  if (!(await winIsValid(hh))) return { x: 0, y: 0, w: 0, h: 0 };
   const c = await getXConnection();
   if (!c) return { x: 0, y: 0, w: 0, h: 0 };
   try {
-    const geom = await c.getGeometry(handle);
+    const geom = await c.getGeometry(hh);
     return { x: geom.x, y: geom.y, w: geom.width, h: geom.height };
   } catch {
     return { x: 0, y: 0, w: 0, h: 0 };
   }
 }
 
-export async function window_setClient(handle: number, x: number, y: number, w: number, h: number): Promise<void> {
-  if (!(await winIsValid(handle))) return;
+export async function window_setClient(handle: bigint, x: number, y: number, w: number, h: number): Promise<void> {
+  const hh = Number(handle);
+  if (!(await winIsValid(hh))) return;
   const c = await getXConnection();
   if (!c) return;
-  c.configureWindow({ window: handle, x, y, width: Math.max(1, w), height: Math.max(1, h) });
+  c.configureWindow({ window: hh, x, y, width: Math.max(1, w), height: Math.max(1, h) });
 }
 
-export async function window_mapToClient(handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
-  if (!(await winIsValid(handle))) return { x: 0, y: 0 };
+export async function window_mapToClient(handle: bigint, x: number, y: number): Promise<{ x: number; y: number }> {
+  const hh = Number(handle);
+  if (!(await winIsValid(hh))) return { x: 0, y: 0 };
   const c = await getXConnection();
   if (!c) return { x: 0, y: 0 };
   try {
-    const geom = await c.getGeometry(handle);
+    const geom = await c.getGeometry(hh);
     return { x: x - geom.x, y: y - geom.y };
   } catch {
     return { x: 0, y: 0 };
   }
 }
 
-export async function window_mapToScreen(handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
-  if (!(await winIsValid(handle))) return { x: 0, y: 0 };
+export async function window_mapToScreen(handle: bigint, x: number, y: number): Promise<{ x: number; y: number }> {
+  const hh = Number(handle);
+  if (!(await winIsValid(hh))) return { x: 0, y: 0 };
   const c = await getXConnection();
   if (!c) return { x: 0, y: 0 };
   try {
-    const geom = await c.getGeometry(handle);
+    const geom = await c.getGeometry(hh);
     return { x: x + geom.x, y: y + geom.y };
   } catch {
     return { x: 0, y: 0 };
   }
 }
 
-export async function window_getList(regexStr?: string): Promise<number[]> {
+export async function window_getList(regexStr?: string): Promise<bigint[]> {
   const c = await getXConnection();
   if (!c) return [];
   const root = c.info.screens[0]?.root ?? 0;
   const results: number[] = [];
   const pattern = regexStr ? new RegExp(regexStr) : null;
   await enumWindows(c, root, pattern, results);
-  return results;
+  return results.map((n) => BigInt(n));
 }
 
-export async function window_getActive(): Promise<number> {
+export async function window_getActive(): Promise<bigint> {
   const c = await getXConnection();
-  if (!c) return 0;
+  if (!c) return 0n;
   const root = c.info.screens[0]?.root ?? 0;
   const activeAtom = await c.internAtom("_NET_ACTIVE_WINDOW", true);
-  if (activeAtom === 0) return 0;
+  if (activeAtom === 0) return 0n;
   try {
     const gp = await c.getProperty({ window: root, property: activeAtom });
     if (gp.format === 32 && gp.value.length >= 4) {
-      return gp.value.readUInt32LE(0);
+      return BigInt(gp.value.readUInt32LE(0));
     }
   } catch {}
-  return 0;
+  return 0n;
 }
 
-export async function window_setActive(handle: number): Promise<void> {
-  if (handle === 0) return;
+export async function window_setActive(handle: bigint): Promise<void> {
+  if (handle === 0n) return;
+  const h = Number(handle);
   const c = await getXConnection();
   if (!c) return;
   const activeAtom = await c.internAtom("_NET_ACTIVE_WINDOW", true);
   if (activeAtom === 0) {
-    c.configureWindow({ window: handle, stackMode: 0 });
+    c.configureWindow({ window: h, stackMode: 0 });
     return;
   }
-  await sendClientMessage(c, handle, activeAtom, [1, 0, 0, 0, 0]);
+  await sendClientMessage(c, h, activeAtom, [1, 0, 0, 0, 0]);
 }
 
 export function window_isAxEnabled(_prompt?: boolean): boolean {

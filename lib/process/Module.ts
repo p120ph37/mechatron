@@ -1,42 +1,53 @@
 import { Process } from "./Process";
 import type { ModuleData } from "./Process";
 
+function toBigInt(v: bigint | number): bigint {
+  return typeof v === "bigint" ? v : BigInt(v);
+}
+
 export class Segment {
   valid: boolean = false;
-  base: number = 0;
-  size: number = 0;
+  base: bigint = 0n;
+  size: bigint = 0n;
   name: string = "";
 
   constructor() {}
 
-  contains(value: number): boolean {
-    if (typeof value !== "number") throw new TypeError("Invalid arguments");
+  contains(value: bigint | number): boolean {
+    if (typeof value !== "bigint" && typeof value !== "number") {
+      throw new TypeError("Invalid arguments");
+    }
+    const v = toBigInt(value);
     const base = this.base;
     const stop = this.base + this.size;
-    return base <= value && stop > value;
+    return base <= v && stop > v;
   }
 
-  lt(value: Segment | number): boolean {
+  lt(value: Segment | bigint | number): boolean {
     if (value instanceof Segment) return this.base < value.base;
-    if (typeof value === "number") return this.base < value;
+    if (typeof value === "bigint") return this.base < value;
+    if (typeof value === "number") return this.base < BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  gt(value: Segment | number): boolean {
+  gt(value: Segment | bigint | number): boolean {
     if (value instanceof Segment) return this.base > value.base;
-    if (typeof value === "number") return this.base > value;
+    if (typeof value === "bigint") return this.base > value;
+    if (typeof value === "number") return this.base > BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  le(value: Segment | number): boolean {
+  le(value: Segment | bigint | number): boolean {
     if (value instanceof Segment) return this.base <= value.base;
-    if (typeof value === "number") return this.base <= value;
+    if (typeof value === "bigint") return this.base <= value;
+    if (typeof value === "number") return this.base <= BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  ge(value: Segment | number): boolean {
+  ge(value: Segment | bigint | number): boolean {
     if (value instanceof Segment) return this.base >= value.base;
-    if (typeof value === "number") return this.base >= value;
+    if (typeof value === "bigint") return this.base >= value;
+    if (typeof value === "number") return this.base >= BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
@@ -76,8 +87,8 @@ export class Module {
   valid: boolean;
   name: string;
   path: string;
-  base: number;
-  size: number;
+  base: bigint;
+  size: bigint;
   process: Process;
 
   _segments: Segment[] | null = null;
@@ -86,8 +97,8 @@ export class Module {
   constructor();
   constructor(other: Module);
   constructor(data: ModuleData);
-  constructor(process: Process, name: string, path: string, base: number, size: number);
-  constructor(a?: Module | ModuleData | Process, b?: string, c?: string, d?: number, e?: number) {
+  constructor(process: Process, name: string, path: string, base: bigint | number, size: bigint | number);
+  constructor(a?: Module | ModuleData | Process, b?: string, c?: string, d?: bigint | number, e?: bigint | number) {
     if (a instanceof Module) {
       this.valid = a.valid;
       this.name = a.name;
@@ -100,22 +111,22 @@ export class Module {
       this.valid = true;
       this.name = b;
       this.path = c || "";
-      this.base = d || 0;
-      this.size = e || 0;
+      this.base = d !== undefined ? toBigInt(d) : 0n;
+      this.size = e !== undefined ? toBigInt(e) : 0n;
       this.process = a;
     } else if (a && typeof a === "object" && "pid" in a) {
       this.valid = (a as ModuleData).valid;
       this.name = (a as ModuleData).name;
       this.path = (a as ModuleData).path;
-      this.base = (a as ModuleData).base;
-      this.size = (a as ModuleData).size;
+      this.base = toBigInt((a as ModuleData).base as bigint | number);
+      this.size = toBigInt((a as ModuleData).size as bigint | number);
       this.process = new Process((a as ModuleData).pid);
     } else {
       this.valid = false;
       this.name = "";
       this.path = "";
-      this.base = 0;
-      this.size = 0;
+      this.base = 0n;
+      this.size = 0n;
       this.process = new Process();
     }
   }
@@ -124,47 +135,57 @@ export class Module {
   isValid(): boolean { return this.valid; }
   getName(): string { return this.name; }
   getPath(): string { return this.path; }
-  getBase(): number { return this.base; }
-  getSize(): number { return this.size; }
+  getBase(): bigint { return this.base; }
+  getSize(): bigint { return this.size; }
   getProcess(): Process { return this.process; }
 
-  contains(address: number): boolean {
-    return address >= this.base && address < this.base + this.size;
+  contains(address: bigint | number): boolean {
+    if (typeof address !== "bigint" && typeof address !== "number") {
+      throw new TypeError("Invalid arguments");
+    }
+    const a = toBigInt(address);
+    return a >= this.base && a < this.base + this.size;
   }
 
-  lt(value: Module | number): boolean {
+  lt(value: Module | bigint | number): boolean {
     if (value instanceof Module) return this.base < value.base;
-    if (typeof value === "number") return this.base < value;
+    if (typeof value === "bigint") return this.base < value;
+    if (typeof value === "number") return this.base < BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  gt(value: Module | number): boolean {
+  gt(value: Module | bigint | number): boolean {
     if (value instanceof Module) return this.base > value.base;
-    if (typeof value === "number") return this.base > value;
+    if (typeof value === "bigint") return this.base > value;
+    if (typeof value === "number") return this.base > BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  le(value: Module | number): boolean {
+  le(value: Module | bigint | number): boolean {
     if (value instanceof Module) return this.base <= value.base;
-    if (typeof value === "number") return this.base <= value;
+    if (typeof value === "bigint") return this.base <= value;
+    if (typeof value === "number") return this.base <= BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  ge(value: Module | number): boolean {
+  ge(value: Module | bigint | number): boolean {
     if (value instanceof Module) return this.base >= value.base;
-    if (typeof value === "number") return this.base >= value;
+    if (typeof value === "bigint") return this.base >= value;
+    if (typeof value === "number") return this.base >= BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  eq(value: Module | number): boolean {
+  eq(value: Module | bigint | number): boolean {
     if (value instanceof Module) return this.base === value.base;
-    if (typeof value === "number") return this.base === value;
+    if (typeof value === "bigint") return this.base === value;
+    if (typeof value === "number") return this.base === BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
-  ne(value: Module | number): boolean {
+  ne(value: Module | bigint | number): boolean {
     if (value instanceof Module) return this.base !== value.base;
-    if (typeof value === "number") return this.base !== value;
+    if (typeof value === "bigint") return this.base !== value;
+    if (typeof value === "number") return this.base !== BigInt(value);
     throw new TypeError("Invalid arguments");
   }
 
@@ -176,8 +197,8 @@ export class Module {
       this._segments = rawSegs.map((s) => {
         const seg = new Segment();
         seg.valid = s.valid;
-        seg.base = s.base;
-        seg.size = s.size;
+        seg.base = toBigInt(s.base as bigint | number);
+        seg.size = toBigInt(s.size as bigint | number);
         seg.name = s.name;
         return seg;
       });

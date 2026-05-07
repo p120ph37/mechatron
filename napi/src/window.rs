@@ -315,39 +315,36 @@ unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: 
 // --- Platform-level functions (Linux) ---
 
 #[cfg(target_os = "linux")]
-fn platform_window_is_valid(handle: f64) -> bool {
-    unsafe { win_is_valid(handle as u64) }
+fn platform_window_is_valid(handle: u64) -> bool {
+    unsafe { win_is_valid(handle) }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_close(handle: f64) {
+fn platform_window_close(handle: u64) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return; }
+        if !win_is_valid(handle) { return; }
         let d = get_display();
         let _xe = XDismissErrors::new();
-        XDestroyWindow(d, h as Window);
+        XDestroyWindow(d, handle as Window);
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_is_top_most(handle: f64) -> bool {
+fn platform_window_is_top_most(handle: u64) -> bool {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return false; }
+        if !win_is_valid(handle) { return false; }
         let _xe = XDismissErrors::new();
-        get_wm_state(h as Window, STATE_TOPMOST)
+        get_wm_state(handle as Window, STATE_TOPMOST)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_is_borderless(handle: f64) -> bool {
+fn platform_window_is_borderless(handle: u64) -> bool {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return false; }
+        if !win_is_valid(handle) { return false; }
         load_atoms();
         let _xe = XDismissErrors::new();
-        let result = get_window_property(h as Window, WM_HINTS, None);
+        let result = get_window_property(handle as Window, WM_HINTS, None);
         if result.is_null() { return false; }
         let decorations = *(result as *const c_ulong).add(2);
         XFree(result as *mut c_void);
@@ -356,40 +353,36 @@ fn platform_window_is_borderless(handle: f64) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_is_minimized(handle: f64) -> bool {
+fn platform_window_is_minimized(handle: u64) -> bool {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return false; }
+        if !win_is_valid(handle) { return false; }
         let _xe = XDismissErrors::new();
-        get_wm_state(h as Window, STATE_MINIMIZE)
+        get_wm_state(handle as Window, STATE_MINIMIZE)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_is_maximized(handle: f64) -> bool {
+fn platform_window_is_maximized(handle: u64) -> bool {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return false; }
+        if !win_is_valid(handle) { return false; }
         let _xe = XDismissErrors::new();
-        get_wm_state(h as Window, STATE_MAXIMIZE)
+        get_wm_state(handle as Window, STATE_MAXIMIZE)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_top_most(handle: f64, top_most: bool) {
+fn platform_window_set_top_most(handle: u64, top_most: bool) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return; }
+        if !win_is_valid(handle) { return; }
         let _xe = XDismissErrors::new();
-        set_wm_state(h as Window, STATE_TOPMOST, top_most);
+        set_wm_state(handle as Window, STATE_TOPMOST, top_most);
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_borderless(handle: f64, borderless: bool) {
+fn platform_window_set_borderless(handle: u64, borderless: bool) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return; }
+        if !win_is_valid(handle) { return; }
         load_atoms();
         let _xe = XDismissErrors::new();
         if WM_HINTS != None_ {
@@ -403,162 +396,150 @@ fn platform_window_set_borderless(handle: f64, borderless: bool) {
                 stat: 0,
             };
             let d = get_display();
-            XChangeProperty(d, h as Window, WM_HINTS, WM_HINTS, 32, PropModeReplace,
+            XChangeProperty(d, handle as Window, WM_HINTS, WM_HINTS, 32, PropModeReplace,
                 &hints as *const Hints as *const u8, 5);
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_minimized(handle: f64, minimized: bool) {
+fn platform_window_set_minimized(handle: u64, minimized: bool) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return; }
+        if !win_is_valid(handle) { return; }
         let _xe = XDismissErrors::new();
-        set_wm_state(h as Window, STATE_MINIMIZE, minimized);
+        set_wm_state(handle as Window, STATE_MINIMIZE, minimized);
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_maximized(handle: f64, maximized: bool) {
+fn platform_window_set_maximized(handle: u64, maximized: bool) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return; }
+        if !win_is_valid(handle) { return; }
         let _xe = XDismissErrors::new();
-        set_wm_state(h as Window, STATE_MINIMIZE, false);
-        set_wm_state(h as Window, STATE_MAXIMIZE, maximized);
+        set_wm_state(handle as Window, STATE_MINIMIZE, false);
+        set_wm_state(handle as Window, STATE_MAXIMIZE, maximized);
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_process(handle: f64) -> f64 {
+fn platform_window_get_process(handle: u64) -> i32 {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return 0.0; }
-        get_pid(h as Window) as f64
+        if !win_is_valid(handle) { return 0; }
+        get_pid(handle as Window)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_pid(handle: f64) -> f64 {
+fn platform_window_get_pid(handle: u64) -> i32 {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return 0.0; }
-        get_pid(h as Window) as f64
+        if !win_is_valid(handle) { return 0; }
+        get_pid(handle as Window)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_handle(handle: f64) -> f64 {
+fn platform_window_get_handle(handle: u64) -> u64 {
     handle
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_handle(_handle: f64, new_handle: f64) -> bool {
-    unsafe { validate_handle(new_handle as u64) != 0 || new_handle == 0.0 }
+fn platform_window_set_handle(_handle: u64, new_handle: u64) -> bool {
+    unsafe { validate_handle(new_handle) != 0 || new_handle == 0 }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_title(handle: f64) -> String {
+fn platform_window_get_title(handle: u64) -> String {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return String::new(); }
-        get_title(h as Window)
+        if !win_is_valid(handle) { return String::new(); }
+        get_title(handle as Window)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_title(handle: f64, title: String) {
+fn platform_window_set_title(handle: u64, title: String) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) { return; }
+        if !win_is_valid(handle) { return; }
         let d = get_display();
         let _xe = XDismissErrors::new();
         if let Ok(cstr) = CString::new(title.as_bytes()) {
-            XStoreName(d, h as Window, cstr.as_ptr());
+            XStoreName(d, handle as Window, cstr.as_ptr());
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_bounds(handle: f64) -> (i32, i32, i32, i32) {
+fn platform_window_get_bounds(handle: u64) -> (i32, i32, i32, i32) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) {
+        if !win_is_valid(handle) {
             return (0, 0, 0, 0);
         }
         let _xe = XDismissErrors::new();
-        let client = get_client(h as Window);
-        let frame = get_frame(h as Window);
+        let client = get_client(handle as Window);
+        let frame = get_frame(handle as Window);
         (client.0 - frame.0, client.1 - frame.1, client.2 + frame.2, client.3 + frame.3)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) {
+fn platform_window_set_bounds(handle: u64, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
-        let hh = handle as u64;
-        if !win_is_valid(hh) { return; }
+        if !win_is_valid(handle) { return; }
         let d = get_display();
         let _xe = XDismissErrors::new();
-        let frame = get_frame(hh as Window);
-        XMoveResizeWindow(d, hh as Window, x, y,
+        let frame = get_frame(handle as Window);
+        XMoveResizeWindow(d, handle as Window, x, y,
             (w - frame.2).max(1) as c_uint,
             (h - frame.3).max(1) as c_uint);
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_client(handle: f64) -> (i32, i32, i32, i32) {
+fn platform_window_get_client(handle: u64) -> (i32, i32, i32, i32) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) {
+        if !win_is_valid(handle) {
             return (0, 0, 0, 0);
         }
         let _xe = XDismissErrors::new();
-        get_client(h as Window)
+        get_client(handle as Window)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) {
+fn platform_window_set_client(handle: u64, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
-        let hh = handle as u64;
-        if !win_is_valid(hh) { return; }
+        if !win_is_valid(handle) { return; }
         let d = get_display();
         let _xe = XDismissErrors::new();
-        XMoveResizeWindow(d, hh as Window, x, y, w.max(1) as c_uint, h.max(1) as c_uint);
+        XMoveResizeWindow(d, handle as Window, x, y, w.max(1) as c_uint, h.max(1) as c_uint);
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_map_to_client(handle: f64, x: i32, y: i32) -> (i32, i32) {
+fn platform_window_map_to_client(handle: u64, x: i32, y: i32) -> (i32, i32) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) {
+        if !win_is_valid(handle) {
             return (x, y);
         }
         let _xe = XDismissErrors::new();
-        let c = get_client(h as Window);
+        let c = get_client(handle as Window);
         (x - c.0, y - c.1)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_map_to_screen(handle: f64, x: i32, y: i32) -> (i32, i32) {
+fn platform_window_map_to_screen(handle: u64, x: i32, y: i32) -> (i32, i32) {
     unsafe {
-        let h = handle as u64;
-        if !win_is_valid(h) {
+        if !win_is_valid(handle) {
             return (x, y);
         }
         let _xe = XDismissErrors::new();
-        let c = get_client(h as Window);
+        let c = get_client(handle as Window);
         (x + c.0, y + c.1)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_list(regex_str: Option<String>) -> Vec<f64> {
+fn platform_window_get_list(regex_str: Option<String>) -> Vec<u64> {
     unsafe {
         let d = get_display();
         if d.is_null() {
@@ -572,15 +553,15 @@ fn platform_window_get_list(regex_str: Option<String>) -> Vec<f64> {
         let root = XDefaultRootWindow(d);
         enum_windows(root, pattern.as_ref(), 0, &mut results);
 
-        results.into_iter().map(|h| h as f64).collect()
+        results
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_get_active() -> f64 {
+fn platform_window_get_active() -> u64 {
     unsafe {
         let d = get_display();
-        if d.is_null() { return 0.0; }
+        if d.is_null() { return 0; }
         load_atoms();
         let _xe = XDismissErrors::new();
 
@@ -590,20 +571,19 @@ fn platform_window_get_active() -> f64 {
             if !result.is_null() {
                 let win = *(result as *const Window);
                 XFree(result as *mut c_void);
-                return win as f64;
+                return win as u64;
             }
         }
-        0.0
+        0
     }
 }
 
 #[cfg(target_os = "linux")]
-fn platform_window_set_active(handle: f64) {
+fn platform_window_set_active(handle: u64) {
     unsafe {
-        let h = handle as u64;
-        if h == 0 { return; }
+        if handle == 0 { return; }
         let _xe = XDismissErrors::new();
-        window_set_active_internal(h as Window);
+        window_set_active_internal(handle as Window);
     }
 }
 
@@ -615,79 +595,79 @@ fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool {
 // ==================== Non-Linux stubs ====================
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_is_valid(_handle: f64) -> bool { false }
+fn platform_window_is_valid(_handle: u64) -> bool { false }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_close(_handle: f64) {}
+fn platform_window_close(_handle: u64) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_is_top_most(_handle: f64) -> bool { false }
+fn platform_window_is_top_most(_handle: u64) -> bool { false }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_is_borderless(_handle: f64) -> bool { false }
+fn platform_window_is_borderless(_handle: u64) -> bool { false }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_is_minimized(_handle: f64) -> bool { false }
+fn platform_window_is_minimized(_handle: u64) -> bool { false }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_is_maximized(_handle: f64) -> bool { false }
+fn platform_window_is_maximized(_handle: u64) -> bool { false }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_top_most(_handle: f64, _top_most: bool) {}
+fn platform_window_set_top_most(_handle: u64, _top_most: bool) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_borderless(_handle: f64, _borderless: bool) {}
+fn platform_window_set_borderless(_handle: u64, _borderless: bool) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_minimized(_handle: f64, _minimized: bool) {}
+fn platform_window_set_minimized(_handle: u64, _minimized: bool) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_maximized(_handle: f64, _maximized: bool) {}
+fn platform_window_set_maximized(_handle: u64, _maximized: bool) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_process(_handle: f64) -> f64 { 0.0 }
+fn platform_window_get_process(_handle: u64) -> i32 { 0 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_pid(_handle: f64) -> f64 { 0.0 }
+fn platform_window_get_pid(_handle: u64) -> i32 { 0 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_handle(handle: f64) -> f64 { handle }
+fn platform_window_get_handle(handle: u64) -> u64 { handle }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_handle(_handle: f64, new_handle: f64) -> bool { new_handle == 0.0 }
+fn platform_window_set_handle(_handle: u64, new_handle: u64) -> bool { new_handle == 0 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_title(_handle: f64) -> String { String::new() }
+fn platform_window_get_title(_handle: u64) -> String { String::new() }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_title(_handle: f64, _title: String) {}
+fn platform_window_set_title(_handle: u64, _title: String) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_bounds(_handle: f64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
+fn platform_window_get_bounds(_handle: u64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_bounds(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+fn platform_window_set_bounds(_handle: u64, _x: i32, _y: i32, _w: i32, _h: i32) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_client(_handle: f64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
+fn platform_window_get_client(_handle: u64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_client(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+fn platform_window_set_client(_handle: u64, _x: i32, _y: i32, _w: i32, _h: i32) {}
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_map_to_client(_handle: f64, x: i32, y: i32) -> (i32, i32) { (x, y) }
+fn platform_window_map_to_client(_handle: u64, x: i32, y: i32) -> (i32, i32) { (x, y) }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_map_to_screen(_handle: f64, x: i32, y: i32) -> (i32, i32) { (x, y) }
+fn platform_window_map_to_screen(_handle: u64, x: i32, y: i32) -> (i32, i32) { (x, y) }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_list(_regex_str: Option<String>) -> Vec<f64> { Vec::new() }
+fn platform_window_get_list(_regex_str: Option<String>) -> Vec<u64> { Vec::new() }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_get_active() -> f64 { 0.0 }
+fn platform_window_get_active() -> u64 { 0 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_window_set_active(_handle: f64) {}
+fn platform_window_set_active(_handle: u64) {}
 
 #[cfg(not(target_os = "linux"))]
 fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool { false }
@@ -708,9 +688,20 @@ pub struct WindowPoint {
     pub y: i32,
 }
 
+// ==================== BigInt helpers ====================
+
+fn bi_to_u64(bi: &BigInt) -> u64 {
+    let (sign, val, _) = bi.get_u64();
+    if sign { 0 } else { val }
+}
+
+fn u64_to_bi(val: u64) -> BigInt {
+    BigInt { sign_bit: false, words: vec![val] }
+}
+
 // ==================== AsyncTask wrappers ====================
 
-struct IsValidTask { handle: f64 }
+struct IsValidTask { handle: u64 }
 impl Task for IsValidTask {
     type Output = bool;
     type JsValue = bool;
@@ -718,7 +709,7 @@ impl Task for IsValidTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct CloseTask { handle: f64 }
+struct CloseTask { handle: u64 }
 impl Task for CloseTask {
     type Output = ();
     type JsValue = ();
@@ -726,7 +717,7 @@ impl Task for CloseTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct IsTopMostTask { handle: f64 }
+struct IsTopMostTask { handle: u64 }
 impl Task for IsTopMostTask {
     type Output = bool;
     type JsValue = bool;
@@ -734,7 +725,7 @@ impl Task for IsTopMostTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct IsBorderlessTask { handle: f64 }
+struct IsBorderlessTask { handle: u64 }
 impl Task for IsBorderlessTask {
     type Output = bool;
     type JsValue = bool;
@@ -742,7 +733,7 @@ impl Task for IsBorderlessTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct IsMinimizedTask { handle: f64 }
+struct IsMinimizedTask { handle: u64 }
 impl Task for IsMinimizedTask {
     type Output = bool;
     type JsValue = bool;
@@ -750,7 +741,7 @@ impl Task for IsMinimizedTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct IsMaximizedTask { handle: f64 }
+struct IsMaximizedTask { handle: u64 }
 impl Task for IsMaximizedTask {
     type Output = bool;
     type JsValue = bool;
@@ -758,7 +749,7 @@ impl Task for IsMaximizedTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct SetTopMostTask { handle: f64, top_most: bool }
+struct SetTopMostTask { handle: u64, top_most: bool }
 impl Task for SetTopMostTask {
     type Output = ();
     type JsValue = ();
@@ -766,7 +757,7 @@ impl Task for SetTopMostTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct SetBorderlessTask { handle: f64, borderless: bool }
+struct SetBorderlessTask { handle: u64, borderless: bool }
 impl Task for SetBorderlessTask {
     type Output = ();
     type JsValue = ();
@@ -774,7 +765,7 @@ impl Task for SetBorderlessTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct SetMinimizedTask { handle: f64, minimized: bool }
+struct SetMinimizedTask { handle: u64, minimized: bool }
 impl Task for SetMinimizedTask {
     type Output = ();
     type JsValue = ();
@@ -782,7 +773,7 @@ impl Task for SetMinimizedTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct SetMaximizedTask { handle: f64, maximized: bool }
+struct SetMaximizedTask { handle: u64, maximized: bool }
 impl Task for SetMaximizedTask {
     type Output = ();
     type JsValue = ();
@@ -790,31 +781,31 @@ impl Task for SetMaximizedTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetProcessTask { handle: f64 }
+struct GetProcessTask { handle: u64 }
 impl Task for GetProcessTask {
-    type Output = f64;
-    type JsValue = f64;
-    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_process(self.handle)) }
-    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+    type Output = i32;
+    type JsValue = i32;
+    fn compute(&mut self) -> Result<i32> { Ok(platform_window_get_process(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: i32) -> Result<i32> { Ok(out) }
 }
 
-struct GetPIDTask { handle: f64 }
+struct GetPIDTask { handle: u64 }
 impl Task for GetPIDTask {
-    type Output = f64;
-    type JsValue = f64;
-    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_pid(self.handle)) }
-    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+    type Output = i32;
+    type JsValue = i32;
+    fn compute(&mut self) -> Result<i32> { Ok(platform_window_get_pid(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: i32) -> Result<i32> { Ok(out) }
 }
 
-struct GetHandleTask { handle: f64 }
+struct GetHandleTask { handle: u64 }
 impl Task for GetHandleTask {
-    type Output = f64;
-    type JsValue = f64;
-    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_handle(self.handle)) }
-    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+    type Output = u64;
+    type JsValue = BigInt;
+    fn compute(&mut self) -> Result<u64> { Ok(platform_window_get_handle(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
 }
 
-struct SetHandleTask { handle: f64, new_handle: f64 }
+struct SetHandleTask { handle: u64, new_handle: u64 }
 impl Task for SetHandleTask {
     type Output = bool;
     type JsValue = bool;
@@ -822,7 +813,7 @@ impl Task for SetHandleTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetTitleTask { handle: f64 }
+struct GetTitleTask { handle: u64 }
 impl Task for GetTitleTask {
     type Output = String;
     type JsValue = String;
@@ -830,7 +821,7 @@ impl Task for GetTitleTask {
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
-struct SetTitleTask { handle: f64, title: String }
+struct SetTitleTask { handle: u64, title: String }
 impl Task for SetTitleTask {
     type Output = ();
     type JsValue = ();
@@ -838,7 +829,7 @@ impl Task for SetTitleTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetBoundsTask { handle: f64 }
+struct GetBoundsTask { handle: u64 }
 impl Task for GetBoundsTask {
     type Output = (i32, i32, i32, i32);
     type JsValue = WindowBounds;
@@ -848,7 +839,7 @@ impl Task for GetBoundsTask {
     }
 }
 
-struct SetBoundsTask { handle: f64, x: i32, y: i32, w: i32, h: i32 }
+struct SetBoundsTask { handle: u64, x: i32, y: i32, w: i32, h: i32 }
 impl Task for SetBoundsTask {
     type Output = ();
     type JsValue = ();
@@ -856,7 +847,7 @@ impl Task for SetBoundsTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetClientTask { handle: f64 }
+struct GetClientTask { handle: u64 }
 impl Task for GetClientTask {
     type Output = (i32, i32, i32, i32);
     type JsValue = WindowBounds;
@@ -866,7 +857,7 @@ impl Task for GetClientTask {
     }
 }
 
-struct SetClientTask { handle: f64, x: i32, y: i32, w: i32, h: i32 }
+struct SetClientTask { handle: u64, x: i32, y: i32, w: i32, h: i32 }
 impl Task for SetClientTask {
     type Output = ();
     type JsValue = ();
@@ -874,7 +865,7 @@ impl Task for SetClientTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct MapToClientTask { handle: f64, x: i32, y: i32 }
+struct MapToClientTask { handle: u64, x: i32, y: i32 }
 impl Task for MapToClientTask {
     type Output = (i32, i32);
     type JsValue = WindowPoint;
@@ -884,7 +875,7 @@ impl Task for MapToClientTask {
     }
 }
 
-struct MapToScreenTask { handle: f64, x: i32, y: i32 }
+struct MapToScreenTask { handle: u64, x: i32, y: i32 }
 impl Task for MapToScreenTask {
     type Output = (i32, i32);
     type JsValue = WindowPoint;
@@ -896,21 +887,23 @@ impl Task for MapToScreenTask {
 
 struct GetListTask { regex_str: Option<String> }
 impl Task for GetListTask {
-    type Output = Vec<f64>;
-    type JsValue = Vec<f64>;
-    fn compute(&mut self) -> Result<Vec<f64>> { Ok(platform_window_get_list(self.regex_str.clone())) }
-    fn resolve(&mut self, _env: Env, out: Vec<f64>) -> Result<Vec<f64>> { Ok(out) }
+    type Output = Vec<u64>;
+    type JsValue = Vec<BigInt>;
+    fn compute(&mut self) -> Result<Vec<u64>> { Ok(platform_window_get_list(self.regex_str.clone())) }
+    fn resolve(&mut self, _env: Env, out: Vec<u64>) -> Result<Vec<BigInt>> {
+        Ok(out.into_iter().map(u64_to_bi).collect())
+    }
 }
 
 struct GetActiveTask;
 impl Task for GetActiveTask {
-    type Output = f64;
-    type JsValue = f64;
-    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_active()) }
-    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+    type Output = u64;
+    type JsValue = BigInt;
+    fn compute(&mut self) -> Result<u64> { Ok(platform_window_get_active()) }
+    fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
 }
 
-struct SetActiveTask { handle: f64 }
+struct SetActiveTask { handle: u64 }
 impl Task for SetActiveTask {
     type Output = ();
     type JsValue = ();
@@ -929,113 +922,113 @@ impl Task for IsAxEnabledTask {
 // ==================== NAPI exports (AsyncTask) ====================
 
 #[napi(js_name = "window_isValid")]
-pub fn window_is_valid(handle: f64) -> AsyncTask<IsValidTask> {
-    AsyncTask::new(IsValidTask { handle })
+pub fn window_is_valid(handle: BigInt) -> AsyncTask<IsValidTask> {
+    AsyncTask::new(IsValidTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_close")]
-pub fn window_close(handle: f64) -> AsyncTask<CloseTask> {
-    AsyncTask::new(CloseTask { handle })
+pub fn window_close(handle: BigInt) -> AsyncTask<CloseTask> {
+    AsyncTask::new(CloseTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_isTopMost")]
-pub fn window_is_top_most(handle: f64) -> AsyncTask<IsTopMostTask> {
-    AsyncTask::new(IsTopMostTask { handle })
+pub fn window_is_top_most(handle: BigInt) -> AsyncTask<IsTopMostTask> {
+    AsyncTask::new(IsTopMostTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_isBorderless")]
-pub fn window_is_borderless(handle: f64) -> AsyncTask<IsBorderlessTask> {
-    AsyncTask::new(IsBorderlessTask { handle })
+pub fn window_is_borderless(handle: BigInt) -> AsyncTask<IsBorderlessTask> {
+    AsyncTask::new(IsBorderlessTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_isMinimized")]
-pub fn window_is_minimized(handle: f64) -> AsyncTask<IsMinimizedTask> {
-    AsyncTask::new(IsMinimizedTask { handle })
+pub fn window_is_minimized(handle: BigInt) -> AsyncTask<IsMinimizedTask> {
+    AsyncTask::new(IsMinimizedTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_isMaximized")]
-pub fn window_is_maximized(handle: f64) -> AsyncTask<IsMaximizedTask> {
-    AsyncTask::new(IsMaximizedTask { handle })
+pub fn window_is_maximized(handle: BigInt) -> AsyncTask<IsMaximizedTask> {
+    AsyncTask::new(IsMaximizedTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_setTopMost")]
-pub fn window_set_top_most(handle: f64, top_most: bool) -> AsyncTask<SetTopMostTask> {
-    AsyncTask::new(SetTopMostTask { handle, top_most })
+pub fn window_set_top_most(handle: BigInt, top_most: bool) -> AsyncTask<SetTopMostTask> {
+    AsyncTask::new(SetTopMostTask { handle: bi_to_u64(&handle), top_most })
 }
 
 #[napi(js_name = "window_setBorderless")]
-pub fn window_set_borderless(handle: f64, borderless: bool) -> AsyncTask<SetBorderlessTask> {
-    AsyncTask::new(SetBorderlessTask { handle, borderless })
+pub fn window_set_borderless(handle: BigInt, borderless: bool) -> AsyncTask<SetBorderlessTask> {
+    AsyncTask::new(SetBorderlessTask { handle: bi_to_u64(&handle), borderless })
 }
 
 #[napi(js_name = "window_setMinimized")]
-pub fn window_set_minimized(handle: f64, minimized: bool) -> AsyncTask<SetMinimizedTask> {
-    AsyncTask::new(SetMinimizedTask { handle, minimized })
+pub fn window_set_minimized(handle: BigInt, minimized: bool) -> AsyncTask<SetMinimizedTask> {
+    AsyncTask::new(SetMinimizedTask { handle: bi_to_u64(&handle), minimized })
 }
 
 #[napi(js_name = "window_setMaximized")]
-pub fn window_set_maximized(handle: f64, maximized: bool) -> AsyncTask<SetMaximizedTask> {
-    AsyncTask::new(SetMaximizedTask { handle, maximized })
+pub fn window_set_maximized(handle: BigInt, maximized: bool) -> AsyncTask<SetMaximizedTask> {
+    AsyncTask::new(SetMaximizedTask { handle: bi_to_u64(&handle), maximized })
 }
 
 #[napi(js_name = "window_getProcess")]
-pub fn window_get_process(handle: f64) -> AsyncTask<GetProcessTask> {
-    AsyncTask::new(GetProcessTask { handle })
+pub fn window_get_process(handle: BigInt) -> AsyncTask<GetProcessTask> {
+    AsyncTask::new(GetProcessTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_getPID")]
-pub fn window_get_pid(handle: f64) -> AsyncTask<GetPIDTask> {
-    AsyncTask::new(GetPIDTask { handle })
+pub fn window_get_pid(handle: BigInt) -> AsyncTask<GetPIDTask> {
+    AsyncTask::new(GetPIDTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_getHandle")]
-pub fn window_get_handle(handle: f64) -> AsyncTask<GetHandleTask> {
-    AsyncTask::new(GetHandleTask { handle })
+pub fn window_get_handle(handle: BigInt) -> AsyncTask<GetHandleTask> {
+    AsyncTask::new(GetHandleTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_setHandle")]
-pub fn window_set_handle(handle: f64, new_handle: f64) -> AsyncTask<SetHandleTask> {
-    AsyncTask::new(SetHandleTask { handle, new_handle })
+pub fn window_set_handle(handle: BigInt, new_handle: BigInt) -> AsyncTask<SetHandleTask> {
+    AsyncTask::new(SetHandleTask { handle: bi_to_u64(&handle), new_handle: bi_to_u64(&new_handle) })
 }
 
 #[napi(js_name = "window_getTitle")]
-pub fn window_get_title(handle: f64) -> AsyncTask<GetTitleTask> {
-    AsyncTask::new(GetTitleTask { handle })
+pub fn window_get_title(handle: BigInt) -> AsyncTask<GetTitleTask> {
+    AsyncTask::new(GetTitleTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_setTitle")]
-pub fn window_set_title(handle: f64, title: String) -> AsyncTask<SetTitleTask> {
-    AsyncTask::new(SetTitleTask { handle, title })
+pub fn window_set_title(handle: BigInt, title: String) -> AsyncTask<SetTitleTask> {
+    AsyncTask::new(SetTitleTask { handle: bi_to_u64(&handle), title })
 }
 
 #[napi(js_name = "window_getBounds")]
-pub fn window_get_bounds(handle: f64) -> AsyncTask<GetBoundsTask> {
-    AsyncTask::new(GetBoundsTask { handle })
+pub fn window_get_bounds(handle: BigInt) -> AsyncTask<GetBoundsTask> {
+    AsyncTask::new(GetBoundsTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_setBounds")]
-pub fn window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) -> AsyncTask<SetBoundsTask> {
-    AsyncTask::new(SetBoundsTask { handle, x, y, w, h })
+pub fn window_set_bounds(handle: BigInt, x: i32, y: i32, w: i32, h: i32) -> AsyncTask<SetBoundsTask> {
+    AsyncTask::new(SetBoundsTask { handle: bi_to_u64(&handle), x, y, w, h })
 }
 
 #[napi(js_name = "window_getClient")]
-pub fn window_get_client(handle: f64) -> AsyncTask<GetClientTask> {
-    AsyncTask::new(GetClientTask { handle })
+pub fn window_get_client(handle: BigInt) -> AsyncTask<GetClientTask> {
+    AsyncTask::new(GetClientTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_setClient")]
-pub fn window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) -> AsyncTask<SetClientTask> {
-    AsyncTask::new(SetClientTask { handle, x, y, w, h })
+pub fn window_set_client(handle: BigInt, x: i32, y: i32, w: i32, h: i32) -> AsyncTask<SetClientTask> {
+    AsyncTask::new(SetClientTask { handle: bi_to_u64(&handle), x, y, w, h })
 }
 
 #[napi(js_name = "window_mapToClient")]
-pub fn window_map_to_client(handle: f64, x: i32, y: i32) -> AsyncTask<MapToClientTask> {
-    AsyncTask::new(MapToClientTask { handle, x, y })
+pub fn window_map_to_client(handle: BigInt, x: i32, y: i32) -> AsyncTask<MapToClientTask> {
+    AsyncTask::new(MapToClientTask { handle: bi_to_u64(&handle), x, y })
 }
 
 #[napi(js_name = "window_mapToScreen")]
-pub fn window_map_to_screen(handle: f64, x: i32, y: i32) -> AsyncTask<MapToScreenTask> {
-    AsyncTask::new(MapToScreenTask { handle, x, y })
+pub fn window_map_to_screen(handle: BigInt, x: i32, y: i32) -> AsyncTask<MapToScreenTask> {
+    AsyncTask::new(MapToScreenTask { handle: bi_to_u64(&handle), x, y })
 }
 
 #[napi(js_name = "window_getList")]
@@ -1049,8 +1042,8 @@ pub fn window_get_active() -> AsyncTask<GetActiveTask> {
 }
 
 #[napi(js_name = "window_setActive")]
-pub fn window_set_active(handle: f64) -> AsyncTask<SetActiveTask> {
-    AsyncTask::new(SetActiveTask { handle })
+pub fn window_set_active(handle: BigInt) -> AsyncTask<SetActiveTask> {
+    AsyncTask::new(SetActiveTask { handle: bi_to_u64(&handle) })
 }
 
 #[napi(js_name = "window_isAxEnabled")]

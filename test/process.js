@@ -173,13 +173,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				var mod = mods[0];
 				assert(typeof mod.getName() === "string", "module getName");
 				assert(typeof mod.getPath() === "string", "module getPath");
-				assert(typeof mod.getBase() === "number", "module getBase");
-				assert(typeof mod.getSize() === "number", "module getSize");
+				assert(typeof mod.getBase() === "bigint", "module getBase");
+				assert(typeof mod.getSize() === "bigint", "module getSize");
 				assert(mod.isValid(), "module isValid");
 				assert(mod.getProcess() instanceof Process, "module getProcess");
 
 				// Module contains
-				if (mod.getSize() > 0) {
+				if (mod.getSize() > 0n) {
 					assert(mod.contains(mod.getBase()), "module contains base");
 					assert(!mod.contains(0), "module !contains 0");
 				}
@@ -196,13 +196,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					assert(typeof m0.ne(m1) === "boolean", "module ne");
 				}
 
-				// Module 5-param constructor
+				// Module 5-param constructor (accepts both number and bigint)
 				var mod5 = new Module(curr, "testmod", "/test/path", 0x1000, 0x2000);
 				assert(mod5.isValid(), "Module 5-param valid");
 				assert(mod5.getName() === "testmod", "Module 5-param name");
 				assert(mod5.getPath() === "/test/path", "Module 5-param path");
-				assert(mod5.getBase() === 0x1000, "Module 5-param base");
-				assert(mod5.getSize() === 0x2000, "Module 5-param size");
+				assert(mod5.getBase() === 0x1000n, "Module 5-param base");
+				assert(mod5.getSize() === 0x2000n, "Module 5-param size");
 				assert(mod5.getProcess().eq(curr), "Module 5-param process");
 
 				// Module clone

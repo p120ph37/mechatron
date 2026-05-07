@@ -600,8 +600,8 @@ fn platform_process_get_modules(pid: i32, regex_str: Option<String>) -> Vec<Napi
                 valid: true,
                 name,
                 path: path_str.to_string(),
-                base: base as f64,
-                size: (end - base) as f64,
+                base: BigInt::from(base),
+                size: BigInt::from(end - base),
                 pid,
             });
         }
@@ -638,8 +638,8 @@ fn platform_process_get_modules(pid: i32, regex_str: Option<String>) -> Vec<Napi
                             valid: true,
                             name,
                             path,
-                            base: mod_info.lpBaseOfDll as u64 as f64,
-                            size: mod_info.SizeOfImage as u64 as f64,
+                            base: BigInt::from(mod_info.lpBaseOfDll as u64),
+                            size: BigInt::from(mod_info.SizeOfImage as u64),
                             pid,
                         });
                     }
@@ -655,7 +655,9 @@ fn platform_process_get_modules(pid: i32, regex_str: Option<String>) -> Vec<Napi
 #[cfg(target_os = "macos")]
 fn platform_process_get_modules(pid: i32, regex_str: Option<String>) -> Vec<NapiModuleInfo> {
     let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
-    let mut modules: Vec<NapiModuleInfo> = Vec::new();
+    // Build (addr, NapiModuleInfo) pairs so we can sort/dedup by raw u64 addr;
+    // BigInt does not implement Ord/PartialEq.
+    let mut entries: Vec<(u64, NapiModuleInfo)> = Vec::new();
 
     let task = mach::get_task(pid);
     if task != 0 {
@@ -737,14 +739,15 @@ fn platform_process_get_modules(pid: i32, regex_str: Option<String>) -> Vec<Napi
                                 if let Some(ref re) = pattern {
                                     if !re.is_match(&name) { continue; }
                                 }
-                                modules.push(NapiModuleInfo {
+                                let addr = infos[i].addr;
+                                entries.push((addr, NapiModuleInfo {
                                     valid: true,
                                     name,
                                     path,
-                                    base: infos[i].addr as f64,
-                                    size: 0.0,
+                                    base: BigInt::from(addr),
+                                    size: BigInt::from(0u64),
                                     pid,
-                                });
+                                }));
                             }
                         }
                     }
@@ -754,10 +757,10 @@ fn platform_process_get_modules(pid: i32, regex_str: Option<String>) -> Vec<Napi
     }
 
     // Sort and deduplicate by address (matching C++)
-    modules.sort_by(|a, b| a.base.partial_cmp(&b.base).unwrap_or(std::cmp::Ordering::Equal));
-    modules.dedup_by(|a, b| a.base == b.base);
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.dedup_by(|a, b| a.0 == b.0);
 
-    modules
+    entries.into_iter().map(|(_, m)| m).collect()
 }
 
 // -- process_getList --
@@ -851,9 +854,8 @@ fn platform_process_get_list(regex_str: Option<String>) -> Vec<i32> {
 // -- process_getSegments --
 
 #[cfg(target_os = "linux")]
-fn platform_process_get_segments(pid: i32, base: f64) -> Vec<NapiSegmentInfo> {
+fn platform_process_get_segments(pid: i32, base: u64) -> Vec<NapiSegmentInfo> {
     let maps_path = format!("/proc/{}/maps", pid);
-    let base_addr = base as u64;
     let mut segments = Vec::new();
 
     if let Ok(content) = fs::read_to_string(&maps_path) {
@@ -863,7 +865,7 @@ fn platform_process_get_segments(pid: i32, base: f64) -> Vec<NapiSegmentInfo> {
             if parts.len() < 6 { continue; }
             let addr_parts: Vec<&str> = parts[0].split('-').collect();
             let start = u64::from_str_radix(addr_parts[0], 16).unwrap_or(0);
-            if start == base_addr {
+            if start == base {
                 module_path = parts[5].trim().to_string();
                 break;
             }
@@ -883,8 +885,8 @@ fn platform_process_get_segments(pid: i32, base: f64) -> Vec<NapiSegmentInfo> {
 
                 segments.push(NapiSegmentInfo {
                     valid: true,
-                    base: start as f64,
-                    size: (end - start) as f64,
+                    base: BigInt::from(start),
+                    size: BigInt::from(end - start),
                     name: perms.to_string(),
                 });
             }
@@ -895,7 +897,7 @@ fn platform_process_get_segments(pid: i32, base: f64) -> Vec<NapiSegmentInfo> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_process_get_segments(_pid: i32, _base: f64) -> Vec<NapiSegmentInfo> {
+fn platform_process_get_segments(_pid: i32, _base: u64) -> Vec<NapiSegmentInfo> {
     Vec::new()
 }
 
@@ -906,16 +908,16 @@ pub struct NapiModuleInfo {
     pub valid: bool,
     pub name: String,
     pub path: String,
-    pub base: f64,
-    pub size: f64,
+    pub base: BigInt,
+    pub size: BigInt,
     pub pid: i32,
 }
 
 #[napi(object)]
 pub struct NapiSegmentInfo {
     pub valid: bool,
-    pub base: f64,
-    pub size: f64,
+    pub base: BigInt,
+    pub size: BigInt,
     pub name: String,
 }
 
@@ -1053,7 +1055,7 @@ impl Task for ProcessIsSys64BitTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessGetSegmentsTask { pid: i32, base: f64 }
+struct ProcessGetSegmentsTask { pid: i32, base: u64 }
 impl Task for ProcessGetSegmentsTask {
     type Output = Vec<NapiSegmentInfo>;
     type JsValue = Vec<NapiSegmentInfo>;
@@ -1146,6 +1148,7 @@ pub fn process_is_sys_64_bit() -> AsyncTask<ProcessIsSys64BitTask> {
 }
 
 #[napi(js_name = "process_getSegments")]
-pub fn process_get_segments(pid: i32, base: f64) -> AsyncTask<ProcessGetSegmentsTask> {
-    AsyncTask::new(ProcessGetSegmentsTask { pid, base })
+pub fn process_get_segments(pid: i32, base: BigInt) -> AsyncTask<ProcessGetSegmentsTask> {
+    let (_, base_u64, _) = base.get_u64();
+    AsyncTask::new(ProcessGetSegmentsTask { pid, base: base_u64 })
 }

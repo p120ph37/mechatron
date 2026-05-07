@@ -5,8 +5,8 @@ export interface ModuleData {
   valid: boolean;
   name: string;
   path: string;
-  base: number;
-  size: number;
+  base: bigint;
+  size: bigint;
   pid: number;
 }
 
@@ -115,7 +115,7 @@ export class Process {
     return getNative("process").process_isSys64Bit();
   }
 
-  static async _getSegments(process: Process, base: number): Promise<Array<{ valid: boolean; base: number; size: number; name: string }>> {
+  static async _getSegments(process: Process, base: bigint): Promise<Array<{ valid: boolean; base: bigint; size: bigint; name: string }>> {
     return await getNative("process").process_getSegments(process._pid, base);
   }
 }

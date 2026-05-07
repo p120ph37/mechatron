@@ -28,7 +28,7 @@ const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 
-interface ModuleEntry { valid: boolean; name: string; path: string; base: number; size: number; pid: number; }
+interface ModuleEntry { valid: boolean; name: string; path: string; base: bigint; size: bigint; pid: number; }
 
 // ── Helpers (Linux) ─────────────────────────────────────────────────────
 
@@ -318,7 +318,7 @@ function macGetModules(pid: number, re: RegExp | null): ModuleEntry[] {
   for (const r of rows) {
     if (lastAddr !== null && r.addr === lastAddr) continue;
     lastAddr = r.addr;
-    out.push({ valid: true, name: r.name, path: r.p, base: Number(r.addr), size: 0, pid });
+    out.push({ valid: true, name: r.name, path: r.p, base: r.addr, size: 0n, pid });
   }
   return out;
 }
@@ -556,8 +556,8 @@ export function process_getModules(pid: number, regexStr?: string): ModuleEntry[
       const name = path.basename(pStr);
       if (re && !re.test(name)) continue;
       const [s, e] = parts[0].split("-");
-      const base = parseInt(s, 16);
-      const end = parseInt(e, 16);
+      const base = BigInt("0x" + s);
+      const end = BigInt("0x" + e);
       out.push({ valid: true, name, path: pStr, base, size: end - base, pid });
     }
     return out;
@@ -591,8 +591,8 @@ export function process_getModules(pid: number, regexStr?: string): ModuleEntry[
         const mi8 = new Uint8Array(mi);
         if (ps.GetModuleInformation(h, hmod, F.ptr(mi8), 24) === 0) continue;
         const dv = new DataView(mi);
-        const base = Number(dv.getBigUint64(0, true));
-        const size = dv.getUint32(8, true);
+        const base = dv.getBigUint64(0, true);
+        const size = BigInt(dv.getUint32(8, true));
         out.push({ valid: true, name, path: fullPath, base, size, pid });
       }
       return out;
@@ -695,9 +695,9 @@ export function process_isSys64Bit(): boolean {
   return false;
 }
 
-interface SegmentEntry { valid: boolean; base: number; size: number; name: string; }
+interface SegmentEntry { valid: boolean; base: bigint; size: bigint; name: string; }
 
-export function process_getSegments(pid: number, base: number): SegmentEntry[] {
+export function process_getSegments(pid: number, base: bigint): SegmentEntry[] {
   if (!IS_LINUX) return [];
   const out: SegmentEntry[] = [];
   let txt: string;
@@ -710,7 +710,7 @@ export function process_getSegments(pid: number, base: number): SegmentEntry[] {
     const parts = line.split(/\s+/);
     if (parts.length < 6) continue;
     const [s] = parts[0].split("-");
-    const start = parseInt(s, 16);
+    const start = BigInt("0x" + s);
     if (start === base) {
       modulePath = parts.slice(5).join(" ").trim();
       break;
@@ -724,8 +724,8 @@ export function process_getSegments(pid: number, base: number): SegmentEntry[] {
     const pStr = parts.slice(5).join(" ").trim();
     if (pStr !== modulePath) continue;
     const [s, e] = parts[0].split("-");
-    const start = parseInt(s, 16);
-    const end = parseInt(e, 16);
+    const start = BigInt("0x" + s);
+    const end = BigInt("0x" + e);
     out.push({ valid: true, base: start, size: end - start, name: parts[1] });
   }
   return out;

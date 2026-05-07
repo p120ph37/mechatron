@@ -24,12 +24,12 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		if (Segment) {
 			var seg = new Segment();
 			assert(seg.valid === false, "empty segment invalid");
-			assert(seg.base === 0, "empty segment base");
-			assert(seg.size === 0, "empty segment size");
+			assert(seg.base === 0n, "empty segment base");
+			assert(seg.size === 0n, "empty segment size");
 			assert(seg.name === "", "empty segment name");
 
 			// Segment contains
-			seg.base = 100; seg.size = 50;
+			seg.base = 100n; seg.size = 50n;
 			assert(seg.contains(100), "segment contains start");
 			assert(seg.contains(149), "segment contains end-1");
 			assert(!seg.contains(150), "segment !contains end");
@@ -37,7 +37,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 			// Segment comparisons
 			var seg2 = new Segment();
-			seg2.base = 200; seg2.size = 10;
+			seg2.base = 200n; seg2.size = 10n;
 			assert(seg.lt(seg2), "segment lt");
 			assert(!seg.gt(seg2), "segment !gt");
 			assert(seg.le(seg2), "segment le");
@@ -75,13 +75,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		var mod = new Module();
 		assert(mod.valid === false, "empty module invalid");
 		assert(mod.name === "", "empty module name");
-		assert(mod.base === 0, "empty module base");
-		assert(mod.size === 0, "empty module size");
+		assert(mod.base === 0n, "empty module base");
+		assert(mod.size === 0n, "empty module size");
 		assert(mod.isValid() === false, "empty module isValid");
 		assert(mod.getName() === "", "empty module getName");
 		assert(mod.getPath() === "", "empty module getPath");
-		assert(mod.getBase() === 0, "empty module getBase");
-		assert(mod.getSize() === 0, "empty module getSize");
+		assert(mod.getBase() === 0n, "empty module getBase");
+		assert(mod.getSize() === 0n, "empty module getSize");
 		assert(mod.getProcess() instanceof Process, "empty module getProcess");
 		assert(mod.contains(0) === false, "empty module !contains 0");
 		assert((await mod.getSegments()).length === 0, "empty module getSegments empty");

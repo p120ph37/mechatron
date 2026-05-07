@@ -35,19 +35,19 @@ function atspiWindowHash(bus: string, path: string): number {
 
 // ── Read-only exports ──────────────────────────────────────────────
 
-export async function window_getList(regexStr?: string): Promise<number[]> {
+export async function window_getList(regexStr?: string): Promise<bigint[]> {
   const pattern = regexStr ? new RegExp(regexStr) : null;
   try {
     const windows = await atspiListWindows();
     const filtered = pattern ? windows.filter(w => pattern.test(w.name)) : windows;
-    return filtered.map(w => atspiWindowHash(w.bus, w.path));
+    return filtered.map(w => BigInt(atspiWindowHash(w.bus, w.path)));
   } catch {
     return [];
   }
 }
 
-export async function window_isValid(handle: number): Promise<boolean> {
-  if (!handle) return false;
+export async function window_isValid(handle: bigint): Promise<boolean> {
+  if (handle === 0n) return false;
   const list = await window_getList();
   return list.includes(handle);
 }
@@ -56,39 +56,39 @@ export async function window_isValid(handle: number): Promise<boolean> {
 // these are deliberate stubs that match the public API shape so callers
 // don't need a separate code path.
 
-export async function window_isTopMost(_handle: number): Promise<boolean> { return false; }
-export async function window_isBorderless(_handle: number): Promise<boolean> { return false; }
-export async function window_isMinimized(_handle: number): Promise<boolean> { return false; }
-export async function window_isMaximized(_handle: number): Promise<boolean> { return false; }
-export async function window_setTopMost(_handle: number, _topMost: boolean): Promise<void> {}
-export async function window_setBorderless(_handle: number, _borderless: boolean): Promise<void> {}
-export async function window_setMinimized(_handle: number, _minimized: boolean): Promise<void> {}
-export async function window_setMaximized(_handle: number, _maximized: boolean): Promise<void> {}
-export async function window_close(_handle: number): Promise<void> {}
-export async function window_setActive(_handle: number): Promise<void> {}
-export async function window_setTitle(_handle: number, _title: string): Promise<void> {}
-export async function window_setBounds(_handle: number, _x: number, _y: number, _w: number, _h: number): Promise<void> {}
-export async function window_setClient(_handle: number, _x: number, _y: number, _w: number, _h: number): Promise<void> {}
+export async function window_isTopMost(_handle: bigint): Promise<boolean> { return false; }
+export async function window_isBorderless(_handle: bigint): Promise<boolean> { return false; }
+export async function window_isMinimized(_handle: bigint): Promise<boolean> { return false; }
+export async function window_isMaximized(_handle: bigint): Promise<boolean> { return false; }
+export async function window_setTopMost(_handle: bigint, _topMost: boolean): Promise<void> {}
+export async function window_setBorderless(_handle: bigint, _borderless: boolean): Promise<void> {}
+export async function window_setMinimized(_handle: bigint, _minimized: boolean): Promise<void> {}
+export async function window_setMaximized(_handle: bigint, _maximized: boolean): Promise<void> {}
+export async function window_close(_handle: bigint): Promise<void> {}
+export async function window_setActive(_handle: bigint): Promise<void> {}
+export async function window_setTitle(_handle: bigint, _title: string): Promise<void> {}
+export async function window_setBounds(_handle: bigint, _x: number, _y: number, _w: number, _h: number): Promise<void> {}
+export async function window_setClient(_handle: bigint, _x: number, _y: number, _w: number, _h: number): Promise<void> {}
 
-export async function window_getProcess(_handle: number): Promise<number> { return 0; }
-export async function window_getPID(_handle: number): Promise<number> { return 0; }
-export function window_getHandle(handle: number): number { return handle; }
-export async function window_setHandle(_handle: number, newHandle: number): Promise<boolean> {
-  if (newHandle === 0) return true;
+export async function window_getProcess(_handle: bigint): Promise<number> { return 0; }
+export async function window_getPID(_handle: bigint): Promise<number> { return 0; }
+export function window_getHandle(handle: bigint): bigint { return handle; }
+export async function window_setHandle(_handle: bigint, newHandle: bigint): Promise<boolean> {
+  if (newHandle === 0n) return true;
   return window_isValid(newHandle);
 }
-export async function window_getTitle(_handle: number): Promise<string> { return ""; }
-export async function window_getBounds(_handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
+export async function window_getTitle(_handle: bigint): Promise<string> { return ""; }
+export async function window_getBounds(_handle: bigint): Promise<{ x: number; y: number; w: number; h: number }> {
   return { x: 0, y: 0, w: 0, h: 0 };
 }
-export async function window_getClient(_handle: number): Promise<{ x: number; y: number; w: number; h: number }> {
+export async function window_getClient(_handle: bigint): Promise<{ x: number; y: number; w: number; h: number }> {
   return { x: 0, y: 0, w: 0, h: 0 };
 }
-export async function window_mapToClient(_handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
+export async function window_mapToClient(_handle: bigint, x: number, y: number): Promise<{ x: number; y: number }> {
   return { x, y };
 }
-export async function window_mapToScreen(_handle: number, x: number, y: number): Promise<{ x: number; y: number }> {
+export async function window_mapToScreen(_handle: bigint, x: number, y: number): Promise<{ x: number; y: number }> {
   return { x, y };
 }
-export async function window_getActive(): Promise<number> { return 0; }
+export async function window_getActive(): Promise<bigint> { return 0n; }
 export function window_isAxEnabled(_prompt?: boolean): boolean { return true; }

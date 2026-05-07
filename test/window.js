@@ -25,7 +25,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			test: async function () {
 				var w1 = new Window();
 				assert(!await w1.isValid(), "empty invalid");
-				assert(w1.getHandle() === 0, "empty handle=0");
+				assert(w1.getHandle() === 0n, "empty handle=0");
 				assert(await w1.getTitle() === "", "empty title empty");
 				assert(await w1.getPID() === 0, "empty pid=0");
 			}
@@ -169,7 +169,9 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				assert(w1.eq(w2), "empty eq empty");
 				assert(!w1.ne(w2), "empty !ne empty");
 				assert(w1.eq(0), "empty eq 0");
+				assert(w1.eq(0n), "empty eq 0n");
 				assert(w1.ne(8888), "empty ne 8888");
+				assert(w1.ne(8888n), "empty ne 8888n");
 			}
 		},
 		{
@@ -287,7 +289,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			test: async function () {
 				var list = await Window.getList();
 				if (list.length === 0) return;
-				assert(typeof list[0].getHandle() === "number", "valid getHandle returns number");
+				assert(typeof list[0].getHandle() === "bigint", "valid getHandle returns bigint");
 			}
 		},
 		{
@@ -304,7 +306,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				assert(typeof await vw.isMinimized() === "boolean", "valid isMinimized");
 				assert(typeof await vw.isMaximized() === "boolean", "valid isMaximized");
 				assert(typeof await vw.getPID() === "number", "valid getPID");
-				assert(typeof vw.getHandle() === "number", "valid getHandle");
+				assert(typeof vw.getHandle() === "bigint", "valid getHandle");
 				var vwProc = await vw.getProcess();
 				assert(typeof vwProc === "object", "valid getProcess");
 				var vwClient = await vw.getClient();
@@ -387,7 +389,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 						["-name", _tag, "-timeout", "10", _tag],
 						{ stdio: "ignore" });
 				} catch (_) { _xm = null; }
-				var _stale = 0;
+				var _stale = 0n;
 				if (_xm) {
 					await waitForAsync(async function () {
 						var f = await Window.getList(_tag);
@@ -398,7 +400,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 						return false;
 					}, 1500);
 				}
-				if (_stale !== 0) {
+				if (_stale !== 0n) {
 					var _live = new Window();
 					if (await _live.setHandle(_stale)) {
 						await _live.close();

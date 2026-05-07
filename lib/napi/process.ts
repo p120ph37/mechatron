@@ -20,4 +20,4 @@ export const process_getCurrent: () => Promise<number> = native.process_getCurre
 export const process_isSys64Bit: () => Promise<boolean> = native.process_isSys64Bit;
 export const process_getList: (regex?: string) => Promise<number[]> = native.process_getList;
 export const process_getModules: (pid: number, regex?: string) => Promise<any[]> = native.process_getModules;
-export const process_getSegments: (pid: number, base: number) => Promise<any[]> = native.process_getSegments;
+export const process_getSegments: (pid: number, base: bigint) => Promise<any[]> = native.process_getSegments;

@@ -2,14 +2,20 @@ import { Bounds } from "../types";
 import { Point } from "../types";
 import { getNative } from "../backend";
 
-export class Window {
-  private _handle: number;
+function toBigInt(v: bigint | number): bigint {
+  return typeof v === "bigint" ? v : BigInt(v);
+}
 
-  constructor(handle?: number | Window) {
+export class Window {
+  private _handle: bigint;
+
+  constructor(handle?: bigint | number | Window) {
     if (handle instanceof Window) {
       this._handle = handle._handle;
+    } else if (typeof handle === "bigint") {
+      this._handle = handle;
     } else {
-      this._handle = handle || 0;
+      this._handle = handle ? BigInt(handle) : 0n;
     }
   }
 
@@ -62,13 +68,14 @@ export class Window {
     return await getNative("window").window_getPID(this._handle);
   }
 
-  getHandle(): number {
+  getHandle(): bigint {
     return this._handle;
   }
 
-  async setHandle(handle: number): Promise<boolean> {
-    const result = await getNative("window").window_setHandle(this._handle, handle);
-    if (result) this._handle = handle;
+  async setHandle(handle: bigint | number): Promise<boolean> {
+    const h = toBigInt(handle);
+    const result = await getNative("window").window_setHandle(this._handle, h);
+    if (result) this._handle = h;
     return result;
   }
 
@@ -148,14 +155,14 @@ export class Window {
     return new Point(p.x, p.y);
   }
 
-  eq(other: Window | number): boolean {
+  eq(other: Window | bigint | number): boolean {
     if (other instanceof Window) {
       return this._handle === other._handle;
     }
-    return this._handle === other;
+    return this._handle === toBigInt(other);
   }
 
-  ne(other: Window | number): boolean {
+  ne(other: Window | bigint | number): boolean {
     return !this.eq(other);
   }
 
@@ -164,7 +171,7 @@ export class Window {
   }
 
   static async getList(title?: string): Promise<Window[]> {
-    const handles: number[] = await getNative("window").window_getList(title);
+    const handles: bigint[] = await getNative("window").window_getList(title);
     return handles.map((h) => new Window(h));
   }
 

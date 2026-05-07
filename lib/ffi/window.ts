@@ -910,36 +910,46 @@ function mac_isAxEnabled(): boolean {
 }
 
 // ── NAPI-compatible exports ─────────────────────────────────────────
+//
+// External signatures use `bigint` for window handles to preserve full
+// 64-bit precision (HWND on Windows, AXUIElementRef on macOS may exceed
+// f64's 52-bit safe integer range). Internally, the X11 / Win32 / mac
+// helpers continue to work with `number` since X11 XIDs fit in 32 bits
+// and the bun:ffi paths convert at their own boundary; the conversion
+// happens at the export shim.
 
-export function window_isValid(handle: number): boolean {
-  if (IS_LINUX) return winIsValid(handle);
-  if (IS_WIN) return win_isValid(handle);
-  if (IS_MAC) return mac_isValid(handle);
+export function window_isValid(handle: bigint): boolean {
+  const h = Number(handle);
+  if (IS_LINUX) return winIsValid(h);
+  if (IS_WIN) return win_isValid(h);
+  if (IS_MAC) return mac_isValid(h);
   return false;
 }
 
-export function window_close(handle: number): void {
+export function window_close(handle: bigint): void {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
+    if (!winIsValid(h)) return;
     const X = x11();
     const d = getDisplay();
     if (!X || !d) return;
-    X.XDestroyWindow(d, BigInt(handle));
+    X.XDestroyWindow(d, BigInt(h));
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_close(handle);
+    if (!win_isValid(h)) return;
+    win_close(h);
   } else if (IS_MAC) {
-    mac_close(handle);
+    mac_close(h);
   }
 }
 
-export function window_isTopMost(handle: number): boolean {
-  if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_TOPMOST);
-  if (IS_WIN) return win_isValid(handle) && win_isTopMost(handle);
+export function window_isTopMost(handle: bigint): boolean {
+  const h = Number(handle);
+  if (IS_LINUX) return winIsValid(h) && getWmState(BigInt(h), STATE_TOPMOST);
+  if (IS_WIN) return win_isValid(h) && win_isTopMost(h);
   if (IS_MAC) {
     const keys = getCGKeys();
     if (!keys) return false;
-    return mac_withWindowDict(handle, (dict) => {
+    return mac_withWindowDict(h, (dict) => {
       const CF = cf()!;
       const layerRef = CF.CFDictionaryGetValue(dict, keys.layer);
       if (!layerRef) return false;
@@ -951,52 +961,57 @@ export function window_isTopMost(handle: number): boolean {
   return false;
 }
 
-export function window_isBorderless(handle: number): boolean {
+export function window_isBorderless(handle: bigint): boolean {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return false;
+    if (!winIsValid(h)) return false;
     const X = x11();
     const F = x11ffi();
     if (!X || !F) return false;
     const wmHints = A("_MOTIF_WM_HINTS");
     if (wmHints === 0n) return false;
-    const r = getWindowProperty(BigInt(handle), wmHints);
+    const r = getWindowProperty(BigInt(h), wmHints);
     if (!r) return false;
     // _MOTIF_WM_HINTS: flags(ulong), funcs(ulong), decorations(ulong) at offset 16
     const decorations = F.read.u64(Number(r.data), 16);
     X.XFree(r.data);
     return decorations === 0n;
   }
-  if (IS_WIN) return win_isValid(handle) && win_isBorderless(handle);
+  if (IS_WIN) return win_isValid(h) && win_isBorderless(h);
   return false;
 }
 
-export function window_isMinimized(handle: number): boolean {
-  if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MINIMIZE);
-  if (IS_WIN) return win_isValid(handle) && win_isMinimized(handle);
-  if (IS_MAC) return mac_isMinimized(handle);
+export function window_isMinimized(handle: bigint): boolean {
+  const h = Number(handle);
+  if (IS_LINUX) return winIsValid(h) && getWmState(BigInt(h), STATE_MINIMIZE);
+  if (IS_WIN) return win_isValid(h) && win_isMinimized(h);
+  if (IS_MAC) return mac_isMinimized(h);
   return false;
 }
 
-export function window_isMaximized(handle: number): boolean {
-  if (IS_LINUX) return winIsValid(handle) && getWmState(BigInt(handle), STATE_MAXIMIZE);
-  if (IS_WIN) return win_isValid(handle) && win_isMaximized(handle);
-  if (IS_MAC) return mac_isMaximized(handle);
+export function window_isMaximized(handle: bigint): boolean {
+  const h = Number(handle);
+  if (IS_LINUX) return winIsValid(h) && getWmState(BigInt(h), STATE_MAXIMIZE);
+  if (IS_WIN) return win_isValid(h) && win_isMaximized(h);
+  if (IS_MAC) return mac_isMaximized(h);
   return false;
 }
 
-export function window_setTopMost(handle: number, topMost: boolean): void {
+export function window_setTopMost(handle: bigint, topMost: boolean): void {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
-    setWmState(BigInt(handle), STATE_TOPMOST, topMost);
+    if (!winIsValid(h)) return;
+    setWmState(BigInt(h), STATE_TOPMOST, topMost);
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setTopMost(handle, topMost);
+    if (!win_isValid(h)) return;
+    win_setTopMost(h, topMost);
   }
 }
 
-export function window_setBorderless(handle: number, borderless: boolean): void {
+export function window_setBorderless(handle: bigint, borderless: boolean): void {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
+    if (!winIsValid(h)) return;
     const X = x11();
     const F = x11ffi();
     const d = getDisplay();
@@ -1011,163 +1026,175 @@ export function window_setBorderless(handle: number, borderless: boolean): void 
     buf[2] = borderless ? 0n : 1n;
     buf[3] = 0n;
     buf[4] = 0n;
-    X.XChangeProperty(d, BigInt(handle), wmHints, wmHints, 32, PropModeReplace, F.ptr(buf), 5);
+    X.XChangeProperty(d, BigInt(h), wmHints, wmHints, 32, PropModeReplace, F.ptr(buf), 5);
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setBorderless(handle, borderless);
+    if (!win_isValid(h)) return;
+    win_setBorderless(h, borderless);
   }
 }
 
-export function window_setMinimized(handle: number, minimized: boolean): void {
+export function window_setMinimized(handle: bigint, minimized: boolean): void {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
-    setWmState(BigInt(handle), STATE_MINIMIZE, minimized);
+    if (!winIsValid(h)) return;
+    setWmState(BigInt(h), STATE_MINIMIZE, minimized);
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setMinimized(handle, minimized);
+    if (!win_isValid(h)) return;
+    win_setMinimized(h, minimized);
   } else if (IS_MAC) {
-    mac_setMinimized(handle, minimized);
+    mac_setMinimized(h, minimized);
   }
 }
 
-export function window_setMaximized(handle: number, maximized: boolean): void {
+export function window_setMaximized(handle: bigint, maximized: boolean): void {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
-    setWmState(BigInt(handle), STATE_MINIMIZE, false);
-    setWmState(BigInt(handle), STATE_MAXIMIZE, maximized);
+    if (!winIsValid(h)) return;
+    setWmState(BigInt(h), STATE_MINIMIZE, false);
+    setWmState(BigInt(h), STATE_MAXIMIZE, maximized);
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setMaximized(handle, maximized);
+    if (!win_isValid(h)) return;
+    win_setMaximized(h, maximized);
   } else if (IS_MAC) {
-    mac_setMaximized(handle, maximized);
+    mac_setMaximized(h, maximized);
   }
 }
 
-export function window_getProcess(handle: number): number {
-  if (IS_LINUX) return winIsValid(handle) ? getPid(BigInt(handle)) : 0;
-  if (IS_WIN) return win_isValid(handle) ? win_getPid(handle) : 0;
-  if (IS_MAC) return mac_getPid(handle);
+export function window_getProcess(handle: bigint): number {
+  const h = Number(handle);
+  if (IS_LINUX) return winIsValid(h) ? getPid(BigInt(h)) : 0;
+  if (IS_WIN) return win_isValid(h) ? win_getPid(h) : 0;
+  if (IS_MAC) return mac_getPid(h);
   return 0;
 }
 
-export function window_getPID(handle: number): number {
+export function window_getPID(handle: bigint): number {
   return window_getProcess(handle);
 }
 
-export function window_getHandle(handle: number): number { return handle; }
+export function window_getHandle(handle: bigint): bigint { return handle; }
 
-export function window_setHandle(_handle: number, newHandle: number): boolean {
-  if (newHandle === 0) return true;
-  if (IS_LINUX) return winIsValid(newHandle);
-  if (IS_WIN) return win_isValid(newHandle);
-  if (IS_MAC) return mac_isValid(newHandle);
+export function window_setHandle(_handle: bigint, newHandle: bigint): boolean {
+  if (newHandle === 0n) return true;
+  const nh = Number(newHandle);
+  if (IS_LINUX) return winIsValid(nh);
+  if (IS_WIN) return win_isValid(nh);
+  if (IS_MAC) return mac_isValid(nh);
   return false;
 }
 
-export function window_getTitle(handle: number): string {
-  if (IS_LINUX) return winIsValid(handle) ? getTitle(BigInt(handle)) : "";
-  if (IS_WIN) return win_isValid(handle) ? win_getTitle(handle) : "";
-  if (IS_MAC) return mac_getTitle(handle);
+export function window_getTitle(handle: bigint): string {
+  const h = Number(handle);
+  if (IS_LINUX) return winIsValid(h) ? getTitle(BigInt(h)) : "";
+  if (IS_WIN) return win_isValid(h) ? win_getTitle(h) : "";
+  if (IS_MAC) return mac_getTitle(h);
   return "";
 }
 
-export function window_setTitle(handle: number, title: string): void {
+export function window_setTitle(handle: bigint, title: string): void {
+  const h = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
+    if (!winIsValid(h)) return;
     const X = x11();
     const F = x11ffi();
     const d = getDisplay();
     if (!X || !F || !d) return;
-    X.XStoreName(d, BigInt(handle), F.ptr(cstr(title)));
+    X.XStoreName(d, BigInt(h), F.ptr(cstr(title)));
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setTitle(handle, title);
+    if (!win_isValid(h)) return;
+    win_setTitle(h, title);
   } else if (IS_MAC) {
-    mac_setTitle(handle, title);
+    mac_setTitle(h, title);
   }
 }
 
-export function window_getBounds(handle: number): { x: number; y: number; w: number; h: number } {
+export function window_getBounds(handle: bigint): { x: number; y: number; w: number; h: number } {
+  const hh = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return { x: 0, y: 0, w: 0, h: 0 };
-    const c = getClient(BigInt(handle));
-    const f = getFrame(BigInt(handle));
+    if (!winIsValid(hh)) return { x: 0, y: 0, w: 0, h: 0 };
+    const c = getClient(BigInt(hh));
+    const f = getFrame(BigInt(hh));
     return { x: c.x - f.left, y: c.y - f.top, w: c.w + f.right, h: c.h + f.bottom };
   }
-  if (IS_WIN) return win_isValid(handle) ? win_getBounds(handle) : { x: 0, y: 0, w: 0, h: 0 };
-  if (IS_MAC) return mac_getBounds(handle);
+  if (IS_WIN) return win_isValid(hh) ? win_getBounds(hh) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_MAC) return mac_getBounds(hh);
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
-export function window_setBounds(handle: number, x: number, y: number, w: number, h: number): void {
+export function window_setBounds(handle: bigint, x: number, y: number, w: number, h: number): void {
+  const hh = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
+    if (!winIsValid(hh)) return;
     const X = x11();
     const d = getDisplay();
     if (!X || !d) return;
-    const f = getFrame(BigInt(handle));
+    const f = getFrame(BigInt(hh));
     const ww = Math.max(1, w - f.right);
-    const hh = Math.max(1, h - f.bottom);
-    X.XMoveResizeWindow(d, BigInt(handle), x, y, ww, hh);
+    const hp = Math.max(1, h - f.bottom);
+    X.XMoveResizeWindow(d, BigInt(hh), x, y, ww, hp);
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setBounds(handle, x, y, w, h);
+    if (!win_isValid(hh)) return;
+    win_setBounds(hh, x, y, w, h);
   } else if (IS_MAC) {
-    mac_setBounds(handle, x, y, w, h);
+    mac_setBounds(hh, x, y, w, h);
   }
 }
 
-export function window_getClient(handle: number): { x: number; y: number; w: number; h: number } {
-  if (IS_LINUX) return winIsValid(handle) ? getClient(BigInt(handle)) : { x: 0, y: 0, w: 0, h: 0 };
-  if (IS_WIN) return win_isValid(handle) ? win_getClient(handle) : { x: 0, y: 0, w: 0, h: 0 };
-  if (IS_MAC) return mac_getBounds(handle);
+export function window_getClient(handle: bigint): { x: number; y: number; w: number; h: number } {
+  const hh = Number(handle);
+  if (IS_LINUX) return winIsValid(hh) ? getClient(BigInt(hh)) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_WIN) return win_isValid(hh) ? win_getClient(hh) : { x: 0, y: 0, w: 0, h: 0 };
+  if (IS_MAC) return mac_getBounds(hh);
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
-export function window_setClient(handle: number, x: number, y: number, w: number, h: number): void {
+export function window_setClient(handle: bigint, x: number, y: number, w: number, h: number): void {
+  const hh = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return;
+    if (!winIsValid(hh)) return;
     const X = x11();
     const d = getDisplay();
     if (!X || !d) return;
-    X.XMoveResizeWindow(d, BigInt(handle), x, y, Math.max(1, w), Math.max(1, h));
+    X.XMoveResizeWindow(d, BigInt(hh), x, y, Math.max(1, w), Math.max(1, h));
   } else if (IS_WIN) {
-    if (!win_isValid(handle)) return;
-    win_setClient(handle, x, y, w, h);
+    if (!win_isValid(hh)) return;
+    win_setClient(hh, x, y, w, h);
   } else if (IS_MAC) {
-    mac_setBounds(handle, x, y, w, h);
+    mac_setBounds(hh, x, y, w, h);
   }
 }
 
-export function window_mapToClient(handle: number, x: number, y: number): { x: number; y: number } {
+export function window_mapToClient(handle: bigint, x: number, y: number): { x: number; y: number } {
+  const hh = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return { x, y };
-    const c = getClient(BigInt(handle));
+    if (!winIsValid(hh)) return { x, y };
+    const c = getClient(BigInt(hh));
     return { x: x - c.x, y: y - c.y };
   }
-  if (IS_WIN) return win_isValid(handle) ? win_mapToClient(handle, x, y) : { x, y };
+  if (IS_WIN) return win_isValid(hh) ? win_mapToClient(hh, x, y) : { x, y };
   if (IS_MAC) {
-    const b = mac_getBounds(handle);
+    const b = mac_getBounds(hh);
     return { x: x - b.x, y: y - b.y };
   }
   return { x, y };
 }
 
-export function window_mapToScreen(handle: number, x: number, y: number): { x: number; y: number } {
+export function window_mapToScreen(handle: bigint, x: number, y: number): { x: number; y: number } {
+  const hh = Number(handle);
   if (IS_LINUX) {
-    if (!winIsValid(handle)) return { x, y };
-    const c = getClient(BigInt(handle));
+    if (!winIsValid(hh)) return { x, y };
+    const c = getClient(BigInt(hh));
     return { x: x + c.x, y: y + c.y };
   }
-  if (IS_WIN) return win_isValid(handle) ? win_mapToScreen(handle, x, y) : { x, y };
+  if (IS_WIN) return win_isValid(hh) ? win_mapToScreen(hh, x, y) : { x, y };
   if (IS_MAC) {
-    const b = mac_getBounds(handle);
+    const b = mac_getBounds(hh);
     return { x: x + b.x, y: y + b.y };
   }
   return { x, y };
 }
 
-export function window_getList(regexStr?: string): number[] {
+export function window_getList(regexStr?: string): bigint[] {
   if (IS_LINUX) {
     const X = x11();
     const d = getDisplay();
@@ -1176,41 +1203,42 @@ export function window_getList(regexStr?: string): number[] {
     const out: number[] = [];
     const root = X.XDefaultRootWindow(d);
     enumWindows(root, re, 0, out);
-    return out;
+    return out.map((n) => BigInt(n));
   }
-  if (IS_WIN) return win_getList(regexStr);
-  if (IS_MAC) return mac_getList(regexStr);
+  if (IS_WIN) return win_getList(regexStr).map((n) => BigInt(n));
+  if (IS_MAC) return mac_getList(regexStr).map((n) => BigInt(n));
   return [];
 }
 
-export function window_getActive(): number {
+export function window_getActive(): bigint {
   if (IS_LINUX) {
     const X = x11();
     const F = x11ffi();
     const d = getDisplay();
-    if (!X || !F || !d) return 0;
+    if (!X || !F || !d) return 0n;
     const wmActive = A("_NET_ACTIVE_WINDOW");
-    if (wmActive === 0n) return 0;
+    if (wmActive === 0n) return 0n;
     const root = X.XDefaultRootWindow(d);
     const r = getWindowProperty(root, wmActive);
-    if (!r) return 0;
+    if (!r) return 0n;
     const win = F.read.u64(Number(r.data), 0);
     X.XFree(r.data);
-    return Number(win);
+    return BigInt(win);
   }
-  if (IS_WIN) return win_getActive();
-  if (IS_MAC) return mac_getActive();
-  return 0;
+  if (IS_WIN) return BigInt(win_getActive());
+  if (IS_MAC) return BigInt(mac_getActive());
+  return 0n;
 }
 
-export function window_setActive(handle: number): void {
-  if (handle === 0) return;
+export function window_setActive(handle: bigint): void {
+  if (handle === 0n) return;
+  const h = Number(handle);
   if (IS_LINUX) {
-    windowSetActiveInternal(BigInt(handle));
+    windowSetActiveInternal(BigInt(h));
   } else if (IS_WIN) {
-    win_setActive(handle);
+    win_setActive(h);
   } else if (IS_MAC) {
-    mac_setActive(handle);
+    mac_setActive(h);
   }
 }
 
