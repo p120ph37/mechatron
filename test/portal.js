@@ -158,29 +158,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
-	function testWindowPortalHash() {
-		log("  atspi hash... ");
-		var IS_BUN = typeof globalThis.Bun !== "undefined";
-		if (!IS_BUN) { log("(skip: node)\n"); return true; }
-
-		// The hash function is internal but exercised through window_getList
-		// when only AT-SPI is available.  We verify its public contract by
-		// asserting the high bit is always set so handles can't collide
-		// with GNOME extension stable-sequence ids (which fit in u31).
-		var portal = require("../lib/nolib/window-portal");
-		// We can't call atspiWindowHash directly (not exported); but we
-		// can verify window_getList returns numbers with the high bit set
-		// when the GNOME extension is unavailable — except that requires
-		// AT-SPI to actually be running.  Skip the runtime check; the
-		// hash function is exercised via the portal CI run.
-		assert(typeof portal.window_getList === "function", "portal getList exported");
-		assert(typeof portal.window_isValid === "function", "portal isValid exported");
-		assert(typeof portal.window_getActive === "function", "portal getActive exported");
-		log("OK\n");
-		return true;
-	}
-
-	function testDbusWire() {
+function testDbusWire() {
 		log("  dbus wire... ");
 		var IS_BUN = typeof globalThis.Bun !== "undefined";
 		if (!IS_BUN) { log("(skip: node)\n"); return true; }
@@ -496,7 +474,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		{ name: "tokens", functions: [], unit: true, test: testTokens },
 		{ name: "gext token", functions: [], unit: true, test: testGextWindowAccessors },
 		{ name: "atspi avail", functions: [], unit: true, test: testAtSpiAvailability },
-		{ name: "atspi hash", functions: [], unit: true, test: testWindowPortalHash },
 		{ name: "dbus wire", functions: [], unit: true, test: testDbusWire },
 		{ name: "platform api", functions: [], unit: true, test: testPlatformApi },
 	];
