@@ -3,10 +3,12 @@
 //                                                                            //
 //                    Mechatron uinput Test Module                            //
 //                                                                            //
-//  Pure-TS exercises of lib/input/uinput.ts: keysym→evdev mapping, event     //
-//  and setup-struct buffer encoding.  Integration tests against a real       //
-//  /dev/uinput device live separately and skip when the device isn't         //
-//  writable (requires root or the `input` group).                            //
+//  Pure-TS exercises of lib/input/uinput.ts: keysym→evdev mapping and        //
+//  byte-level encoding of input_event / uinput_setup / uinput_abs_setup      //
+//  structs.  These layouts must match the Linux kernel's <linux/uinput.h>    //
+//  ABI exactly — a one-byte offset error here would not be caught by the     //
+//  end-to-end tests on linux-nolib[vt], because the kernel would silently    //
+//  accept malformed events.  Pure JS, runs on every platform.                //
 //                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
@@ -18,46 +20,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	function testUinput() {
 		log("  uinput... ");
 
-		// Pure-logic unit tests — no platform-specific behavior.  The
-		// keycode table and ioctl numbers are Linux-defined constants
-		// but the encoding functions work the same everywhere, so we
-		// run this on all platforms to catch regressions.
-
-		// Load the module directly so tests attribute coverage to
-		// lib/input/uinput.ts (the public API doesn't re-export these
-		// helpers because they're an implementation detail — users go
-		// through Keyboard/Mouse).
 		var ui = require("../lib/input/uinput");
-
-		// ── Constants sanity check ──────────────────────────────────
-		// ioctl numbers are derived from <linux/uinput.h>; confirm the
-		// ones we care about match the kernel's _IOC_NONE / _IOW macros
-		// for the standard Linux arches (x86_64, aarch64, arm, riscv64).
-		assert(ui.UI_DEV_CREATE === 0x5501, "UI_DEV_CREATE value");
-		assert(ui.UI_DEV_DESTROY === 0x5502, "UI_DEV_DESTROY value");
-		assert(ui.UI_SET_EVBIT === 0x40045564, "UI_SET_EVBIT value");
-		assert(ui.UI_SET_KEYBIT === 0x40045565, "UI_SET_KEYBIT value");
-		assert(ui.UI_SET_RELBIT === 0x40045566, "UI_SET_RELBIT value");
-		// _IOW('U', 3, sizeof(uinput_setup)=92) = 0x405c5503
-		assert(ui.UI_DEV_SETUP === 0x405c5503, "UI_DEV_SETUP value");
-
-		// Event type codes from <linux/input-event-codes.h>
-		assert(ui.EV_SYN === 0x00, "EV_SYN");
-		assert(ui.EV_KEY === 0x01, "EV_KEY");
-		assert(ui.EV_REL === 0x02, "EV_REL");
-		assert(ui.SYN_REPORT === 0, "SYN_REPORT");
-		assert(ui.REL_X === 0x00 && ui.REL_Y === 0x01, "REL_X/Y");
-		assert(ui.REL_WHEEL === 0x08, "REL_WHEEL");
-		assert(ui.REL_HWHEEL === 0x06, "REL_HWHEEL");
-		assert(ui.EV_ABS === 0x03, "EV_ABS");
-		assert(ui.ABS_X === 0x00, "ABS_X");
-		assert(ui.ABS_Y === 0x01, "ABS_Y");
-		assert(ui.UI_SET_ABSBIT === 0x40045567, "UI_SET_ABSBIT value");
-		assert(ui.UI_ABS_SETUP === 0x401c5504, "UI_ABS_SETUP value");
-		assert(ui.BTN_LEFT === 0x110, "BTN_LEFT");
-		assert(ui.BTN_RIGHT === 0x111, "BTN_RIGHT");
-		assert(ui.BTN_MIDDLE === 0x112, "BTN_MIDDLE");
-		assert(ui.BUS_VIRTUAL === 0x06, "BUS_VIRTUAL");
 
 		// ── Keysym → evdev mapping ──────────────────────────────────
 		// Spot-check that the X11 keysym → Linux evdev code mapping
@@ -226,148 +189,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(synOnly.length === 24, "empty burst → lone SYN");
 		assert(synOnly.readUInt16LE(16) === ui.EV_SYN, "lone SYN type");
 		assert(synOnly.readUInt16LE(18) === ui.SYN_REPORT, "lone SYN code");
-
-		// ── Probe semantics ──────────────────────────────────────────
-		var probe = ui.openUinputForProbe();
-		assert(typeof probe === "object" && "ok" in probe, "probe returns {ok,...}");
-		assert(typeof probe.ok === "boolean", "probe.ok boolean");
-		if (!probe.ok) {
-			assert(typeof probe.reason === "string" && probe.reason.length > 0,
-				"probe failure includes a reason");
-		}
-
-		// uinputAvailable() is a cheap probe — should agree with
-		// openUinputForProbe().ok (same syscall, no device creation).
-		assert(ui.uinputAvailable() === probe.ok,
-			"uinputAvailable matches probe.ok");
-
-		// ── FFI layer (lib/ffi/uinput.ts) ────────────────────────────
-		// The ioctl-based device lifecycle requires bun:ffi.  On Node
-		// the module loads cleanly (just can't open libc) and every
-		// injection helper returns false.  On Bun with /dev/uinput
-		// writable the full create+write path runs; without it, the
-		// open diagnostic string should be non-empty.
-		var ffi = require("../lib/ffi/uinput");
-		assert(typeof ffi.getUinputDevice === "function", "ffi.getUinputDevice");
-		assert(typeof ffi.uinputReady === "function", "ffi.uinputReady");
-		assert(typeof ffi.uinputOpenReason === "function", "ffi.uinputOpenReason");
-		assert(typeof ffi.injectKeysym === "function", "ffi.injectKeysym");
-		assert(typeof ffi.injectMouseButton === "function", "ffi.injectMouseButton");
-		assert(typeof ffi.injectScrollV === "function", "ffi.injectScrollV");
-		assert(typeof ffi.injectScrollH === "function", "ffi.injectScrollH");
-		assert(typeof ffi.injectAbsMotion === "function", "ffi.injectAbsMotion");
-		assert(ffi.UINPUT_ABS_MAX === 65535, "UINPUT_ABS_MAX value");
-		assert(typeof ffi.closeUinputDevice === "function", "ffi.closeUinputDevice");
-
-		var ready = ffi.uinputReady();
-		assert(typeof ready === "boolean", "uinputReady boolean");
-		if (!ready) {
-			// Diagnostic string must be populated on failure so operators
-			// can tell "why not" without running strace.
-			var reason = ffi.uinputOpenReason();
-			assert(typeof reason === "string" && reason.length > 0,
-				"uinputOpenReason populated when not ready (got " + JSON.stringify(reason) + ")");
-			// All injection helpers short-circuit to false when the
-			// device isn't available — they must NOT throw.
-			assert(ffi.injectKeysym(0x0061 /* X11 'a' */, true) === false, "injectKeysym false when !ready");
-			assert(ffi.injectMouseButton(0, true) === false, "injectMouseButton false when !ready");
-			assert(ffi.injectScrollV(1) === false, "injectScrollV false when !ready");
-			assert(ffi.injectScrollH(1) === false, "injectScrollH false when !ready");
-			// closeUinputDevice is a no-op when there's no device.
-			ffi.closeUinputDevice();
-		} else {
-			// Live-device smoke tests: each injection is a best-effort
-			// write; "true" just means the syscall didn't error.  We
-			// don't read back via evdev here because that requires
-			// privileges beyond what `input` group gives us and would
-			// race against the compositor's grab.
-			log("(live uinput) ");
-			assert(ffi.injectKeysym(0xFFE1 /* X11 LSHIFT */, true) === true, "LSHIFT press accepted");
-			assert(ffi.injectKeysym(0xFFE1, false) === true, "LSHIFT release accepted");
-			// Unmapped keysym: short-circuits false without writing.
-			assert(ffi.injectKeysym(0xFFFE, true) === false, "unknown keysym returns false");
-			assert(ffi.injectMouseButton(0, true) === true, "BTN_LEFT press accepted");
-			assert(ffi.injectMouseButton(0, false) === true, "BTN_LEFT release accepted");
-			assert(ffi.injectMouseButton(99, true) === false, "out-of-range button false");
-			assert(ffi.injectScrollV(1) === true, "scrollV +1 accepted");
-			assert(ffi.injectScrollV(0) === true, "scrollV 0 no-op");
-			assert(ffi.injectScrollH(-1) === true, "scrollH -1 accepted");
-			assert(ffi.injectScrollH(0) === true, "scrollH 0 no-op");
-			assert(ffi.injectAbsMotion(32768, 32768) === true, "absMotion center accepted");
-			assert(ffi.injectAbsMotion(0, 0) === true, "absMotion origin accepted");
-			// Tear down explicitly so process exit doesn't leak the device.
-			ffi.closeUinputDevice();
-			// After close, getUinputDevice returns null (re-open is
-			// guarded by _openAttempted; a second probe gets null+null).
-			assert(ffi.uinputReady() === false, "uinputReady false after close");
-		}
-
-		// ── Platform mechanism plumbing ──────────────────────────────
-		// Keyboard/Mouse dispatch consults Platform.getMechanism("input")
-		// on each call; verify that the mechanism registry knows about
-		// uinput, that pinning it works, and that Keyboard.press /
-		// Mouse.press don't throw when it's the selected mechanism —
-		// regardless of whether the device is actually live (dispatcher
-		// falls through to XTest when uinput isn't ready).
-		if (!mechatron.isAvailable("keyboard")) {
-			log("(keyboard unavailable, skipping mechanism tests) OK\n");
-			return true;
-		}
-
-		var infos = mechatron.listMechanisms("input");
-		assert(Array.isArray(infos), "listMechanisms returns array");
-		var uinputInfo = infos.find(function (m) { return m.name === "uinput"; });
-		assert(uinputInfo, "uinput mechanism registered");
-		assert(typeof uinputInfo.available === "boolean", "uinput.available boolean");
-		var xtestInfo = infos.find(function (m) { return m.name === "xtest"; });
-		assert(xtestInfo, "xtest mechanism registered");
-
-		// Pinning uinput: honoured even when unavailable so auto-detect
-		// doesn't silently pick xtest behind the user's back.
-		var prevActive = mechatron.getMechanism("input");
-		mechatron.setMechanism("input", "uinput");
-		assert(mechatron.getMechanism("input") === "uinput",
-			"setMechanism input=uinput sticks");
-
-		// Keyboard.press/release under uinput pin.  When uinput isn't
-		// ready the dispatcher silently falls through to XTest, so this
-		// just verifies no exception escapes.  We only attempt this if
-		// an XTest fallback is actually available — otherwise the whole
-		// call becomes a no-op but importing mechanism would still have
-		// been exercised.
-		// Use mechatron.KEYS here (not hardcoded X11 keysyms) because
-		// kb.press() is the public API — it expects the platform-native
-		// key code (X11 keysym on Linux, VK on Windows, HID code on
-		// macOS) and translates internally.  We're testing "press
-		// doesn't throw with uinput pinned", not the keysym mapping.
-		var KEYS = mechatron.KEYS;
-		var kb = new mechatron.Keyboard();
-		var mouse = new mechatron.Mouse();
-		try {
-			kb.press(KEYS.KEY_LSHIFT);
-			kb.release(KEYS.KEY_LSHIFT);
-		} catch (e) {
-			assert(false, "Keyboard under uinput pin threw: " + e.message);
-		}
-
-		// Mouse buttons + scroll under uinput pin.  setPos uses EV_ABS
-		// through uinput (emulated digitizer) when uinput is selected,
-		// falling back to XWarpPointer if the coordinate mapping fails.
-		try {
-			mouse.press(mechatron.BUTTON_LEFT);
-			mouse.release(mechatron.BUTTON_LEFT);
-			mouse.scrollV(1);
-			mouse.scrollH(-1);
-		} catch (e) {
-			assert(false, "Mouse ops under uinput pin threw: " + e.message);
-		}
-
-		// Restore prior selection so later tests aren't affected.
-		if (prevActive) {
-			mechatron.setMechanism("input", prevActive);
-		} else {
-			mechatron.resetMechanism("input");
-		}
 
 		log("OK\n");
 		return true;
