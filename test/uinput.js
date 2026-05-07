@@ -18,12 +18,10 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	function testUinput() {
 		log("  uinput... ");
 
-		// Only meaningful on Linux — the encoding functions are present
-		// everywhere (pure JS), but the keycode table is Linux-specific.
-		if (process.platform !== "linux") {
-			log("SKIP (not Linux)\n");
-			return true;
-		}
+		// Pure-logic unit tests — no platform-specific behavior.  The
+		// keycode table and ioctl numbers are Linux-defined constants
+		// but the encoding functions work the same everywhere, so we
+		// run this on all platforms to catch regressions.
 
 		// Load the module directly so tests attribute coverage to
 		// lib/input/uinput.ts (the public API doesn't re-export these

@@ -402,42 +402,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			try { _child.kill(); } catch (_) {}
 		}
 
-		// --- task_for_pid failure path (macOS, non-root -> root process) ---
-		if (process.platform === "darwin" &&
-			typeof process.getuid === "function" &&
-			process.getuid() === 0) {
-			var _nrScript =
-				"(async function() {" +
-				"try {" +
-				"  var m = require(" + JSON.stringify(_path.resolve(__dirname, "..")) + ");" +
-				"  var p = new m.Process(); p.open(1);" +
-				"  var mem = new m.Memory(p);" +
-				"  process.stdout.write(await mem.isValid() ? 'TASK_OK' : 'TASK_DENIED');" +
-				"} catch (e) { process.stderr.write(String(e)); }" +
-				"})();";
-			var _nrResult = null;
-			try {
-				_nrResult = _cp.spawnSync(process.execPath,
-					["-e", _nrScript],
-					{
-						uid: -2, gid: -2,   // macOS "nobody"
-						stdio: ["ignore", "pipe", "pipe"],
-						env: process.env,
-						timeout: 5000,
-					});
-			} catch (_) { _nrResult = null; }
-			var _nrOut = _nrResult && _nrResult.stdout
-				? _nrResult.stdout.toString() : "";
-			if (_nrOut.indexOf("TASK_DENIED") >= 0) {
-				assert(true, "non-root Memory(pid=1) denied (task_for_pid KERN_FAILURE)");
-			} else if (_nrOut.indexOf("TASK_OK") >= 0) {
-				log("(task_for_pid succeeded as nobody?) ");
-			} else {
-				log("(non-root helper unavailable) ");
-			}
-		}
-
-		// --- Multi-value (count > 1) typed reads ---
+// --- Multi-value (count > 1) typed reads ---
 		if (readable && readable.size >= 32n) {
 			var mv8 = await mem.readInt8(readable.start, 4);
 			assert(Array.isArray(mv8), "readInt8 count=4 returns array");
@@ -512,6 +477,51 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
 
 		await proc.close();
+		log("OK\n");
+		return true;
+	}
+
+	async function testTaskForPidRoot() {
+		// macOS task_for_pid privilege check: when root drops to a
+		// non-root user, attaching Memory to PID 1 (launchd) must fail
+		// with KERN_FAILURE.  Matrix gates platform; the only inline
+		// check is for root, which is a TEST PREREQ (not a skip
+		// decision) — non-root local runs log and exit cleanly.
+		log("  task_for_pid (root)... ");
+		if (typeof process.getuid !== "function" || process.getuid() !== 0) {
+			log("SKIPPED (need root)\n");
+			return true;
+		}
+		var _cp = require("child_process");
+		var _path = require("path");
+		var nrScript =
+			"(async function() {" +
+			"try {" +
+			"  var m = require(" + JSON.stringify(_path.resolve(__dirname, "..")) + ");" +
+			"  var p = new m.Process(); p.open(1);" +
+			"  var mem = new m.Memory(p);" +
+			"  process.stdout.write(await mem.isValid() ? 'TASK_OK' : 'TASK_DENIED');" +
+			"} catch (e) { process.stderr.write(String(e)); }" +
+			"})();";
+		var nrResult = null;
+		try {
+			nrResult = _cp.spawnSync(process.execPath,
+				["-e", nrScript],
+				{
+					uid: -2, gid: -2,   // macOS "nobody"
+					stdio: ["ignore", "pipe", "pipe"],
+					env: process.env,
+					timeout: 5000,
+				});
+		} catch (_) { nrResult = null; }
+		var nrOut = nrResult && nrResult.stdout ? nrResult.stdout.toString() : "";
+		if (nrOut.indexOf("TASK_DENIED") >= 0) {
+			assert(true, "non-root Memory(pid=1) denied (task_for_pid KERN_FAILURE)");
+		} else if (nrOut.indexOf("TASK_OK") >= 0) {
+			log("(task_for_pid succeeded as nobody?) ");
+		} else {
+			log("(non-root helper unavailable) ");
+		}
 		log("OK\n");
 		return true;
 	}
@@ -616,6 +626,11 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			functions: ["memory_writeData", "memory_bufferAddress",
 				"process_getCurrent", "process_close"],
 			test: testMemoryFlaggedWrites,
+		},
+		{
+			name: "memory task_for_pid (root)",
+			functions: ["memory_task_for_pid_root"],
+			test: testTaskForPidRoot,
 		},
 		{
 			name: "memory setAccess",

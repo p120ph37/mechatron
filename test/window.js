@@ -370,15 +370,15 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				}
 			}
 		},
-		// ── Stale-handle probe (Linux FFI only) ──
+		// ── Stale-handle probe — verify a window-handle is detected as
+		// invalid once its backing process exits.  Currently exercised
+		// only on Linux FFI (xmessage is the test helper).  To extend
+		// to other platforms, mark window_isValid_proc "ok" in their
+		// matrix column and add platform-appropriate helper spawning.
 		{
-			name: "stale-handle probe (Linux FFI)",
-			functions: ["window_getList", "window_isValid", "window_close", "window_setHandle"],
+			name: "stale-handle probe",
+			functions: ["window_isValid_proc", "window_getList", "window_isValid", "window_close", "window_setHandle"],
 			test: async function () {
-				if (process.platform !== "linux" ||
-					mechatron.getBackend("window") !== "ffi") {
-					return;
-				}
 				var _cpw = require("child_process");
 				var _tag = "MechatronStaleProbe_" + process.pid;
 				var _xm = null;

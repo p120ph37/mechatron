@@ -87,6 +87,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | window_getActive | ok | ok | ok | skip | ok | ok | ok | ok | ok |
 | window_setActive | ok | ok | ok | skip | ok | ok | ok | ok | ok |
 | window_isAxEnabled | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| window_isValid_proc | skip | ok | skip | skip | skip | skip | skip | skip | skip |
 
 ## Process
 
@@ -152,3 +153,4 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | memory_setAccess | skip | skip | skip | ok | ok | ok | ok |
 | memory_setAccessFlags | skip | skip | skip | ok | ok | ok | ok |
 | memory_bufferAddress | ok | ok | skip | ok | ok | ok | ok |
+| memory_task_for_pid_root | skip | skip | skip | skip | skip | ok | ok |

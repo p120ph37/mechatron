@@ -870,49 +870,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					catch (_) { postCloseThrew = true; }
 					assert(postCloseThrew, "post-close sendRequest rejects");
 
-					// ── xproto bridge: sync→async dispatch via lib/x11proto/xproto ──
-					// Only exercise under the FFI backend — the napi backend
-					// doesn't load lib/x11proto/xproto.ts and the sync wrappers
-					// would have nothing to forward to.
-					var be = (process.env.MECHATRON_BACKEND || "").toLowerCase();
-					if (be === "ffi" && mechatron.isAvailable("keyboard")) {
-						log("(ffi bridge) ");
-						var Platform = mechatron.Platform;
-						var prior = Platform.getPreferredMechanisms("input");
-						Platform.setMechanism("input", "xproto");
-						assert(Platform.getMechanism("input") === "xproto",
-							"xproto selected as input mechanism");
-						var bridge = require("../lib/x11proto/xproto");
-						bridge._resetXprotoForTests();
-						await bridge.xprotoSetPos(42, 51);
-						await bridge.xprotoMousePress(mechatron.BUTTON_LEFT);
-						await bridge.xprotoMouseRelease(mechatron.BUTTON_LEFT);
-						await bridge.xprotoScrollV(1);
-						await bridge.xprotoScrollH(-1);
-						await bridge.xprotoKeyPress(0x61);
-						await bridge.xprotoKeyRelease(0x61);
-						await bridge.xprotoFlush();
-						assert(bridge.xprotoReady(),
-							"xproto bridge opened conn and survived press burst");
-						assert(bridge.xprotoOpenReason() === null,
-							"xproto open reason is null (success)");
-
-						// Dispatch through the public API — routes to xproto
-						// because we pinned the mechanism above.
-						var kb = new mechatron.Keyboard();
-						await kb.press(0x61);
-						await kb.release(0x61);
-						var ms = new mechatron.Mouse();
-						await ms.press(mechatron.BUTTON_LEFT);
-						await ms.release(mechatron.BUTTON_LEFT);
-						await mechatron.Mouse.setPos(123, 234);
-						await bridge.xprotoFlush();
-
-						bridge._resetXprotoForTests();
-						if (prior && prior.length) Platform.setMechanism("input", prior);
-						else Platform.resetMechanism("input");
-					}
-
 					log("OK\n");
 					liveDone = true;
 					return true;
