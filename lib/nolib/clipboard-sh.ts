@@ -81,7 +81,12 @@ async function runCapture(cmd: string, args: string[], input?: string | Buffer):
       errored = true;
       settle(false);
     });
-    child.on("close", (code) => {
+    // Resolve on `exit`, not `close`. xclip and xsel daemonize themselves
+    // to keep the X11 selection alive after the foreground process exits;
+    // their daemon child inherits stdin/stdout and never closes them, so
+    // `close` would hang forever. `exit` fires as soon as the parent
+    // process terminates, which is what we want.
+    child.on("exit", (code) => {
       settle(!errored && code === 0);
     });
 
