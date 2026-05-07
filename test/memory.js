@@ -495,23 +495,22 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
 			}
 
-			var writable = null;
-			for (var j = 0; j < regions.length; ++j) {
-				if (regions[j].valid && regions[j].bound && regions[j].writable && regions[j].size > 16n) {
-					writable = regions[j];
-					break;
-				}
+			// Use a Buffer we own as the write target.  Writing to a random
+			// "writable region" returned by getRegions() on the current
+			// process targets V8 heap pages, which Node's GC depends on
+			// being intact — corrupting them with arbitrary bytes causes
+			// shutdown crashes (observed as v8::ThreadIsolation::
+			// JitPageReference::Size NULL_CLASS_PTR_READ on Windows ia32).
+			var wBuf = Buffer.alloc(16);
+			var wDest = Buffer.alloc(64);
+			var wDestAddr = mem.addressOf(wDest);
+			if (!bisectSkip("flagged-write-skiperr")) {
+				var wroteSkip = await mem.writeData(wDestAddr, wBuf, 16, Memory.SKIP_ERRORS);
+				assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
 			}
-			if (writable) {
-				var wBuf = Buffer.alloc(16);
-				if (!bisectSkip("flagged-write-skiperr")) {
-					var wroteSkip = await mem.writeData(writable.start, wBuf, 16, Memory.SKIP_ERRORS);
-					assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
-				}
-				if (!bisectSkip("flagged-write-autoaccess")) {
-					var wroteAuto = await mem.writeData(writable.start, wBuf, 16, Memory.AUTO_ACCESS);
-					assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
-				}
+			if (!bisectSkip("flagged-write-autoaccess")) {
+				var wroteAuto = await mem.writeData(wDestAddr, wBuf, 16, Memory.AUTO_ACCESS);
+				assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
 			}
 		}
 
@@ -570,6 +569,46 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
+	async function testAddressOf() {
+		log("  Memory addressOf... ");
+		var Process = mechatron.Process;
+		var Memory  = mechatron.Memory;
+
+		// nolib: addressOf cannot be implemented in pure JS.
+		if (process.env.MECHATRON_BACKEND === "nolib") {
+			var mem0 = new Memory(await Process.getCurrent());
+			var threw = false;
+			try { mem0.addressOf(Buffer.alloc(16)); } catch (_) { threw = true; }
+			assert(threw, "nolib addressOf throws");
+			log("SKIPPED (nolib)\n");
+			return true;
+		}
+
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		var buf = Buffer.alloc(64);
+		buf.writeUInt32LE(0xDEADBEEF, 0);
+		var addr = mem.addressOf(buf);
+		assert(typeof addr === "bigint", "addressOf returns bigint");
+		assert(addr > 0n, "addressOf returns non-zero");
+
+		// Round-trip: read back via the address and confirm we see our magic.
+		var readBuf = Buffer.alloc(4);
+		var got = await mem.readData(addr, readBuf, 4);
+		assert(got === 4, "addressOf read 4 bytes");
+		assert(readBuf.readUInt32LE(0) === 0xDEADBEEF,
+			"addressOf round-trip: read magic from buffer's address");
+
+		// Round-trip write: writeData to the address modifies our buffer.
+		var writeBuf = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+		await mem.writeData(addr, writeBuf, 4);
+		assert(buf.readUInt8(0) === 0x01 && buf.readUInt8(3) === 0x04,
+			"addressOf round-trip: writeData modifies our buffer");
+
+		log("OK\n");
+		return true;
+	}
+
 	return [
 		{
 			name: "memory ctor",
@@ -585,6 +624,11 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				"process_getCurrent", "process_open", "process_close",
 			],
 			test: testMemory,
+		},
+		{
+			name: "memory addressOf",
+			functions: ["memory_bufferAddress"],
+			test: testAddressOf,
 		},
 		{
 			name: "memory setAccess",

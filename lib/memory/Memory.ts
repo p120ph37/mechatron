@@ -257,6 +257,24 @@ export class Memory {
     return getNative("memory").memory_writeData(this._pid, toBigInt(address), buf, flags);
   }
 
+  /**
+   * Return the address of `buffer`'s backing byte-array in the current
+   * process's address space.  Useful for getting a known-safe target for
+   * read/write tests on the current process — writing to a Buffer you own
+   * is safer than picking a random "writable region" returned by
+   * getRegions(), which on Node may include V8 heap pages whose corruption
+   * causes shutdown crashes.
+   *
+   * The address is only meaningful in the current process.  Passing it to
+   * a Memory bound to another process is a logical error.
+   *
+   * Not supported on the nolib backend (pure JS cannot introspect Buffer
+   * pointers) — throws on call.
+   */
+  addressOf(buffer: Buffer): bigint {
+    return getNative("memory").memory_bufferAddress(buffer);
+  }
+
   async readInt8(address: bigint | number, count?: number, stride?: number): Promise<number | number[] | null> {
     return this._readType(toBigInt(address), DataType.Int8, 1, count, stride);
   }

@@ -17,3 +17,4 @@ export const memory_writeData: (pid: number, address: bigint, data: Buffer, flag
 export const memory_find: (pid: number, pattern: string, start?: bigint, stop?: bigint, limit?: number, flags?: string) => bigint[] = native.memory_find;
 export const memory_setAccess: (pid: number, address: bigint, readable: boolean, writable: boolean, executable: boolean) => boolean = native.memory_setAccess;
 export const memory_setAccessFlags: (pid: number, address: bigint, flags: number) => boolean = native.memory_setAccessFlags;
+export const memory_bufferAddress: (buf: Buffer) => bigint = native.memory_bufferAddress;

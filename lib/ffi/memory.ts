@@ -938,3 +938,7 @@ export function memory_writeData(pid: number, address: bigint, data: Buffer | Ui
 
   throw new Error("memory: not implemented on this platform");
 }
+
+export function memory_bufferAddress(buf: Buffer): bigint {
+  return bp(buf);
+}

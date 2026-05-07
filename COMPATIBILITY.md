@@ -151,3 +151,4 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | memory_find | ok | ok | ok | ok | ok | ok | ok |
 | memory_setAccess | skip | skip | skip | ok | ok | ok | ok |
 | memory_setAccessFlags | skip | skip | skip | ok | ok | ok | ok |
+| memory_bufferAddress | ok | ok | skip | ok | ok | ok | ok |

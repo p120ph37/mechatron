@@ -14,6 +14,11 @@ fn alloc_node_buffer(env: &Env, len: usize) -> Result<(Buffer, *mut u8)> {
 
 // ── Shared types (all platforms) ────────────────────────────────────────────
 
+#[napi(js_name = "memory_bufferAddress")]
+pub fn memory_buffer_address(buf: Buffer) -> BigInt {
+    u64_to_bi(buf.as_ptr() as u64)
+}
+
 struct RegionInfo {
     valid: bool,
     bound: bool,

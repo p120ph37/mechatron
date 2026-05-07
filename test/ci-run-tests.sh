@@ -178,18 +178,16 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   #
   # 'warmup-only' = warmup + module load + exit (no memory ops at all)
   # 'no-warmup-*' = same case body but skips warmup (control)
-  # Variance verified the flag is NOT the differentiator (prior 75/75 OK
-  # for full-no-flagged-skiperr was luck — crashed @ 11 on rerun).
-  # Now test: is the trigger reads, writes, or both?
-  #   full-no-flagged-reads: only writes run (corruption hypothesis)
-  #   full-no-flagged-writes: only reads run (control)
-  # If only-writes crashes and only-reads doesn't, the 16-byte WRITE to
-  # writable.start (which is V8 heap on self) is the corruption source.
+  # Verification of the fix: prior runs proved the trigger is the 16-byte
+  # writeData(writable.start, ...) on self, where writable.start is the
+  # first writable region returned by getRegions() — almost always a V8
+  # heap page on Node.  Test now uses mem.addressOf(ourBuffer) to get a
+  # known-safe target address.  Run 'full' at high iter count to confirm
+  # the fix.  No crash @ 250 iters = fix verified.
   BISECT_CASES=(
-    full-no-flagged-reads
-    full-no-flagged-writes
+    full
   )
-  BISECT_ITERS=200
+  BISECT_ITERS=250
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
   declare -A BISECT_RESULT
   for case_name in "${BISECT_CASES[@]}"; do

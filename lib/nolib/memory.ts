@@ -363,3 +363,7 @@ export function memory_find(
   }
   return out;
 }
+
+export function memory_bufferAddress(_buf: Buffer): bigint {
+  throw new Error("memory_bufferAddress: not supported in nolib backend (requires native pointer access)");
+}
