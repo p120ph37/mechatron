@@ -15,14 +15,6 @@
  * because it must run an X event loop to answer SelectionRequest events
  * asynchronously; this generic dispatcher is for the simpler subsystems
  * whose operations are one-shot synchronous FFI calls.
- *
- * Coverage mode: set MECHATRON_FFI_DIRECT=1 to bypass the worker and
- * invoke impl functions directly on the main thread. Bun's --coverage
- * doesn't follow worker_threads (as of 1.3), so the worker code goes
- * uninstrumented; the direct-call mode lets CI measure impl coverage
- * by running tests once with workers (correctness) and once without
- * (coverage). The dispatcher contract is unchanged from the caller's
- * point of view — both modes return Promises.
  */
 
 import { Worker } from "worker_threads";
@@ -36,32 +28,7 @@ interface PendingEntry {
   reject: (reason: any) => void;
 }
 
-const DIRECT_MODE = process.env.MECHATRON_FFI_DIRECT === "1";
-
-export function createDispatcher(workerPath: string, implPath?: string): Dispatcher {
-  // Direct mode: load impl on the main thread and invoke synchronously.
-  // The impl path is conventionally workerPath with "-worker" → "-impl",
-  // and is also accepted as an explicit argument for callers that don't
-  // follow that convention.
-  if (DIRECT_MODE) {
-    const path = implPath ?? workerPath.replace(/-worker(\.[a-z]+)?$/, "-impl$1");
-    let impl: Record<string, any> | null = null;
-    return {
-      call<T>(op: string, args: unknown[] = []): Promise<T> {
-        if (!impl) impl = require(path);
-        const fn = impl![op];
-        if (typeof fn !== "function") {
-          return Promise.reject(new Error(`unknown op: ${op}`));
-        }
-        try {
-          return Promise.resolve(fn(...args));
-        } catch (err) {
-          return Promise.reject(err);
-        }
-      },
-    };
-  }
-
+export function createDispatcher(workerPath: string): Dispatcher {
   let worker: Worker | null = null;
   let nextId = 1;
   const pending = new Map<number, PendingEntry>();

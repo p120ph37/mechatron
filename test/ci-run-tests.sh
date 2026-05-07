@@ -179,27 +179,6 @@ for be in "${BACKENDS[@]}"; do
   UNIT_DONE=true
 done
 
-# ── ffi[direct]: bypass worker_threads so coverage instrumentation
-#    sees the synchronous impl files. Bun's --coverage doesn't follow
-#    Worker threads (as of 1.3), so the normal ffi pass leaves the
-#    -impl.ts files uninstrumented.  This pass invokes them inline on
-#    the main thread to capture their coverage; functional behavior is
-#    identical (same code, same Promise contract). ──
-JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-direct.xml"
-BE_COV_DIR="$COV_DIR/ffi-direct"
-mkdir -p "$BE_COV_DIR"
-BE_RC=0
-MECHATRON_BACKEND=ffi \
-MECHATRON_FFI_DIRECT=1 \
-MECHATRON_SKIP_UNIT=1 \
-  run_bun "ffi-direct" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-    --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-    --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-  || BE_RC=$?
-guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-direct" \
-  "bun test for ffi-direct (MECHATRON_FFI_DIRECT=1) exited ${BE_RC} without producing a JUnit report."
-[ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-
 # ── Linux-only: FFI + nolib[vt] input (uinput path) ──────────────
 if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-input.xml"
