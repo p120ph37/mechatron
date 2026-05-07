@@ -178,23 +178,17 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   #
   # 'warmup-only' = warmup + module load + exit (no memory ops at all)
   # 'no-warmup-*' = same case body but skips warmup (control)
-  # Sub-bisection within the "flagged" section (confirmed trigger from
-  # prior run: skipping it eliminated the crash entirely).  Section has
-  # 4 ops: SKIP_ERRORS read, AUTO_ACCESS read, SKIP_ERRORS write,
-  # AUTO_ACCESS write — all on self process.  Identify the specific op(s).
+  # Variance check on the most informative comparison:
+  #   full-no-flagged-autoaccess (only SKIP_ERRORS read+write left): crashed @ 12
+  #   full-no-flagged-skiperr   (only AUTO_ACCESS read+write left): OK 75/75
+  # Run each at 200 iters to verify the flag really is the differentiator.
+  # Crashing cases stop early on first crash, so total time is dominated
+  # by the OK case (~200s = ~3.5 min).
   BISECT_CASES=(
-    full
-    full-no-flagged
-    full-no-flagged-reads
-    full-no-flagged-writes
-    full-no-flagged-autoaccess
     full-no-flagged-skiperr
-    full-no-flagged-read-skiperr
-    full-no-flagged-read-autoaccess
-    full-no-flagged-write-skiperr
-    full-no-flagged-write-autoaccess
+    full-no-flagged-autoaccess
   )
-  BISECT_ITERS=75
+  BISECT_ITERS=200
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
   declare -A BISECT_RESULT
   for case_name in "${BISECT_CASES[@]}"; do
