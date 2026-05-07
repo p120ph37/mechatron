@@ -221,7 +221,13 @@ const KEYSYM_MOD_MASK = new Map([
 
 // Button index → Clutter.ModifierType mask for GetButtonState.
 // Button 0=left, 1=mid, 2=right (mechatron constants).
-const BUTTON_MOD_MASKS = [256, 512, 1024, 2048, 4096];
+// Mutter's native maskmap swaps BUTTON2/BUTTON3 masks (X11 legacy):
+//   Clutter button 2 (mid)   → BUTTON3_MASK (1024)
+//   Clutter button 3 (right) → BUTTON2_MASK (512)
+const BUTTON_MOD_MASKS = [256, 1024, 512, 2048, 4096];
+
+// Mechatron button constant → Clutter button number.
+const MECHATRON_TO_CLUTTER = [1, 2, 3, 8, 9];
 
 function inputTime() {
   const t = global.get_current_time();
@@ -264,6 +270,7 @@ export default class MechatronWMExtension extends Extension {
   _virtualKeyboard = null;
   _virtualPointer = null;
   _pressedKeys = new Set();
+  _pressedButtons = new Set();
 
   _ensureVirtualDevices() {
     if (!this._virtualKeyboard) {
@@ -471,7 +478,9 @@ export default class MechatronWMExtension extends Extension {
             const button = args[1];
             const [, , mods] = global.get_pointer();
             const mask = button >= 0 && button < BUTTON_MOD_MASKS.length ? BUTTON_MOD_MASKS[button] : 0;
-            invocation.return_value(new GLib.Variant("(b)", [(mods & mask) !== 0]));
+            const clutterBtn = button >= 0 && button < MECHATRON_TO_CLUTTER.length ? MECHATRON_TO_CLUTTER[button] : -1;
+            const pressed = (mods & mask) !== 0 || ext._pressedButtons.has(clutterBtn);
+            invocation.return_value(new GLib.Variant("(b)", [pressed]));
             return;
           }
           if (method === "GetKeyState") {
@@ -505,7 +514,10 @@ export default class MechatronWMExtension extends Extension {
               break;
             }
             case "PointerButton": {
-              const state = args[2] ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED;
+              const pressed = !!args[2];
+              const state = pressed ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED;
+              if (pressed) ext._pressedButtons.add(args[1]);
+              else ext._pressedButtons.delete(args[1]);
               ext._virtualPointer.notify_button(time, args[1], state);
               break;
             }
@@ -576,5 +588,6 @@ export default class MechatronWMExtension extends Extension {
     this._virtualKeyboard = null;
     this._virtualPointer = null;
     this._pressedKeys.clear();
+    this._pressedButtons.clear();
   }
 }
