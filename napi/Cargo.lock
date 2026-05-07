@@ -206,12 +206,31 @@ dependencies = [
 name = "mechatron-keyboard"
 version = "0.0.0"
 dependencies = [
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "windows",
+]
+
+[[package]]
+name = "mechatron-keyboard-portal"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "napi",
+ "napi-build",
+ "napi-derive",
+]
+
+[[package]]
+name = "mechatron-keyboard-x11"
+version = "0.0.0"
+dependencies = [
  "libc",
  "mechatron-shared",
  "napi",
  "napi-build",
  "napi-derive",
- "windows",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "mechatron-keyboard"
+name = "mechatron-keyboard-x11"
 version = "0.0.0"
 edition = "2021"
 
@@ -10,11 +10,9 @@ crate-type = ["cdylib"]
 napi = { version = "2", features = ["napi4"] }
 napi-derive = "2"
 
-[target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.58", features = [
-    "Win32_Foundation",
-    "Win32_UI_Input_KeyboardAndMouse",
-] }
+[target.'cfg(target_os = "linux")'.dependencies]
+mechatron-shared = { path = "../shared" }
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"

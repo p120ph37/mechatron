@@ -2,6 +2,8 @@
 members = [
     "shared",
     "keyboard",
+    "keyboard-x11",
+    "keyboard-portal",
     "mouse",
     "clipboard",
     "screen",

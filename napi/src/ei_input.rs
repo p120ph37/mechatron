@@ -161,8 +161,6 @@ fn get_handle() -> Option<&'static EiHandle> {
 
 fn try_init() -> Option<EiHandle> {
     unsafe {
-        let ei_fns = load_ei()?;
-
         // Check Wayland session
         let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
             || std::env::var("XDG_SESSION_TYPE").ok().map_or(false, |v| v == "wayland");
@@ -182,7 +180,7 @@ fn try_init() -> Option<EiHandle> {
         libc::fcntl(pipe_rd, libc::F_SETFL, flags | libc::O_NONBLOCK);
 
         let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || ei_thread(ei_fns, eis_fd, rx, pipe_rd));
+        std::thread::spawn(move || ei_thread(eis_fd, rx, pipe_rd));
 
         Some(EiHandle { tx: Mutex::new(tx), wake_wr: pipe_wr })
     }
@@ -190,22 +188,19 @@ fn try_init() -> Option<EiHandle> {
 
 // ── EI background thread ──────────────────────────────────────────────
 
-unsafe fn ei_thread(
-    fns: &'static EiFns, eis_fd: RawFd,
-    rx: mpsc::Receiver<EiCmd>, wake_rd: RawFd,
-) {
-    let ei = (fns.ei_new_sender)(std::ptr::null_mut());
+unsafe fn ei_thread(eis_fd: RawFd, rx: mpsc::Receiver<EiCmd>, wake_rd: RawFd) {
+    let ei = ei_new_sender(std::ptr::null_mut());
     if ei.is_null() { return; }
 
     let name = b"mechatron\0";
-    (fns.ei_configure_name)(ei, name.as_ptr() as *const c_char);
+    ei_configure_name(ei, name.as_ptr() as *const c_char);
 
-    if (fns.ei_setup_backend_fd)(ei, eis_fd) != 0 {
-        (fns.ei_unref)(ei);
+    if ei_setup_backend_fd(ei, eis_fd) != 0 {
+        ei_unref(ei);
         return;
     }
 
-    let ei_fd = (fns.ei_get_fd)(ei);
+    let ei_fd = ei_get_fd(ei);
     let mut device: *mut c_void = std::ptr::null_mut();
     let mut seq: u32 = 0;
     let mut ready = false;
@@ -218,47 +213,46 @@ unsafe fn ei_thread(
         libc::poll(fds.as_mut_ptr(), 1, 500);
         if fds[0].revents & libc::POLLIN == 0 { continue; }
 
-        (fns.ei_dispatch)(ei);
+        ei_dispatch(ei);
         loop {
-            let event = (fns.ei_get_event)(ei);
+            let event = ei_get_event(ei);
             if event.is_null() { break; }
-            let etype = (fns.ei_event_get_type)(event);
+            let etype = ei_event_get_type(event);
             match etype {
                 EI_EVENT_SEAT_ADDED => {
-                    let seat = (fns.ei_event_get_seat)(event);
+                    let seat = ei_event_get_seat(event);
                     if !seat.is_null() {
-                        // Bind all capabilities via variadic fn
-                        type BindFn = unsafe extern "C" fn(
-                            *mut c_void, c_int, c_int, c_int, c_int, c_int, *const c_void,
+                        ei_seat_bind_capabilities(
+                            seat,
+                            CAP_POINTER, CAP_POINTER_ABSOLUTE, CAP_KEYBOARD,
+                            CAP_BUTTON, CAP_SCROLL,
+                            std::ptr::null(),
                         );
-                        let bind: BindFn = std::mem::transmute(fns.ei_seat_bind_capabilities);
-                        bind(seat, CAP_POINTER, CAP_POINTER_ABSOLUTE, CAP_KEYBOARD,
-                             CAP_BUTTON, CAP_SCROLL, std::ptr::null());
                     }
                 }
                 EI_EVENT_DEVICE_ADDED => {
-                    let dev = (fns.ei_event_get_device)(event);
+                    let dev = ei_event_get_device(event);
                     if !dev.is_null() {
-                        device = (fns.ei_device_ref)(dev);
+                        device = ei_device_ref(dev);
                     }
                 }
                 EI_EVENT_DEVICE_RESUMED => {
                     if !device.is_null() {
                         seq += 1;
-                        (fns.ei_device_start_emulating)(device, seq);
+                        ei_device_start_emulating(device, seq);
                         ready = true;
                     }
                 }
                 _ => {}
             }
-            (fns.ei_event_unref)(event);
+            ei_event_unref(event);
             if ready { break; }
         }
         if ready { break; }
     }
 
     if !ready || device.is_null() {
-        (fns.ei_unref)(ei);
+        ei_unref(ei);
         return;
     }
 
@@ -275,48 +269,48 @@ unsafe fn ei_thread(
         }
 
         if fds[0].revents & libc::POLLIN != 0 {
-            (fns.ei_dispatch)(ei);
+            ei_dispatch(ei);
             loop {
-                let event = (fns.ei_get_event)(ei);
+                let event = ei_get_event(ei);
                 if event.is_null() { break; }
-                let etype = (fns.ei_event_get_type)(event);
+                let etype = ei_event_get_type(event);
                 match etype {
                     EI_EVENT_DEVICE_PAUSED => { ready = false; }
                     EI_EVENT_DEVICE_RESUMED => {
                         seq += 1;
-                        (fns.ei_device_start_emulating)(device, seq);
+                        ei_device_start_emulating(device, seq);
                         ready = true;
                     }
                     EI_EVENT_DEVICE_REMOVED | EI_EVENT_DISCONNECT => {
-                        (fns.ei_event_unref)(event);
+                        ei_event_unref(event);
                         return;
                     }
                     _ => {}
                 }
-                (fns.ei_event_unref)(event);
+                ei_event_unref(event);
             }
         }
 
         while let Ok(cmd) = rx.try_recv() {
             let (resp, did_emit) = match cmd {
                 EiCmd::Key { keycode, press, resp } => {
-                    if ready { (fns.ei_device_keyboard_key)(device, keycode, press); }
+                    if ready { ei_device_keyboard_key(device, keycode, press); }
                     (resp, ready)
                 }
                 EiCmd::Button { button, press, resp } => {
-                    if ready { (fns.ei_device_button_button)(device, button, press); }
+                    if ready { ei_device_button_button(device, button, press); }
                     (resp, ready)
                 }
                 EiCmd::ScrollDiscrete { dx, dy, resp } => {
-                    if ready { (fns.ei_device_scroll_discrete)(device, dx, dy); }
+                    if ready { ei_device_scroll_discrete(device, dx, dy); }
                     (resp, ready)
                 }
                 EiCmd::MotionAbsolute { x, y, resp } => {
-                    if ready { (fns.ei_device_pointer_motion_absolute)(device, x, y); }
+                    if ready { ei_device_pointer_motion_absolute(device, x, y); }
                     (resp, ready)
                 }
             };
-            if did_emit { (fns.ei_device_frame)(device, (fns.ei_now)(ei)); }
+            if did_emit { ei_device_frame(device, ei_now(ei)); }
             let _ = resp.send(did_emit);
         }
     }

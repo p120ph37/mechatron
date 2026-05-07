@@ -1,13 +1,7 @@
-#[cfg(target_os = "linux")]
-use mechatron_shared::x11 as x11_mod;
-#[cfg(target_os = "linux")]
-mod x11 {
-    pub use crate::x11_mod::*;
-}
-
-#[cfg(target_os = "linux")]
-#[path = "../../src/ei_input.rs"]
-mod ei_input;
+// mechatron-keyboard — non-Linux keyboard binary (macOS / Windows).
+//
+// On Linux, see mechatron-keyboard-x11 and mechatron-keyboard-portal
+// which are separate crates with their own NEEDED system libs.
 
 #[path = "../../src/keyboard.rs"]
 mod keyboard;

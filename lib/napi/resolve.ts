@@ -1,8 +1,17 @@
 /**
  * Shared napi .node binary resolution logic.
  *
- * Each @mechatronic/napi-<subsystem> npm package ships a platform-specific
- * .node binary.  This module resolves the correct filename and loads it.
+ * Each @mechatronic/napi-<subsystem> npm package ships one or more
+ * platform-specific .node binaries.  Subsystems with backend variants on
+ * Linux (keyboard / mouse / clipboard / screen) ship multiple binaries
+ * inside the same package — one per variant, each linking only its own
+ * runtime dependencies.  The variant TS facade calls
+ * `loadNapi(subsystem, variant)` to pick the matching binary file.
+ *
+ * Selecting the right binary by name doesn't change the npm publish
+ * surface: each subsystem has exactly one npm package; users who want
+ * to exclude a whole subsystem (e.g. memory, to avoid AV warnings)
+ * still uninstall a single package.
  */
 
 const p = process.platform;
@@ -19,10 +28,11 @@ const PLATFORM_MAP: Record<string, string> = {
 
 const platformSuffix = PLATFORM_MAP[`${p}-${a}`] || `${p}-${a}`;
 
-export function loadNapi(subsystem: string): any {
+export function loadNapi(subsystem: string, variant?: string): any {
   const path = require("path");
   const pkg = `@mechatronic/napi-${subsystem}`;
   const pkgDir = path.dirname(require.resolve(`${pkg}/package.json`));
-  const nodeFile = `mechatron-${subsystem}.${platformSuffix}.node`;
+  const baseName = variant ? `${subsystem}-${variant}` : subsystem;
+  const nodeFile = `mechatron-${baseName}.${platformSuffix}.node`;
   return require(path.join(pkgDir, nodeFile));
 }

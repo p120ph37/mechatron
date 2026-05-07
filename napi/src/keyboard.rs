@@ -1,52 +1,18 @@
+// Non-Linux keyboard implementation.
+//
+// macOS uses Quartz Event Services (CGEventCreateKeyboardEvent +
+// CGEventPost / CGEventSourceKeyState).  Windows uses SendInput with
+// INPUT_KEYBOARD events and GetAsyncKeyState for state queries.  Both
+// platforms expose a single OS-native input API with no variant fan-out,
+// so this file is the only keyboard implementation on those platforms.
+//
+// On Linux, see ../keyboard_x11.rs (XTest) and ../keyboard_portal.rs
+// (libei via xdg-desktop-portal RemoteDesktop) — the build system selects
+// one of those crates per backend variant rather than runtime-dispatching
+// at the language level.
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-
-#[cfg(target_os = "linux")]
-use crate::x11::*;
-
-// ==================== Linux ====================
-
-#[cfg(target_os = "linux")]
-fn do_press(keycode: u32) {
-    if crate::ei_input::is_available() {
-        crate::ei_input::ei_key(keycode, true);
-        return;
-    }
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
-        XTestFakeKeyEvent(display, xkeycode as u32, True_, CurrentTime);
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn do_release(keycode: u32) {
-    if crate::ei_input::is_available() {
-        crate::ei_input::ei_key(keycode, false);
-        return;
-    }
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
-        XTestFakeKeyEvent(display, xkeycode as u32, False_, CurrentTime);
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_key_state(keycode: i32) -> bool {
-    unsafe {
-        if !is_xtest_available() { return false; }
-        let display = get_display();
-        let mut keys = [0i8; 32];
-        XQueryKeymap(display, &mut keys as *mut [i8; 32] as *mut [std::ffi::c_char; 32]);
-        let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
-        (keys[(xkeycode / 8) as usize] & (1 << (xkeycode % 8))) != 0
-    }
-}
 
 // ==================== macOS ====================
 
@@ -161,7 +127,9 @@ fn platform_get_key_state(keycode: i32) -> bool {
 
 // ==================== AsyncTask wrappers ====================
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct PressTask(u32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for PressTask {
     type Output = ();
     type JsValue = ();
@@ -169,7 +137,9 @@ impl Task for PressTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct ReleaseTask(u32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for ReleaseTask {
     type Output = ();
     type JsValue = ();
@@ -177,7 +147,9 @@ impl Task for ReleaseTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct GetKeyStateTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for GetKeyStateTask {
     type Output = bool;
     type JsValue = bool;
@@ -185,16 +157,19 @@ impl Task for GetKeyStateTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "keyboard_press")]
 pub fn keyboard_press(keycode: i32) -> AsyncTask<PressTask> {
     AsyncTask::new(PressTask(keycode as u32))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "keyboard_release")]
 pub fn keyboard_release(keycode: i32) -> AsyncTask<ReleaseTask> {
     AsyncTask::new(ReleaseTask(keycode as u32))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "keyboard_getKeyState")]
 pub fn keyboard_get_key_state(keycode: i32) -> AsyncTask<GetKeyStateTask> {
     AsyncTask::new(GetKeyStateTask(keycode))

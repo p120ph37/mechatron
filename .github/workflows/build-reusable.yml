@@ -147,7 +147,17 @@ jobs:
 
       - name: Build Rust napi modules
         run: |
-          SUBS="keyboard mouse clipboard screen window process memory"
+          # Crates per platform.  On Linux the input subsystems split into
+          # variant-specific crates so each .node binary links only its
+          # own runtime deps (keyboard-x11 → libX11/libXtst, keyboard-portal
+          # → libei, etc).  All variants for a subsystem still ship inside
+          # one npm package: $PKG below maps each crate back to the
+          # subsystem's package directory (`keyboard-x11` → `keyboard`).
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            SUBS="keyboard-x11 keyboard-portal mouse clipboard screen window process memory"
+          else
+            SUBS="keyboard mouse clipboard screen window process memory"
+          fi
           cd napi
           if [ "${{ matrix.arch }}" = "ia32" ]; then
             CARGO_TARGET=i686-pc-windows-msvc
@@ -175,17 +185,23 @@ jobs:
           fi
 
           for s in $SUBS; do
-            SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s}.${SRC_EXT}"
+            # Cargo emits binaries with underscores (lib name rules); on
+            # disk we name them with dashes (variant-suffixed naming).
+            SRC="$TARGET_DIR/${SRC_PREFIX}mechatron_${s//-/_}.${SRC_EXT}"
             DST_NAME="mechatron-${s}.${TRIPLE}.node"
-            # Copy into napi/<sub>/ (for dev layout & artifact upload)
+            # Strip variant suffix (e.g. "keyboard-x11" → "keyboard") to
+            # find the npm package directory.  Subsystems without variants
+            # are unaffected.
+            PKG="${s%%-*}"
+            # Copy into napi/<crate>/ (for dev layout & artifact upload)
             cp "$SRC" "$s/$DST_NAME"
-            # Copy into packages/@mechatronic/napi-<sub>/ (for published layout)
-            cp "$SRC" "../packages/@mechatronic/napi-${s}/$DST_NAME"
+            # Copy into packages/@mechatronic/napi-<pkg>/ (for published layout)
+            cp "$SRC" "../packages/@mechatronic/napi-${PKG}/$DST_NAME"
             # Re-sign macOS binaries (strip="symbols" invalidates ad-hoc signature;
             # task_for_pid requires a valid signature even when running as root)
             if [ "${{ runner.os }}" = "macOS" ]; then
               codesign --force --sign - "$s/$DST_NAME"
-              codesign --force --sign - "../packages/@mechatronic/napi-${s}/$DST_NAME"
+              codesign --force --sign - "../packages/@mechatronic/napi-${PKG}/$DST_NAME"
             fi
           done
 
