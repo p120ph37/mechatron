@@ -625,6 +625,93 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
+	function testPtr() {
+		log("  Ptr... ");
+
+		var Ptr = mechatron.Ptr;
+
+		// ── Constructor variants ──
+		assert(new Ptr().value === 0n, "Ptr() default");
+		assert(new Ptr(undefined).value === 0n, "Ptr(undefined)");
+		assert(new Ptr(null).value === 0n, "Ptr(null)");
+		assert(new Ptr(0n).value === 0n, "Ptr(0n)");
+		assert(new Ptr(0x1000n).value === 0x1000n, "Ptr(bigint)");
+		assert(new Ptr(0x1000).value === 0x1000n, "Ptr(number) coerces to bigint");
+		var copy = new Ptr(new Ptr(0x2000n));
+		assert(copy.value === 0x2000n, "Ptr(Ptr) copy");
+
+		// ── NULL constant ──
+		assert(Ptr.NULL.isNull(), "Ptr.NULL.isNull");
+		assert(Ptr.NULL.value === 0n, "Ptr.NULL value");
+
+		// ── isNull ──
+		assert(new Ptr(0n).isNull(), "0n isNull");
+		assert(!new Ptr(1n).isNull(), "1n !isNull");
+
+		// ── add / sub ──
+		var p = new Ptr(0x1000n);
+		assert(p.add(0x10n).value === 0x1010n, "add bigint");
+		assert(p.add(16).value === 0x1010n, "add number");
+		assert(p.add(new Ptr(0x10n)).value === 0x1010n, "add Ptr");
+		assert(p.sub(0x10n).value === 0x0FF0n, "sub bigint");
+		assert(p.sub(16).value === 0x0FF0n, "sub number");
+		assert(p.sub(new Ptr(0x10n)).value === 0x0FF0n, "sub Ptr");
+
+		// ── eq / ne ──
+		assert(p.eq(new Ptr(0x1000n)), "eq Ptr");
+		assert(p.eq(0x1000n), "eq bigint");
+		assert(p.eq(0x1000), "eq number");
+		assert(!p.eq(0n), "!eq 0");
+		assert(p.ne(0n), "ne 0");
+		assert(!p.ne(0x1000n), "!ne self");
+
+		// ── lt / gt / le / ge ──
+		var lo = new Ptr(0x100n);
+		var hi = new Ptr(0x200n);
+		assert(lo.lt(hi), "lt Ptr");
+		assert(lo.lt(0x200n), "lt bigint");
+		assert(lo.lt(0x200), "lt number");
+		assert(hi.gt(lo), "gt Ptr");
+		assert(hi.gt(0x100n), "gt bigint");
+		assert(hi.gt(0x100), "gt number");
+		assert(lo.le(hi), "le Ptr lt");
+		assert(lo.le(lo), "le Ptr eq");
+		assert(lo.le(0x200n), "le bigint");
+		assert(lo.le(0x100), "le number eq");
+		assert(hi.ge(lo), "ge Ptr gt");
+		assert(hi.ge(hi), "ge Ptr eq");
+		assert(hi.ge(0x100n), "ge bigint");
+		assert(hi.ge(0x200), "ge number eq");
+
+		// ── Conversions ──
+		assert(p.toNumber() === 0x1000, "toNumber");
+		assert(p.toBigInt() === 0x1000n, "toBigInt");
+		assert(p.toString() === "0x1000", "toString hex");
+		assert(p.toJSON() === "0x1000", "toJSON");
+
+		// Symbol.toPrimitive: hint "string" returns hex, else returns bigint.
+		assert(`${p}` === "0x1000", "toPrimitive string");
+		assert(p + 0n === 0x1000n, "toPrimitive default = bigint");
+		assert(p.valueOf() === 0x1000n, "valueOf");
+
+		// ── Static helpers ──
+		var ptrFromNum = Ptr.from(42);
+		assert(ptrFromNum instanceof Ptr && ptrFromNum.value === 42n, "Ptr.from(number)");
+		var ptrFromBig = Ptr.from(0x100n);
+		assert(ptrFromBig.value === 0x100n, "Ptr.from(bigint)");
+		var existing = new Ptr(99n);
+		assert(Ptr.from(existing) === existing, "Ptr.from(Ptr) returns same");
+		assert(Ptr.from(undefined).value === 0n, "Ptr.from(undefined)");
+		assert(Ptr.from(null).value === 0n, "Ptr.from(null)");
+
+		assert(Ptr.compare(lo, hi) === -1, "compare lt");
+		assert(Ptr.compare(hi, lo) === 1, "compare gt");
+		assert(Ptr.compare(lo, lo) === 0, "compare eq");
+
+		log("OK\n");
+		return true;
+	}
+
 	function testTimer() {
 		log("  Timer... ");
 
@@ -709,6 +796,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	return [
 		{ name: "types", functions: [], unit: true, test: testTypes },
+		{ name: "ptr", functions: [], unit: true, test: testPtr },
 		{ name: "timer", functions: [], unit: true, test: testTimer },
 	];
 };
