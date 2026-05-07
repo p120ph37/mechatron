@@ -300,7 +300,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				"native helper emitted 64-byte hex dump");
 
 			var childProc = new Process();
-			assert(childProc.open(_child.pid), "open child process");
+			assert(await childProc.open(_child.pid), "open child process");
 			var childMem = new Memory(childProc);
 			assert(await childMem.isValid(), "child Memory valid");
 			assert(childMem.getProcess().getPID() === _child.pid,
@@ -396,7 +396,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			assert(_hex.substring(0, 2) === "a5",
 				"cross-process writeData restore visible");
 
-			childProc.close();
+			await childProc.close();
 		} finally {
 			try { _child.stdin.end(); } catch (_) {}
 			try { _child.kill(); } catch (_) {}
@@ -498,7 +498,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			"(async function() {" +
 			"try {" +
 			"  var m = require(" + JSON.stringify(_path.resolve(__dirname, "..")) + ");" +
-			"  var p = new m.Process(); p.open(1);" +
+			"  var p = new m.Process(); await p.open(1);" +
 			"  var mem = new m.Memory(p);" +
 			"  process.stdout.write(await mem.isValid() ? 'TASK_OK' : 'TASK_DENIED');" +
 			"} catch (e) { process.stderr.write(String(e)); }" +
