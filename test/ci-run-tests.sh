@@ -178,15 +178,16 @@ if [ "$MATRIX_ARCH" = "ia32" ]; then
   #
   # 'warmup-only' = warmup + module load + exit (no memory ops at all)
   # 'no-warmup-*' = same case body but skips warmup (control)
-  # Variance check on the most informative comparison:
-  #   full-no-flagged-autoaccess (only SKIP_ERRORS read+write left): crashed @ 12
-  #   full-no-flagged-skiperr   (only AUTO_ACCESS read+write left): OK 75/75
-  # Run each at 200 iters to verify the flag really is the differentiator.
-  # Crashing cases stop early on first crash, so total time is dominated
-  # by the OK case (~200s = ~3.5 min).
+  # Variance verified the flag is NOT the differentiator (prior 75/75 OK
+  # for full-no-flagged-skiperr was luck — crashed @ 11 on rerun).
+  # Now test: is the trigger reads, writes, or both?
+  #   full-no-flagged-reads: only writes run (corruption hypothesis)
+  #   full-no-flagged-writes: only reads run (control)
+  # If only-writes crashes and only-reads doesn't, the 16-byte WRITE to
+  # writable.start (which is V8 heap on self) is the corruption source.
   BISECT_CASES=(
-    full-no-flagged-skiperr
-    full-no-flagged-autoaccess
+    full-no-flagged-reads
+    full-no-flagged-writes
   )
   BISECT_ITERS=200
   echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
