@@ -25,5 +25,5 @@ export const screen_grabScreen  = impl.screen_grabScreen;
 
 export const screen_getPortalToken: () => string | null =
   (impl as any).screen_getPortalToken ?? (() => null);
-export const screen_setPortalToken: (token: string) => void =
+export const screen_setPortalToken: (token: string | null) => void =
   (impl as any).screen_setPortalToken ?? (() => {});

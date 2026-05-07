@@ -6,7 +6,7 @@
  * positioning and pointer queries via global.get_pointer().
  */
 
-import { evdevButton } from "../mouse/constants";
+import { clutterButton } from "../mouse/constants";
 import {
   gextPointerButton, gextPointerAxisDiscrete,
   gextPointerMotionAbsolute, gextGetPointerPos,
@@ -17,12 +17,12 @@ const AXIS_VERTICAL = 0;
 const AXIS_HORIZONTAL = 1;
 
 export async function mouse_press(button: number): Promise<void> {
-  const code = evdevButton(button);
+  const code = clutterButton(button);
   if (code !== null) await gextPointerButton(code, true);
 }
 
 export async function mouse_release(button: number): Promise<void> {
-  const code = evdevButton(button);
+  const code = clutterButton(button);
   if (code !== null) await gextPointerButton(code, false);
 }
 

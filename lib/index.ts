@@ -43,7 +43,7 @@ export {
 } from "./memory";
 
 // Native availability checking
-export { isAvailable, getBackend } from "./backend";
+export { isAvailable, getBackend, getNative } from "./backend";
 export type { Subsystem, Backend, Variant, BackendEntry } from "./backend";
 
 // Platform mechanism introspection — discover / select / override which

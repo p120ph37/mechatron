@@ -34,3 +34,16 @@ export function evdevButton(button: number): number | null {
     default: return null;
   }
 }
+
+/** Map mechatron button constants to Clutter button numbers.
+ *  Clutter uses 1-based button numbers that mutter internally converts to evdev. */
+export function clutterButton(button: number): number | null {
+  switch (button) {
+    case BUTTON_LEFT:  return 1;
+    case BUTTON_MID:   return 2;
+    case BUTTON_RIGHT: return 3;
+    case BUTTON_X1:    return 8;
+    case BUTTON_X2:    return 9;
+    default: return null;
+  }
+}
