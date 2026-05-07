@@ -60,56 +60,47 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(ui.BUS_VIRTUAL === 0x06, "BUS_VIRTUAL");
 
 		// ── Keysym → evdev mapping ──────────────────────────────────
-		// Every mechatron-public KEYS.* entry on Linux should either
-		// map to a non-zero evdev code or be intentionally absent
-		// (with rationale documented).  Spot-check a cross-section.
-		var KEYS = mechatron.KEYS;
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_A) === 30, "KEY_A → 30");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_Z) === 44, "KEY_Z → 44");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_0) === 11, "KEY_0 → 11");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_1) === 2,  "KEY_1 → 2");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_SPACE) === 57, "SPACE → 57");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_RETURN) === 28, "RETURN → 28");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_ESCAPE) === 1, "ESC → 1");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_F1) === 59, "F1 → 59");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_F12) === 88, "F12 → 88");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_LSHIFT) === 42, "LSHIFT → 42");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_RSHIFT) === 54, "RSHIFT → 54");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_LCONTROL) === 29, "LCTRL → 29");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_RCONTROL) === 97, "RCTRL → 97");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_LALT) === 56, "LALT → 56");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_RALT) === 100, "RALT → 100");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_LSYSTEM) === 125, "LSUPER → 125");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_RSYSTEM) === 126, "RSUPER → 126");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_CAPS_LOCK) === 58, "CAPS → 58");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_NUM_LOCK) === 69, "NUM_LOCK → 69");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_SCROLL_LOCK) === 70, "SCROLL_LOCK → 70");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_NUM0) === 82, "KP0 → 82");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_NUM9) === 73, "KP9 → 73");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_ADD) === 78, "KP_ADD → 78");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_ENTER) === 96, "KP_ENTER → 96");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_UP) === 103, "UP → 103");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_DOWN) === 108, "DOWN → 108");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_LEFT) === 105, "LEFT → 105");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_RIGHT) === 106, "RIGHT → 106");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_HOME) === 102, "HOME → 102");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_END) === 107, "END → 107");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_PAGE_UP) === 104, "PG_UP → 104");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_PAGE_DOWN) === 109, "PG_DOWN → 109");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_INSERT) === 110, "INSERT → 110");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_DELETE) === 111, "DELETE → 111");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_TAB) === 15, "TAB → 15");
-		assert(ui.mapKeysymToKeycode(KEYS.KEY_BACKSPACE) === 14, "BKSP → 14");
-
-		// Every KeyTable entry should map to a non-zero evdev code.
-		// Guards against accidentally deleting a row from KEYSYM_TO_EVDEV
-		// when adding a new mechatron KEYS entry.
-		Object.keys(KEYS).forEach(function (k) {
-			if (k.indexOf("KEY_") !== 0) return;
-			var sym = KEYS[k];
-			var code = ui.mapKeysymToKeycode(sym);
-			assert(code > 0, "keysym map missing for " + k + " (sym=0x" + sym.toString(16) + ")");
-		});
+		// Spot-check that the X11 keysym → Linux evdev code mapping
+		// produces the expected values for representative keys.  Use
+		// hardcoded X11 keysyms (not mechatron.KEYS, which is the
+		// public per-platform table — only Linux uses X11 keysyms;
+		// Windows uses Win32 VK codes, macOS uses Carbon HID codes).
+		assert(ui.mapKeysymToKeycode(0x0061) === 30, "X11 'a' → 30");
+		assert(ui.mapKeysymToKeycode(0x007A) === 44, "X11 'z' → 44");
+		assert(ui.mapKeysymToKeycode(0x0030) === 11, "X11 '0' → 11");
+		assert(ui.mapKeysymToKeycode(0x0031) === 2,  "X11 '1' → 2");
+		assert(ui.mapKeysymToKeycode(0x0020) === 57, "X11 SPACE → 57");
+		assert(ui.mapKeysymToKeycode(0xFF0D) === 28, "X11 RETURN → 28");
+		assert(ui.mapKeysymToKeycode(0xFF1B) === 1,  "X11 ESCAPE → 1");
+		assert(ui.mapKeysymToKeycode(0xFFBE) === 59, "X11 F1 → 59");
+		assert(ui.mapKeysymToKeycode(0xFFC9) === 88, "X11 F12 → 88");
+		assert(ui.mapKeysymToKeycode(0xFFE1) === 42, "X11 LSHIFT → 42");
+		assert(ui.mapKeysymToKeycode(0xFFE2) === 54, "X11 RSHIFT → 54");
+		assert(ui.mapKeysymToKeycode(0xFFE3) === 29, "X11 LCTRL → 29");
+		assert(ui.mapKeysymToKeycode(0xFFE4) === 97, "X11 RCTRL → 97");
+		assert(ui.mapKeysymToKeycode(0xFFE9) === 56, "X11 LALT → 56");
+		assert(ui.mapKeysymToKeycode(0xFFEA) === 100, "X11 RALT → 100");
+		assert(ui.mapKeysymToKeycode(0xFFEB) === 125, "X11 LSUPER → 125");
+		assert(ui.mapKeysymToKeycode(0xFFEC) === 126, "X11 RSUPER → 126");
+		assert(ui.mapKeysymToKeycode(0xFFE5) === 58, "X11 CAPS → 58");
+		assert(ui.mapKeysymToKeycode(0xFF7F) === 69, "X11 NUM_LOCK → 69");
+		assert(ui.mapKeysymToKeycode(0xFF14) === 70, "X11 SCROLL_LOCK → 70");
+		assert(ui.mapKeysymToKeycode(0xFFB0) === 82, "X11 KP_0 → 82");
+		assert(ui.mapKeysymToKeycode(0xFFB9) === 73, "X11 KP_9 → 73");
+		assert(ui.mapKeysymToKeycode(0xFFAB) === 78, "X11 KP_ADD → 78");
+		assert(ui.mapKeysymToKeycode(0xFF8D) === 96, "X11 KP_ENTER → 96");
+		assert(ui.mapKeysymToKeycode(0xFF52) === 103, "X11 UP → 103");
+		assert(ui.mapKeysymToKeycode(0xFF54) === 108, "X11 DOWN → 108");
+		assert(ui.mapKeysymToKeycode(0xFF51) === 105, "X11 LEFT → 105");
+		assert(ui.mapKeysymToKeycode(0xFF53) === 106, "X11 RIGHT → 106");
+		assert(ui.mapKeysymToKeycode(0xFF50) === 102, "X11 HOME → 102");
+		assert(ui.mapKeysymToKeycode(0xFF57) === 107, "X11 END → 107");
+		assert(ui.mapKeysymToKeycode(0xFF55) === 104, "X11 PG_UP → 104");
+		assert(ui.mapKeysymToKeycode(0xFF56) === 109, "X11 PG_DOWN → 109");
+		assert(ui.mapKeysymToKeycode(0xFF63) === 110, "X11 INSERT → 110");
+		assert(ui.mapKeysymToKeycode(0xFFFF) === 111, "X11 DELETE → 111");
+		assert(ui.mapKeysymToKeycode(0xFF09) === 15, "X11 TAB → 15");
+		assert(ui.mapKeysymToKeycode(0xFF08) === 14, "X11 BKSP → 14");
 
 		// Unknown keysyms return 0 (caller should skip).
 		assert(ui.mapKeysymToKeycode(0) === 0, "keysym 0 → 0");
@@ -278,7 +269,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				"uinputOpenReason populated when not ready (got " + JSON.stringify(reason) + ")");
 			// All injection helpers short-circuit to false when the
 			// device isn't available — they must NOT throw.
-			assert(ffi.injectKeysym(KEYS.KEY_A, true) === false, "injectKeysym false when !ready");
+			assert(ffi.injectKeysym(0x0061 /* X11 'a' */, true) === false, "injectKeysym false when !ready");
 			assert(ffi.injectMouseButton(0, true) === false, "injectMouseButton false when !ready");
 			assert(ffi.injectScrollV(1) === false, "injectScrollV false when !ready");
 			assert(ffi.injectScrollH(1) === false, "injectScrollH false when !ready");
@@ -291,8 +282,8 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			// privileges beyond what `input` group gives us and would
 			// race against the compositor's grab.
 			log("(live uinput) ");
-			assert(ffi.injectKeysym(KEYS.KEY_LSHIFT, true) === true, "LSHIFT press accepted");
-			assert(ffi.injectKeysym(KEYS.KEY_LSHIFT, false) === true, "LSHIFT release accepted");
+			assert(ffi.injectKeysym(0xFFE1 /* X11 LSHIFT */, true) === true, "LSHIFT press accepted");
+			assert(ffi.injectKeysym(0xFFE1, false) === true, "LSHIFT release accepted");
 			// Unmapped keysym: short-circuits false without writing.
 			assert(ffi.injectKeysym(0xFFFE, true) === false, "unknown keysym returns false");
 			assert(ffi.injectMouseButton(0, true) === true, "BTN_LEFT press accepted");
@@ -344,6 +335,12 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// an XTest fallback is actually available — otherwise the whole
 		// call becomes a no-op but importing mechanism would still have
 		// been exercised.
+		// Use mechatron.KEYS here (not hardcoded X11 keysyms) because
+		// kb.press() is the public API — it expects the platform-native
+		// key code (X11 keysym on Linux, VK on Windows, HID code on
+		// macOS) and translates internally.  We're testing "press
+		// doesn't throw with uinput pinned", not the keysym mapping.
+		var KEYS = mechatron.KEYS;
 		var kb = new mechatron.Keyboard();
 		var mouse = new mechatron.Mouse();
 		try {
@@ -377,10 +374,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	}
 
 	return [
-		{
-			name: "uinput",
-			functions: ["keyboard_ctor", "mouse_ctor"],
-			test: testUinput,
-		},
+		{ name: "uinput", functions: [], unit: true, test: testUinput },
 	];
 };
