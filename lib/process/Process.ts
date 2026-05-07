@@ -115,7 +115,7 @@ export class Process {
     return getNative("process").process_isSys64Bit();
   }
 
-  static _getSegments(process: Process, base: number): Array<{ valid: boolean; base: number; size: number; name: string }> {
-    return getNative("process").process_getSegments(process._pid, base);
+  static async _getSegments(process: Process, base: number): Promise<Array<{ valid: boolean; base: number; size: number; name: string }>> {
+    return await getNative("process").process_getSegments(process._pid, base);
   }
 }

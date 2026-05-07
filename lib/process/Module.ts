@@ -168,11 +168,11 @@ export class Module {
     throw new TypeError("Invalid arguments");
   }
 
-  getSegments(): Segment[] {
+  async getSegments(): Promise<Segment[]> {
     if (!this.valid) return [];
     if (this._segments === null) {
       const proc = this._proc || this.process;
-      const rawSegs = Process._getSegments(proc, this.base);
+      const rawSegs = await Process._getSegments(proc, this.base);
       this._segments = rawSegs.map((s) => {
         const seg = new Segment();
         seg.valid = s.valid;

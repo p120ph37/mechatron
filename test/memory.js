@@ -84,7 +84,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(mod.getSize() === 0, "empty module getSize");
 		assert(mod.getProcess() instanceof Process, "empty module getProcess");
 		assert(mod.contains(0) === false, "empty module !contains 0");
-		assert(mod.getSegments().length === 0, "empty module getSegments empty");
+		assert((await mod.getSegments()).length === 0, "empty module getSegments empty");
 
 		// Module comparisons
 		assert(mod.eq(0), "empty module eq 0");

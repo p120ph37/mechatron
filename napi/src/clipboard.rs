@@ -631,52 +631,126 @@ fn platform_get_sequence() -> f64 {
 }
 
 // =============================================================================
-// NAPI exports — delegate to platform functions
+// AsyncTask wrappers
 // =============================================================================
 
-#[napi(js_name = "clipboard_clear")]
-pub fn clipboard_clear() -> bool {
-    platform_clear()
+struct ClearTask;
+impl Task for ClearTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_clear()) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-#[napi(js_name = "clipboard_hasText")]
-pub fn clipboard_has_text() -> bool {
-    platform_has_text()
+struct HasTextTask;
+impl Task for HasTextTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_has_text()) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-#[napi(js_name = "clipboard_getText")]
-pub fn clipboard_get_text() -> String {
-    platform_get_text()
+struct GetTextTask;
+impl Task for GetTextTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> { Ok(platform_get_text()) }
+    fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
-#[napi(js_name = "clipboard_setText")]
-pub fn clipboard_set_text(text: String) -> bool {
-    platform_set_text(&text)
+struct SetTextTask { text: String }
+impl Task for SetTextTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_set_text(&self.text)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-#[napi(js_name = "clipboard_hasImage")]
-pub fn clipboard_has_image() -> bool {
-    platform_has_image()
+struct HasImageTask;
+impl Task for HasImageTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_has_image()) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-#[napi(js_name = "clipboard_getImage")]
-pub fn clipboard_get_image(env: Env) -> Result<Either<ClipboardImage, napi::JsNull>> {
-    match platform_get_image() {
-        Some((width, height, argb)) => Ok(Either::A(ClipboardImage {
-            width,
-            height,
-            data: Uint32Array::new(argb),
-        })),
-        None => Ok(Either::B(env.get_null()?)),
+struct GetImageTask;
+impl Task for GetImageTask {
+    type Output = Option<(u32, u32, Vec<u32>)>;
+    type JsValue = Either<ClipboardImage, ()>;
+    fn compute(&mut self) -> Result<Option<(u32, u32, Vec<u32>)>> {
+        Ok(platform_get_image())
+    }
+    fn resolve(&mut self, _env: Env, out: Option<(u32, u32, Vec<u32>)>) -> Result<Either<ClipboardImage, ()>> {
+        match out {
+            Some((w, h, data)) => Ok(Either::A(ClipboardImage {
+                width: w,
+                height: h,
+                data: Uint32Array::new(data),
+            })),
+            None => Ok(Either::B(())),
+        }
     }
 }
 
+struct SetImageTask { width: u32, height: u32, data: Vec<u32> }
+impl Task for SetImageTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> {
+        Ok(platform_set_image(self.width, self.height, &self.data))
+    }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct GetSequenceTask;
+impl Task for GetSequenceTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_get_sequence()) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+// =============================================================================
+// NAPI exports — delegate to platform functions via AsyncTask
+// =============================================================================
+
+#[napi(js_name = "clipboard_clear")]
+pub fn clipboard_clear() -> AsyncTask<ClearTask> {
+    AsyncTask::new(ClearTask)
+}
+
+#[napi(js_name = "clipboard_hasText")]
+pub fn clipboard_has_text() -> AsyncTask<HasTextTask> {
+    AsyncTask::new(HasTextTask)
+}
+
+#[napi(js_name = "clipboard_getText")]
+pub fn clipboard_get_text() -> AsyncTask<GetTextTask> {
+    AsyncTask::new(GetTextTask)
+}
+
+#[napi(js_name = "clipboard_setText")]
+pub fn clipboard_set_text(text: String) -> AsyncTask<SetTextTask> {
+    AsyncTask::new(SetTextTask { text })
+}
+
+#[napi(js_name = "clipboard_hasImage")]
+pub fn clipboard_has_image() -> AsyncTask<HasImageTask> {
+    AsyncTask::new(HasImageTask)
+}
+
+#[napi(js_name = "clipboard_getImage")]
+pub fn clipboard_get_image() -> AsyncTask<GetImageTask> {
+    AsyncTask::new(GetImageTask)
+}
+
 #[napi(js_name = "clipboard_setImage")]
-pub fn clipboard_set_image(width: u32, height: u32, data: Uint32Array) -> bool {
-    platform_set_image(width, height, data.as_ref())
+pub fn clipboard_set_image(width: u32, height: u32, data: Uint32Array) -> AsyncTask<SetImageTask> {
+    AsyncTask::new(SetImageTask { width, height, data: data.to_vec() })
 }
 
 #[napi(js_name = "clipboard_getSequence")]
-pub fn clipboard_get_sequence() -> f64 {
-    platform_get_sequence()
+pub fn clipboard_get_sequence() -> AsyncTask<GetSequenceTask> {
+    AsyncTask::new(GetSequenceTask)
 }

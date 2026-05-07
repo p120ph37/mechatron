@@ -99,12 +99,10 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos() -> (i32, i32) {
     unsafe {
         if !is_xtest_available() {
-            obj.set("x", 0i32)?;
-            obj.set("y", 0i32)?;
-            return Ok(());
+            return (0, 0);
         }
         let display = get_display();
         let screens = XScreenCount(display);
@@ -122,15 +120,11 @@ fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
                 &mut root, &mut child,
                 &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
             ) != 0 {
-                obj.set("x", rx)?;
-                obj.set("y", ry)?;
-                return Ok(());
+                return (rx, ry);
             }
         }
     }
-    obj.set("x", 0i32)?;
-    obj.set("y", 0i32)?;
-    Ok(())
+    (0, 0)
 }
 
 #[cfg(target_os = "linux")]
@@ -349,11 +343,9 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos() -> (i32, i32) {
     let pt = mac_get_cursor_pos();
-    obj.set("x", pt.x as i32)?;
-    obj.set("y", pt.y as i32)?;
-    Ok(())
+    (pt.x as i32, pt.y as i32)
 }
 
 #[cfg(target_os = "macos")]
@@ -505,14 +497,12 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "windows")]
-fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos() -> (i32, i32) {
     unsafe {
         let mut point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
         let _ = GetCursorPos(&mut point);
-        obj.set("x", point.x)?;
-        obj.set("y", point.y)?;
+        (point.x, point.y)
     }
-    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -538,39 +528,103 @@ fn platform_get_button_state(button: i32) -> bool {
     }
 }
 
+#[napi(object)]
+pub struct MousePos {
+    pub x: i32,
+    pub y: i32,
+}
+
+struct PressTask(i32);
+impl Task for PressTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { do_press(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct ReleaseTask(i32);
+impl Task for ReleaseTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { do_release(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct ScrollHTask(i32);
+impl Task for ScrollHTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_scroll_h(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct ScrollVTask(i32);
+impl Task for ScrollVTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_scroll_v(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct GetPosTask;
+impl Task for GetPosTask {
+    type Output = (i32, i32);
+    type JsValue = MousePos;
+    fn compute(&mut self) -> Result<(i32, i32)> {
+        Ok(platform_get_pos())
+    }
+    fn resolve(&mut self, _env: Env, out: (i32, i32)) -> Result<MousePos> {
+        Ok(MousePos { x: out.0, y: out.1 })
+    }
+}
+
+struct SetPosTask(i32, i32);
+impl Task for SetPosTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_set_pos(self.0, self.1); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct GetButtonStateTask(i32);
+impl Task for GetButtonStateTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_get_button_state(self.0)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
 #[napi(js_name = "mouse_press")]
-pub fn mouse_press(button: i32) {
-    do_press(button);
+pub fn mouse_press(button: i32) -> AsyncTask<PressTask> {
+    AsyncTask::new(PressTask(button))
 }
 
 #[napi(js_name = "mouse_release")]
-pub fn mouse_release(button: i32) {
-    do_release(button);
+pub fn mouse_release(button: i32) -> AsyncTask<ReleaseTask> {
+    AsyncTask::new(ReleaseTask(button))
 }
 
 #[napi(js_name = "mouse_scrollH")]
-pub fn mouse_scroll_h(amount: i32) {
-    platform_scroll_h(amount);
+pub fn mouse_scroll_h(amount: i32) -> AsyncTask<ScrollHTask> {
+    AsyncTask::new(ScrollHTask(amount))
 }
 
 #[napi(js_name = "mouse_scrollV")]
-pub fn mouse_scroll_v(amount: i32) {
-    platform_scroll_v(amount);
+pub fn mouse_scroll_v(amount: i32) -> AsyncTask<ScrollVTask> {
+    AsyncTask::new(ScrollVTask(amount))
 }
 
 #[napi(js_name = "mouse_getPos")]
-pub fn mouse_get_pos(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    platform_get_pos(&env, &mut obj)?;
-    Ok(obj)
+pub fn mouse_get_pos() -> AsyncTask<GetPosTask> {
+    AsyncTask::new(GetPosTask)
 }
 
 #[napi(js_name = "mouse_setPos")]
-pub fn mouse_set_pos(x: i32, y: i32) {
-    platform_set_pos(x, y);
+pub fn mouse_set_pos(x: i32, y: i32) -> AsyncTask<SetPosTask> {
+    AsyncTask::new(SetPosTask(x, y))
 }
 
 #[napi(js_name = "mouse_getButtonState")]
-pub fn mouse_get_button_state(button: i32) -> bool {
-    platform_get_button_state(button)
+pub fn mouse_get_button_state(button: i32) -> AsyncTask<GetButtonStateTask> {
+    AsyncTask::new(GetButtonStateTask(button))
 }

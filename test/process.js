@@ -211,12 +211,12 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(mc.getBase() === mod.getBase(), "module clone base");
 
 				// Module getSegments
-				var segs = mod.getSegments();
+				var segs = await mod.getSegments();
 				assert(segs instanceof Array, "module getSegments is array");
 
 				// Module clone with segments populated
 				var mc2 = mod.clone();
-				assert(mc2.getSegments() instanceof Array, "cloned module getSegments");
+				assert((await mc2.getSegments()) instanceof Array, "cloned module getSegments");
 
 				// Module TypeError for comparison with invalid type
 				var modThrew = false;
