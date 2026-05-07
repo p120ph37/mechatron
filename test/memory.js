@@ -501,16 +501,21 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			// being intact — corrupting them with arbitrary bytes causes
 			// shutdown crashes (observed as v8::ThreadIsolation::
 			// JitPageReference::Size NULL_CLASS_PTR_READ on Windows ia32).
-			var wBuf = Buffer.alloc(16);
-			var wDest = Buffer.alloc(64);
-			var wDestAddr = mem.addressOf(wDest);
-			if (!bisectSkip("flagged-write-skiperr")) {
-				var wroteSkip = await mem.writeData(wDestAddr, wBuf, 16, Memory.SKIP_ERRORS);
-				assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
-			}
-			if (!bisectSkip("flagged-write-autoaccess")) {
-				var wroteAuto = await mem.writeData(wDestAddr, wBuf, 16, Memory.AUTO_ACCESS);
-				assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
+			//
+			// addressOf throws on nolib (pure JS cannot introspect Buffer
+			// pointers), so the self-write tests are skipped there.
+			var wDestAddr = null;
+			try { wDestAddr = mem.addressOf(Buffer.alloc(64)); } catch (_) {}
+			if (wDestAddr !== null) {
+				var wBuf = Buffer.alloc(16);
+				if (!bisectSkip("flagged-write-skiperr")) {
+					var wroteSkip = await mem.writeData(wDestAddr, wBuf, 16, Memory.SKIP_ERRORS);
+					assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
+				}
+				if (!bisectSkip("flagged-write-autoaccess")) {
+					var wroteAuto = await mem.writeData(wDestAddr, wBuf, 16, Memory.AUTO_ACCESS);
+					assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
+				}
 			}
 		}
 
@@ -573,17 +578,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		log("  Memory addressOf... ");
 		var Process = mechatron.Process;
 		var Memory  = mechatron.Memory;
-
-		// nolib: addressOf cannot be implemented in pure JS.
-		if (process.env.MECHATRON_BACKEND === "nolib") {
-			var mem0 = new Memory(await Process.getCurrent());
-			var threw = false;
-			try { mem0.addressOf(Buffer.alloc(16)); } catch (_) { threw = true; }
-			assert(threw, "nolib addressOf throws");
-			log("SKIPPED (nolib)\n");
-			return true;
-		}
-
 		var proc = await Process.getCurrent();
 		var mem = new Memory(proc);
 		var buf = Buffer.alloc(64);

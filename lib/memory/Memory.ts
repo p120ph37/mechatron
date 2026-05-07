@@ -259,17 +259,21 @@ export class Memory {
 
   /**
    * Return the address of `buffer`'s backing byte-array in the current
-   * process's address space.  Useful for getting a known-safe target for
-   * read/write tests on the current process — writing to a Buffer you own
-   * is safer than picking a random "writable region" returned by
-   * getRegions(), which on Node may include V8 heap pages whose corruption
-   * causes shutdown crashes.
+   * process's address space, as a bigint pointer.
    *
-   * The address is only meaningful in the current process.  Passing it to
-   * a Memory bound to another process is a logical error.
+   * This exposes a small slice of bun:ffi-style functionality to plain
+   * Node apps: given a JS-owned Buffer, get a raw pointer that can be
+   * passed to native APIs expecting `void*` — syscalls, ioctls, struct
+   * fields containing pointers, FFI calls into other native libraries,
+   * or as a known-safe target for Memory.readData/writeData on self
+   * (rather than guessing at "writable" regions which may belong to V8).
    *
-   * Not supported on the nolib backend (pure JS cannot introspect Buffer
-   * pointers) — throws on call.
+   * The address is only meaningful in the current process; passing it
+   * to a Memory bound to another process is a logical error.  The
+   * Buffer must remain alive (not GC'd) while the address is in use.
+   *
+   * Not supported on the nolib backend (pure JS cannot introspect
+   * Buffer pointers) — throws on call.
    */
   addressOf(buffer: Buffer): bigint {
     return getNative("memory").memory_bufferAddress(buffer);
