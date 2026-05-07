@@ -22,13 +22,13 @@ if (!nolibUinputAvailable()) {
 }
 
 let _fbScreenDims: { w: number; h: number } | null | undefined;
-function getFbScreenDims(): { w: number; h: number } | null {
+async function getFbScreenDims(): Promise<{ w: number; h: number } | null> {
   if (_fbScreenDims !== undefined) return _fbScreenDims;
   if (!ioctlBridgeAvailable() || !framebufferAvailable()) {
     _fbScreenDims = null;
     return null;
   }
-  const result = ioctlSync(FRAMEBUFFER_DEV, [
+  const result = await ioctlSync(FRAMEBUFFER_DEV, [
     { request: FBIOGET_VSCREENINFO, data: Buffer.alloc(160) },
   ]);
   if (!result || result.outputs.length < 1) { _fbScreenDims = null; return null; }
@@ -59,7 +59,7 @@ export async function mouse_getPos(): Promise<{ x: number; y: number }> {
 }
 
 export async function mouse_setPos(x: number, y: number): Promise<void> {
-  const dims = getFbScreenDims();
+  const dims = await getFbScreenDims();
   if (!dims || dims.w <= 0 || dims.h <= 0) return;
   const absX = Math.round((x * UINPUT_ABS_MAX) / dims.w);
   const absY = Math.round((y * UINPUT_ABS_MAX) / dims.h);

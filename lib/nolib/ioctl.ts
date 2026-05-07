@@ -15,6 +15,10 @@ type Interpreter = "perl" | "miniperl" | "python3" | "python";
 
 let _probed: Interpreter | null | undefined;
 
+// The interpreter probe stays synchronous: it is a one-time `--version`
+// check that callers (notably `nolibUinputAvailable()` in uinput.ts) need
+// to invoke at module load time to gate per-platform top-level throws in
+// mouse-vt.ts / keyboard-vt.ts.  The actual ioctl work is async.
 function probeInterpreter(): Interpreter | null {
   if (_probed !== undefined) return _probed;
   for (const cmd of ["perl", "miniperl", "python3", "python"] as const) {
@@ -78,26 +82,63 @@ export interface IoctlResult {
 }
 
 /**
- * Execute ioctls synchronously (one-shot).  Opens the device, runs all
+ * Execute ioctls asynchronously (one-shot).  Opens the device, runs all
  * ioctl calls, then exits.  No stdin is piped.
  *
  * Returns the post-ioctl buffer contents (the kernel may have modified
  * them in place for _IOR / _IOWR requests).
+ *
+ * Naming retained for backward compatibility — the function is now async.
  */
-export function ioctlSync(device: string, ioctls: IoctlCall[]): IoctlResult | null {
+export async function ioctlSync(device: string, ioctls: IoctlCall[]): Promise<IoctlResult | null> {
   const interp = probeInterpreter();
   if (!interp) return null;
   const args = buildArgs(interp, device, ioctls);
-  const r = spawnSync(interp, args, {
-    timeout: 5000,
-    stdio: ["pipe", "pipe", "pipe"],
-    input: "",
+  return await new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(interp, args, { stdio: ["pipe", "pipe", "pipe"] });
+    } catch {
+      resolve(null);
+      return;
+    }
+
+    const stdoutChunks: Buffer[] = [];
+    let stdoutLen = 0;
+    let settled = false;
+    const settle = (result: IoctlResult | null) => {
+      if (settled) return;
+      settled = true;
+      try { clearTimeout(timer); } catch {}
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      settle(null);
+    }, 5000);
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+      stdoutLen += chunk.length;
+    });
+    child.stderr?.on("data", () => { /* discard */ });
+    child.on("error", () => settle(null));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        settle(null);
+        return;
+      }
+      const stdout = Buffer.concat(stdoutChunks, stdoutLen).toString("utf8");
+      const lines = stdout.split("\n").filter(Boolean);
+      const outputs = lines.map(hex => Buffer.from(hex, "hex"));
+      settle({ outputs });
+    });
+
+    if (child.stdin) {
+      child.stdin.on("error", () => { /* ignore EPIPE */ });
+      try { child.stdin.end(""); } catch {}
+    }
   });
-  if (r.status !== 0) return null;
-  const stdout = r.stdout?.toString("utf8") || "";
-  const lines = stdout.split("\n").filter(Boolean);
-  const outputs = lines.map(hex => Buffer.from(hex, "hex"));
-  return { outputs };
 }
 
 /**
@@ -114,7 +155,7 @@ export interface IoctlStream {
   alive: boolean;
 }
 
-export function ioctlStream(device: string, ioctls: IoctlCall[]): IoctlStream | null {
+export async function ioctlStream(device: string, ioctls: IoctlCall[]): Promise<IoctlStream | null> {
   const interp = probeInterpreter();
   if (!interp) return null;
   const args = buildArgs(interp, device, ioctls);

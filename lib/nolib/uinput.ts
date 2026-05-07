@@ -6,6 +6,11 @@
  * Lifetime: a single device per process, lazily created on first use.
  * The ioctl bridge child process stays alive for the duration, piping
  * event buffers to /dev/uinput via its stdin.
+ *
+ * Open is async (the ioctl bridge spawns a subprocess) but the public
+ * inject* helpers stay synchronous to preserve the makeInject* API
+ * contract.  Events emitted before the stream is fully open are queued
+ * and flushed in order once setup completes.
  */
 
 import { ioctlStream, ioctlBridgeAvailable, type IoctlCall, type IoctlStream } from "./ioctl";
@@ -23,8 +28,10 @@ import {
 } from "../input/uinput";
 
 let _stream: IoctlStream | null = null;
+let _streamPromise: Promise<IoctlStream | null> | null = null;
 let _openAttempted = false;
 let _openReason: string | null = null;
+let _pendingWrites: Buffer[] = [];
 
 function buildSetupIoctls(): IoctlCall[] {
   const calls: IoctlCall[] = [];
@@ -63,27 +70,42 @@ function buildSetupIoctls(): IoctlCall[] {
   return calls;
 }
 
-function getStream(): IoctlStream | null {
-  if (_stream && _stream.alive) return _stream;
-  if (_openAttempted) return null;
+function ensureStreamPromise(): Promise<IoctlStream | null> {
+  if (_streamPromise) return _streamPromise;
+  if (_openAttempted) return Promise.resolve(_stream);
   _openAttempted = true;
 
   if (!ioctlBridgeAvailable()) {
     _openReason = "no interpreter (perl/python) available";
-    return null;
+    _streamPromise = Promise.resolve(null);
+    return _streamPromise;
   }
 
   const calls = buildSetupIoctls();
-  _stream = ioctlStream("/dev/uinput", calls);
-  if (!_stream) {
-    _openReason = "ioctlStream failed (device not writable or ioctl error)";
+  _streamPromise = ioctlStream("/dev/uinput", calls).then((s) => {
+    if (!s) {
+      _openReason = "ioctlStream failed (device not writable or ioctl error)";
+      return null;
+    }
+    _stream = s;
+    // Drain any writes queued during setup.
+    if (_pendingWrites.length > 0) {
+      const queued = _pendingWrites;
+      _pendingWrites = [];
+      for (const b of queued) {
+        try { s.write(b); } catch { /* ignore */ }
+      }
+    }
+    return s;
+  }).catch(() => {
+    _openReason = "ioctlStream rejected";
     return null;
-  }
-  return _stream;
+  });
+  return _streamPromise;
 }
 
-export function nolibUinputReady(): boolean {
-  return getStream() !== null;
+export async function nolibUinputReady(): Promise<boolean> {
+  return (await ensureStreamPromise()) !== null;
 }
 
 export function nolibUinputOpenReason(): string | null {
@@ -95,9 +117,16 @@ export function nolibUinputAvailable(): boolean {
 }
 
 function emit(events: UInputEvent[]): boolean {
-  const s = getStream();
-  if (!s) return false;
-  return s.write(encodeEventBurst(events));
+  const buf = encodeEventBurst(events);
+  if (_stream && _stream.alive) {
+    return _stream.write(buf);
+  }
+  // Queue the write; kick off async open if not started.  Returns true
+  // optimistically — the actual delivery is best-effort.
+  _pendingWrites.push(buf);
+  // Fire-and-forget: ensures setup runs and pending writes drain.
+  void ensureStreamPromise();
+  return true;
 }
 
 export const injectKeysym = makeInjectKeysym(emit);
@@ -114,6 +143,8 @@ export function closeNolibUinput(): void {
     _stream.close();
     _stream = null;
   }
+  _streamPromise = null;
+  _pendingWrites = [];
 }
 
 if (process.platform === "linux" && typeof process.on === "function") {

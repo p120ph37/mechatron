@@ -27,7 +27,7 @@
  * nolib[x11]/[portal] must use direct protocols).
  */
 
-import { spawnSync } from "child_process";
+import { spawn } from "child_process";
 import {
   getMechanism, listMechanisms, setMechanism, getPreferredMechanisms,
 } from "../platform";
@@ -37,17 +37,67 @@ const IS_MAC = process.platform === "darwin";
 
 type CbImage = { width: number; height: number; data: Uint32Array };
 
-function runCapture(cmd: string, args: string[], input?: string | Buffer): { ok: boolean; stdout: Buffer; stderr: Buffer } {
-  const r = spawnSync(cmd, args, {
-    input,
-    stdio: ["pipe", "pipe", "pipe"],
-    maxBuffer: 256 * 1024 * 1024,   // 256MB, enough for reasonable images
+const MAX_BUFFER = 256 * 1024 * 1024;   // 256MB, enough for reasonable images
+
+async function runCapture(cmd: string, args: string[], input?: string | Buffer): Promise<{ ok: boolean; stdout: Buffer; stderr: Buffer }> {
+  return await new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    } catch {
+      resolve({ ok: false, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+      return;
+    }
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutLen = 0;
+    let stderrLen = 0;
+    let errored = false;
+    let settled = false;
+
+    const settle = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve({
+        ok,
+        stdout: Buffer.concat(stdoutChunks, stdoutLen),
+        stderr: Buffer.concat(stderrChunks, stderrLen),
+      });
+    };
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (stdoutLen + chunk.length > MAX_BUFFER) return;
+      stdoutChunks.push(chunk);
+      stdoutLen += chunk.length;
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderrLen + chunk.length > MAX_BUFFER) return;
+      stderrChunks.push(chunk);
+      stderrLen += chunk.length;
+    });
+
+    child.on("error", () => {
+      errored = true;
+      settle(false);
+    });
+    child.on("close", (code) => {
+      settle(!errored && code === 0);
+    });
+
+    if (child.stdin) {
+      child.stdin.on("error", () => { /* ignore EPIPE */ });
+      if (input !== undefined) {
+        try {
+          child.stdin.end(input);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        try { child.stdin.end(); } catch {}
+      }
+    }
   });
-  return {
-    ok: r.status === 0 && !r.error,
-    stdout: r.stdout || Buffer.alloc(0),
-    stderr: r.stderr || Buffer.alloc(0),
-  };
 }
 
 // ── monotonic local sequence counter ──────────────────────────────────
@@ -64,52 +114,52 @@ function bumpSeq(): void { _seq++; }
 // Linux — wl-clipboard / xclip / xsel
 // ═══════════════════════════════════════════════════════════════════════
 
-function wlHasText(): boolean {
-  const r = runCapture("wl-paste", ["--list-types"]);
+async function wlHasText(): Promise<boolean> {
+  const r = await runCapture("wl-paste", ["--list-types"]);
   if (!r.ok) return false;
   return /text\//.test(r.stdout.toString("utf8"));
 }
 
-function wlGetText(): string {
-  const r = runCapture("wl-paste", ["--no-newline", "--type", "text/plain;charset=utf-8"]);
+async function wlGetText(): Promise<string> {
+  const r = await runCapture("wl-paste", ["--no-newline", "--type", "text/plain;charset=utf-8"]);
   return r.ok ? r.stdout.toString("utf8") : "";
 }
 
-function wlSetText(text: string): boolean {
-  return runCapture("wl-copy", ["--type", "text/plain;charset=utf-8"], text).ok;
+async function wlSetText(text: string): Promise<boolean> {
+  return (await runCapture("wl-copy", ["--type", "text/plain;charset=utf-8"], text)).ok;
 }
 
-function wlClear(): boolean {
-  return runCapture("wl-copy", ["--clear"]).ok;
+async function wlClear(): Promise<boolean> {
+  return (await runCapture("wl-copy", ["--clear"])).ok;
 }
 
-function xclipHasText(): boolean {
-  const r = runCapture("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"]);
+async function xclipHasText(): Promise<boolean> {
+  const r = await runCapture("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"]);
   if (!r.ok) return false;
   return /(^|\n)(UTF8_STRING|text\/plain|TEXT|STRING)(\n|$)/.test(r.stdout.toString("utf8"));
 }
 
-function xclipGetText(): string {
-  const r = runCapture("xclip", ["-selection", "clipboard", "-o"]);
+async function xclipGetText(): Promise<string> {
+  const r = await runCapture("xclip", ["-selection", "clipboard", "-o"]);
   return r.ok ? r.stdout.toString("utf8") : "";
 }
 
-function xclipSetText(text: string): boolean {
-  return runCapture("xclip", ["-selection", "clipboard", "-in"], text).ok;
+async function xclipSetText(text: string): Promise<boolean> {
+  return (await runCapture("xclip", ["-selection", "clipboard", "-in"], text)).ok;
 }
 
-function xselHasText(): boolean {
-  const r = runCapture("xsel", ["--clipboard", "--output"]);
+async function xselHasText(): Promise<boolean> {
+  const r = await runCapture("xsel", ["--clipboard", "--output"]);
   return r.ok && r.stdout.length > 0;
 }
 
-function xselGetText(): string {
-  const r = runCapture("xsel", ["--clipboard", "--output"]);
+async function xselGetText(): Promise<string> {
+  const r = await runCapture("xsel", ["--clipboard", "--output"]);
   return r.ok ? r.stdout.toString("utf8") : "";
 }
 
-function xselSetText(text: string): boolean {
-  return runCapture("xsel", ["--clipboard", "--input"], text).ok;
+async function xselSetText(text: string): Promise<boolean> {
+  return (await runCapture("xsel", ["--clipboard", "--input"], text)).ok;
 }
 
 // Linux dispatcher: try the user's preferred clipboard mechanism, fall
@@ -120,16 +170,16 @@ function xselSetText(text: string): boolean {
 // prefers xclip there, so we don't land on wl-clipboard to begin with.
 
 interface LinuxImpl {
-  clear: () => boolean;
-  hasText: () => boolean;
-  getText: () => string;
-  setText: (s: string) => boolean;
+  clear: () => Promise<boolean>;
+  hasText: () => Promise<boolean>;
+  getText: () => Promise<string>;
+  setText: (s: string) => Promise<boolean>;
 }
 
 const LINUX_IMPLS: Record<string, LinuxImpl> = {
-  "wl-clipboard": { clear: wlClear,                hasText: wlHasText,    getText: wlGetText,    setText: wlSetText },
-  "xclip":        { clear: () => xclipSetText(""), hasText: xclipHasText, getText: xclipGetText, setText: xclipSetText },
-  "xsel":         { clear: () => xselSetText(""),  hasText: xselHasText,  getText: xselGetText,  setText: xselSetText },
+  "wl-clipboard": { clear: wlClear,                      hasText: wlHasText,    getText: wlGetText,    setText: wlSetText },
+  "xclip":        { clear: () => xclipSetText(""),       hasText: xclipHasText, getText: xclipGetText, setText: xclipSetText },
+  "xsel":         { clear: () => xselSetText(""),        hasText: xselHasText,  getText: xselGetText,  setText: xselSetText },
 };
 
 function linuxDispatchOrder(): string[] {
@@ -142,13 +192,13 @@ function linuxDispatchOrder(): string[] {
   return [primary, ...rest];
 }
 
-function linuxRun<T>(op: (impl: LinuxImpl) => T, fallback: T): T {
+async function linuxRun<T>(op: (impl: LinuxImpl) => Promise<T>, fallback: T): Promise<T> {
   const order = linuxDispatchOrder();
   for (const name of order) {
     const impl = LINUX_IMPLS[name];
     if (!impl) continue;
     try {
-      const r = op(impl);
+      const r = await op(impl);
       if (name !== (getMechanism("clipboard") || "")) {
         try { setMechanism("clipboard", name); } catch { /* ignore */ }
       }
@@ -162,64 +212,64 @@ function linuxRun<T>(op: (impl: LinuxImpl) => T, fallback: T): T {
 // macOS — pbcopy / pbpaste
 // ═══════════════════════════════════════════════════════════════════════
 
-function macGetText(): string {
-  const r = runCapture("pbpaste", []);
+async function macGetText(): Promise<string> {
+  const r = await runCapture("pbpaste", []);
   return r.ok ? r.stdout.toString("utf8") : "";
 }
 
-function macSetText(text: string): boolean {
-  return runCapture("pbcopy", [], text).ok;
+async function macSetText(text: string): Promise<boolean> {
+  return (await runCapture("pbcopy", [], text)).ok;
 }
 
-function macHasText(): boolean {
-  return macGetText().length > 0;
+async function macHasText(): Promise<boolean> {
+  return (await macGetText()).length > 0;
 }
 
-function macClear(): boolean {
-  return runCapture("pbcopy", [], "").ok;
+async function macClear(): Promise<boolean> {
+  return (await runCapture("pbcopy", [], "")).ok;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Exports — platform-dispatched
 // ═══════════════════════════════════════════════════════════════════════
 
-export function clipboard_clear(): boolean {
+export async function clipboard_clear(): Promise<boolean> {
   let ok = false;
-  if (IS_LINUX) ok = linuxRun(i => i.clear(), false);
-  else if (IS_MAC) ok = macClear();
+  if (IS_LINUX) ok = await linuxRun(i => i.clear(), false);
+  else if (IS_MAC) ok = await macClear();
   if (ok) bumpSeq();
   return ok;
 }
 
-export function clipboard_hasText(): boolean {
+export async function clipboard_hasText(): Promise<boolean> {
   if (IS_LINUX) return linuxRun(i => i.hasText(), false);
   if (IS_MAC) return macHasText();
   return false;
 }
 
-export function clipboard_getText(): string {
+export async function clipboard_getText(): Promise<string> {
   if (IS_LINUX) return linuxRun(i => i.getText(), "");
   if (IS_MAC) return macGetText();
   return "";
 }
 
-export function clipboard_setText(text: string): boolean {
+export async function clipboard_setText(text: string): Promise<boolean> {
   let ok = false;
-  if (IS_LINUX) ok = linuxRun(i => i.setText(text), false);
-  else if (IS_MAC) ok = macSetText(text);
+  if (IS_LINUX) ok = await linuxRun(i => i.setText(text), false);
+  else if (IS_MAC) ok = await macSetText(text);
   if (ok) bumpSeq();
   return ok;
 }
 
-export function clipboard_hasImage(): boolean {
+export async function clipboard_hasImage(): Promise<boolean> {
   return false;
 }
 
-export function clipboard_getImage(): CbImage | null {
+export async function clipboard_getImage(): Promise<CbImage | null> {
   return null;
 }
 
-export function clipboard_setImage(_w: number, _h: number, _d: Uint32Array): boolean {
+export async function clipboard_setImage(_w: number, _h: number, _d: Uint32Array): Promise<boolean> {
   return false;
 }
 

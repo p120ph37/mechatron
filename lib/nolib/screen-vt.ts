@@ -24,13 +24,13 @@ interface ScreenInfo { bounds: RawRect; usable: RawRect; }
 
 let _fbGeom: FbGeometry | null | undefined;
 
-function getFbGeometry(): FbGeometry | null {
+async function getFbGeometry(): Promise<FbGeometry | null> {
   if (_fbGeom !== undefined) return _fbGeom;
   if (!ioctlBridgeAvailable() || !framebufferAvailable()) {
     _fbGeom = null;
     return null;
   }
-  const result = ioctlSync(FRAMEBUFFER_DEV, [
+  const result = await ioctlSync(FRAMEBUFFER_DEV, [
     { request: FBIOGET_VSCREENINFO, data: Buffer.alloc(160) },
     { request: FBIOGET_FSCREENINFO, data: Buffer.alloc(68) },
   ]);
@@ -49,7 +49,7 @@ function getFbGeometry(): FbGeometry | null {
 }
 
 export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
-  const geom = getFbGeometry();
+  const geom = await getFbGeometry();
   if (!geom) return null;
   const bounds: RawRect = { x: 0, y: 0, w: geom.width, h: geom.height };
   return [{ bounds, usable: bounds }];
@@ -58,7 +58,7 @@ export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
 export async function screen_grabScreen(
   x: number, y: number, w: number, h: number, _windowHandle?: number,
 ): Promise<Uint32Array | null> {
-  const geom = getFbGeometry();
+  const geom = await getFbGeometry();
   if (!geom) return null;
 
   const clampX = Math.max(0, Math.min(x, geom.width));
