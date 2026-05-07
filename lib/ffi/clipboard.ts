@@ -1,16 +1,13 @@
 /**
  * Clipboard subsystem — pure FFI implementation.
  *
- * Linux: TODO. ffi[x11] should imitate napi[x11] — dlopen libX11.so and
- * own the ICCCM CLIPBOARD selection from a dedicated invisible window,
- * answering SelectionRequest events for UTF8_STRING / image/png / TARGETS
- * via XSetSelectionOwner / XConvertSelection / XGetWindowProperty in an
- * event loop. Wayland support is a separate ffi[portal] variant (a future
- * lib/ffi/clipboard-portal.ts that dlopens libwayland-client.so and
- * speaks wlr-data-control-unstable-v1).  Until those land, Linux callers
- * get clipboard via:
- *   - `nolib[x11]` — pure-TS xproto SELECTION protocol
- *   - `nolib[sh]`  — wl-copy / xclip / xsel subprocess wrappers
+ * Linux: full ICCCM CLIPBOARD selection via a dedicated Bun Worker that
+ * dlopens libX11 and runs an X event loop wired into libuv (see
+ * ./clipboard-worker.ts). Mirrors napi[x11]'s background-thread
+ * architecture: the worker owns the X display, answers SelectionRequest
+ * events asynchronously, and serves clipboard ops over postMessage.
+ * The main-thread API here is a thin async proxy. Wayland support is a
+ * separate future ffi[portal] variant.
  *
  * Windows uses CF_UNICODETEXT (UTF-16LE NUL-terminated) and CF_DIB
  * (BITMAPINFOHEADER + pixel rows).  Memory is allocated with GMEM_MOVEABLE
@@ -28,13 +25,7 @@ import {
   cls, sel, msgSendTyped, cfStringFromJS,
   BITMAP_INFO_BGRA_PMA,
 } from "./mac";
-import { bp, getBunFFI, cstr } from "./bun";
-import {
-  x11 as x11Syms, ffi as x11ffi, getDisplay,
-  atom as internAtom, True, False,
-  SelectionRequest, SelectionNotify, SelectionClear,
-  PropModeReplace, XA_CARDINAL,
-} from "./x11";
+import { bp } from "./bun";
 
 const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
@@ -48,329 +39,73 @@ const GMEM_MOVEABLE  = 0x0002;
 
 const BITMAPINFOHEADER_SIZE = 40;
 
-// ── Linux/X11 clipboard via ICCCM SELECTION protocol ──────────────────
+// ── Linux/X11 clipboard via background Worker (see clipboard-worker.ts) ──
 
-let _clipDisplay: any = null;
-let _clipWindow = 0n;
-let _clipText: string | null = null;
-let _clipPng: Uint8Array | null = null;
-let _weOwnClipboard = false;
-let _clipSeq = 0;
-let _X: ReturnType<typeof x11Syms> = null;
-let _F: ReturnType<typeof x11ffi> = null;
+import { Worker } from "worker_threads";
 
-let _CLIPBOARD = 0n;
-let _UTF8_STRING = 0n;
-let _STRING = 0n;
-let _TARGETS = 0n;
-let _ATOM = 0n;
-let _TIMESTAMP = 0n;
-let _IMAGE_PNG = 0n;
-let _MECHATRON_SEL = 0n;
+let _worker: Worker | null = null;
+let _nextReqId = 1;
+const _pending = new Map<number, (result: any) => void>();
 
-const SIZEOF_XEVENT = 192;
-
-function linuxEnsure(): boolean {
-  if (_clipWindow !== 0n) return true;
-  _X = x11Syms();
-  _F = x11ffi();
-  if (!_X || !_F) return false;
-
-  _clipDisplay = _X.XOpenDisplay(_F.ptr(cstr("")));
-  if (!_clipDisplay) return false;
-
-  const root = _X.XDefaultRootWindow(_clipDisplay);
-  _clipWindow = _X.XCreateSimpleWindow(_clipDisplay, root, 0, 0, 1, 1, 0, 0n, 0n);
-  if (_clipWindow === 0n) return false;
-
-  const ia = (name: string) => _X!.XInternAtom(_clipDisplay, _F!.ptr(cstr(name)), False);
-  _CLIPBOARD = ia("CLIPBOARD");
-  _UTF8_STRING = ia("UTF8_STRING");
-  _STRING = 31n;
-  _TARGETS = ia("TARGETS");
-  _ATOM = 4n;
-  _TIMESTAMP = ia("TIMESTAMP");
-  _IMAGE_PNG = ia("image/png");
-  _MECHATRON_SEL = ia("_MECHATRON_SEL");
-
-  return true;
-}
-
-function linuxDrainEvents(): void {
-  if (!_X || !_F || !_clipDisplay) return;
-
-  const evBuf = new Uint8Array(SIZEOF_XEVENT);
-  const evDv = new DataView(evBuf.buffer);
-
-  while (_X.XPending(_clipDisplay) > 0) {
-    _X.XNextEvent(_clipDisplay, _F.ptr(evBuf));
-    const type = evDv.getInt32(0, true);
-
-    if (type === SelectionClear) {
-      _weOwnClipboard = false;
-      _clipSeq++;
-    } else if (type === SelectionRequest) {
-      linuxHandleSelectionRequest(evDv);
-    }
-  }
-}
-
-function linuxHandleSelectionRequest(ev: DataView): void {
-  if (!_X || !_F || !_clipDisplay) return;
-
-  const requestor = ev.getBigUint64(40, true);
-  const target = ev.getBigUint64(56, true);
-  const property = ev.getBigUint64(64, true);
-  const time = ev.getBigUint64(72, true);
-
-  let replyProp = property;
-
-  if (target === _TARGETS) {
-    const targets: bigint[] = [_TARGETS, _TIMESTAMP];
-    if (_clipText) { targets.push(_UTF8_STRING); targets.push(_STRING); }
-    if (_clipPng) targets.push(_IMAGE_PNG);
-    const buf = new BigUint64Array(targets.length);
-    for (let i = 0; i < targets.length; i++) buf[i] = targets[i];
-    _X.XChangeProperty(_clipDisplay, requestor, property, _ATOM, 32,
-      PropModeReplace, _F.ptr(new Uint8Array(buf.buffer)), targets.length);
-  } else if ((target === _UTF8_STRING || target === _STRING) && _clipText) {
-    const data = new TextEncoder().encode(_clipText);
-    _X.XChangeProperty(_clipDisplay, requestor, property, _UTF8_STRING, 8,
-      PropModeReplace, _F.ptr(data), data.length);
-  } else if (target === _IMAGE_PNG && _clipPng) {
-    _X.XChangeProperty(_clipDisplay, requestor, property, _IMAGE_PNG, 8,
-      PropModeReplace, _F.ptr(_clipPng), _clipPng.length);
-  } else if (target === _TIMESTAMP) {
-    const buf = new BigUint64Array([0n]);
-    _X.XChangeProperty(_clipDisplay, requestor, property, XA_CARDINAL, 32,
-      PropModeReplace, _F.ptr(new Uint8Array(buf.buffer)), 1);
-  } else {
-    replyProp = 0n;
-  }
-
-  const reply = new Uint8Array(SIZEOF_XEVENT);
-  const rdv = new DataView(reply.buffer);
-  rdv.setInt32(0, SelectionNotify, true);
-  rdv.setBigUint64(32, requestor, true);
-  rdv.setBigUint64(40, _CLIPBOARD, true);
-  rdv.setBigUint64(48, target, true);
-  rdv.setBigUint64(56, replyProp, true);
-  rdv.setBigUint64(64, time, true);
-  _X.XSendEvent(_clipDisplay, requestor, False, 0n, _F.ptr(reply));
-  _X.XFlush(_clipDisplay);
-}
-
-function linuxWaitForSelectionNotify(timeoutMs: number): DataView | null {
-  if (!_X || !_F || !_clipDisplay) return null;
-
-  const evBuf = new Uint8Array(SIZEOF_XEVENT);
-  const evDv = new DataView(evBuf.buffer);
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    if (_X.XPending(_clipDisplay) > 0) {
-      _X.XNextEvent(_clipDisplay, _F.ptr(evBuf));
-      const type = evDv.getInt32(0, true);
-      if (type === SelectionNotify) return evDv;
-      if (type === SelectionClear) {
-        _weOwnClipboard = false;
-        _clipSeq++;
-      } else if (type === SelectionRequest) {
-        linuxHandleSelectionRequest(evDv);
-      }
-    } else {
-      Bun.sleepSync(1);
-    }
-  }
-  return null;
-}
-
-function linuxReadProperty(window: bigint, property: bigint): Uint8Array | null {
-  if (!_X || !_F || !_clipDisplay) return null;
-
-  const actualType = new BigUint64Array(1);
-  const actualFormat = new Int32Array(1);
-  const nitems = new BigUint64Array(1);
-  const bytesAfter = new BigUint64Array(1);
-  const propRet = new BigUint64Array(1);
-
-  const status = _X.XGetWindowProperty(
-    _clipDisplay, window, property, 0n, 4194304n, True, 0n,
-    _F.ptr(actualType), _F.ptr(actualFormat),
-    _F.ptr(nitems), _F.ptr(bytesAfter), _F.ptr(propRet),
-  );
-  if (status !== 0 || propRet[0] === 0n) return null;
-
-  const n = Number(nitems[0]);
-  const format = actualFormat[0];
-  // format 32 means items are `long`-sized (8 bytes on LP64, 4 on ILP32)
-  const longSize = process.arch === "x64" || process.arch === "arm64" ? 8 : 4;
-  const byteLen = format === 32 ? n * longSize : format === 16 ? n * 2 : n;
-  if (byteLen === 0) {
-    _X.XFree(propRet[0]);
-    return null;
-  }
-
-  const ptr = Number(propRet[0]);
-  const result = new Uint8Array(_F.toArrayBuffer(ptr, 0, byteLen)).slice();
-  _X.XFree(propRet[0]);
-  return result;
-}
-
-function linuxClear(): boolean {
-  if (!linuxEnsure()) return false;
-  if (_weOwnClipboard) {
-    _X!.XSetSelectionOwner(_clipDisplay, _CLIPBOARD, 0n, 0n);
-    _weOwnClipboard = false;
-    _clipSeq++;
-  }
-  _clipText = null;
-  _clipPng = null;
-  _X!.XFlush(_clipDisplay);
-  linuxDrainEvents();
-  return true;
-}
-
-function linuxHasTarget(target: bigint): boolean {
-  if (_X!.XGetSelectionOwner(_clipDisplay, _CLIPBOARD) === 0n) return false;
-
-  _X!.XDeleteProperty(_clipDisplay, _clipWindow, _MECHATRON_SEL);
-  _X!.XConvertSelection(_clipDisplay, _CLIPBOARD, _TARGETS, _MECHATRON_SEL, _clipWindow, 0n);
-  _X!.XFlush(_clipDisplay);
-
-  const ev = linuxWaitForSelectionNotify(2000);
-  if (!ev) return false;
-  if (ev.getBigUint64(56, true) === 0n) return false;
-
-  const data = linuxReadProperty(_clipWindow, _MECHATRON_SEL);
-  if (!data) return false;
-
-  const longSize = process.arch === "x64" || process.arch === "arm64" ? 8 : 4;
-  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  for (let i = 0; i + 3 < data.length; i += longSize) {
-    if (BigInt(dv.getUint32(i, true)) === target) return true;
-  }
-  return false;
-}
-
-function linuxHasText(): boolean {
-  if (!linuxEnsure()) return false;
-  linuxDrainEvents();
-  if (_weOwnClipboard) return _clipText !== null && _clipText.length > 0;
-  return linuxHasTarget(_UTF8_STRING);
-}
-
-function linuxGetText(): string {
-  if (!linuxEnsure()) return "";
-  linuxDrainEvents();
-  if (_weOwnClipboard) return _clipText ?? "";
-
-  _X!.XDeleteProperty(_clipDisplay, _clipWindow, _MECHATRON_SEL);
-  _X!.XConvertSelection(_clipDisplay, _CLIPBOARD, _UTF8_STRING, _MECHATRON_SEL, _clipWindow, 0n);
-  _X!.XFlush(_clipDisplay);
-
-  const ev = linuxWaitForSelectionNotify(2000);
-  if (!ev) return "";
-  const property = ev.getBigUint64(56, true);
-  if (property === 0n) return "";
-
-  const data = linuxReadProperty(_clipWindow, _MECHATRON_SEL);
-  if (!data) return "";
-  return new TextDecoder().decode(data);
-}
-
-function linuxSetText(text: string): boolean {
-  if (!linuxEnsure()) return false;
-  linuxDrainEvents();
-  _clipText = text;
-  _clipPng = null;
-  _X!.XSetSelectionOwner(_clipDisplay, _CLIPBOARD, _clipWindow, 0n);
-  _X!.XFlush(_clipDisplay);
-  _weOwnClipboard = _X!.XGetSelectionOwner(_clipDisplay, _CLIPBOARD) === _clipWindow;
-  if (_weOwnClipboard) _clipSeq++;
-  return _weOwnClipboard;
-}
-
-function linuxHasImage(): boolean {
-  if (!linuxEnsure()) return false;
-  linuxDrainEvents();
-  if (_weOwnClipboard) return _clipPng !== null;
-  return linuxHasTarget(_IMAGE_PNG);
-}
-
-function linuxGetImage(): { width: number; height: number; data: Uint32Array } | null {
-  if (!linuxEnsure()) return null;
-  linuxDrainEvents();
-
-  let pngData: Uint8Array | null = null;
-
-  if (_weOwnClipboard) {
-    if (!_clipPng) return null;
-    pngData = _clipPng;
-  } else {
-    _X!.XDeleteProperty(_clipDisplay, _clipWindow, _MECHATRON_SEL);
-    _X!.XConvertSelection(_clipDisplay, _CLIPBOARD, _IMAGE_PNG, _MECHATRON_SEL, _clipWindow, 0n);
-    _X!.XFlush(_clipDisplay);
-
-    const ev = linuxWaitForSelectionNotify(2000);
-    if (!ev) return null;
-    const property = ev.getBigUint64(56, true);
-    if (property === 0n) return null;
-
-    pngData = linuxReadProperty(_clipWindow, _MECHATRON_SEL);
-    if (!pngData) return null;
-  }
-
+function ensureWorker(): Worker | null {
+  if (_worker) return _worker;
   try {
-    // @ts-ignore
-    const { PNG } = require("pngjs");
-    const png = PNG.sync.read(Buffer.from(pngData));
-    const pixels = new Uint32Array(png.width * png.height);
-    for (let i = 0; i < pixels.length; i++) {
-      const r = png.data[i * 4];
-      const g = png.data[i * 4 + 1];
-      const b = png.data[i * 4 + 2];
-      const a = png.data[i * 4 + 3];
-      pixels[i] = ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
-    }
-    return { width: png.width, height: png.height, data: pixels };
+    // Bun resolves the .ts source directly; Node loads the compiled .js.
+    _worker = new Worker(require.resolve("./clipboard-worker"));
   } catch {
     return null;
   }
-}
-
-function linuxSetImage(w: number, h: number, d: Uint32Array): boolean {
-  if (!linuxEnsure()) return false;
-  linuxDrainEvents();
-
-  try {
-    // @ts-ignore
-    const { PNG } = require("pngjs");
-    const png = new PNG({ width: w, height: h });
-    for (let i = 0; i < w * h; i++) {
-      const px = d[i];
-      png.data[i * 4]     = (px >> 16) & 0xFF;
-      png.data[i * 4 + 1] = (px >> 8) & 0xFF;
-      png.data[i * 4 + 2] = px & 0xFF;
-      png.data[i * 4 + 3] = (px >> 24) & 0xFF;
+  _worker.on("message", (data: any) => {
+    const { id, result } = data;
+    const r = _pending.get(id);
+    if (r) {
+      _pending.delete(id);
+      r(result);
+      // Idle: don't keep the process alive solely for the worker.
+      if (_pending.size === 0) _worker?.unref();
     }
-    _clipPng = PNG.sync.write(png);
-    _clipText = null;
-
-    _X!.XSetSelectionOwner(_clipDisplay, _CLIPBOARD, _clipWindow, 0n);
-    _X!.XFlush(_clipDisplay);
-    _weOwnClipboard = _X!.XGetSelectionOwner(_clipDisplay, _CLIPBOARD) === _clipWindow;
-    if (_weOwnClipboard) _clipSeq++;
-    return _weOwnClipboard;
-  } catch {
-    return false;
-  }
+  });
+  _worker.on("error", () => { /* swallow — worker crashes drop pending ops */ });
+  // Start unref'd — only ref while a request is in flight.
+  _worker.unref();
+  return _worker;
 }
 
-function linuxSequence(): number {
-  if (!linuxEnsure()) return 0;
-  linuxDrainEvents();
-  return _clipSeq;
+function call<T>(op: string, args: Record<string, unknown> = {}): Promise<T | null> {
+  const w = ensureWorker();
+  if (!w) return Promise.resolve(null);
+  const id = _nextReqId++;
+  // Ref the worker so the main loop waits for the response.
+  if (_pending.size === 0) w.ref();
+  return new Promise<T | null>((resolve) => {
+    _pending.set(id, resolve as (r: any) => void);
+    w.postMessage({ id, op, args });
+  });
+}
+
+async function linuxClear(): Promise<boolean> {
+  return (await call<boolean>("clear")) === true;
+}
+async function linuxHasText(): Promise<boolean> {
+  return (await call<boolean>("hasText")) === true;
+}
+async function linuxGetText(): Promise<string> {
+  return (await call<string>("getText")) ?? "";
+}
+async function linuxSetText(text: string): Promise<boolean> {
+  return (await call<boolean>("setText", { text })) === true;
+}
+async function linuxHasImage(): Promise<boolean> {
+  return (await call<boolean>("hasImage")) === true;
+}
+async function linuxGetImage(): Promise<{ width: number; height: number; data: Uint32Array } | null> {
+  return await call<{ width: number; height: number; data: Uint32Array }>("getImage");
+}
+async function linuxSetImage(w: number, h: number, d: Uint32Array): Promise<boolean> {
+  return (await call<boolean>("setImage", { width: w, height: h, data: d })) === true;
+}
+async function linuxSequence(): Promise<number> {
+  return (await call<number>("sequence")) ?? 0;
 }
 
 // ── Windows helpers ───────────────────────────────────────────────────
@@ -825,58 +560,58 @@ function macSequence(): number {
   return typeof r === "bigint" ? Number(r) : (r as number);
 }
 
-// ── NAPI-compatible exports ───────────────────────────────────────────
+// ── NAPI-compatible exports (all Promise-returning) ───────────────────
 
-export function clipboard_clear(): boolean {
+export async function clipboard_clear(): Promise<boolean> {
   if (IS_LINUX) return linuxClear();
   if (IS_WIN) return winClear();
   if (IS_MAC) return macClear();
   return false;
 }
 
-export function clipboard_hasText(): boolean {
+export async function clipboard_hasText(): Promise<boolean> {
   if (IS_LINUX) return linuxHasText();
   if (IS_WIN) return winHasText();
   if (IS_MAC) return macHasText();
   return false;
 }
 
-export function clipboard_getText(): string {
+export async function clipboard_getText(): Promise<string> {
   if (IS_LINUX) return linuxGetText();
   if (IS_WIN) return winGetText();
   if (IS_MAC) return macGetText();
   return "";
 }
 
-export function clipboard_setText(text: string): boolean {
+export async function clipboard_setText(text: string): Promise<boolean> {
   if (IS_LINUX) return linuxSetText(text);
   if (IS_WIN) return winSetText(text);
   if (IS_MAC) return macSetText(text);
   return false;
 }
 
-export function clipboard_hasImage(): boolean {
+export async function clipboard_hasImage(): Promise<boolean> {
   if (IS_LINUX) return linuxHasImage();
   if (IS_WIN) return winHasImage();
   if (IS_MAC) return macHasImage();
   return false;
 }
 
-export function clipboard_getImage(): { width: number; height: number; data: Uint32Array } | null {
+export async function clipboard_getImage(): Promise<{ width: number; height: number; data: Uint32Array } | null> {
   if (IS_LINUX) return linuxGetImage();
   if (IS_WIN) return winGetImage();
   if (IS_MAC) return macGetImage();
   return null;
 }
 
-export function clipboard_setImage(width: number, height: number, data: Uint32Array): boolean {
+export async function clipboard_setImage(width: number, height: number, data: Uint32Array): Promise<boolean> {
   if (IS_LINUX) return linuxSetImage(width, height, data);
   if (IS_WIN) return winSetImage(width, height, data);
   if (IS_MAC) return macSetImage(width, height, data);
   return false;
 }
 
-export function clipboard_getSequence(): number {
+export async function clipboard_getSequence(): Promise<number> {
   if (IS_LINUX) return linuxSequence();
   if (IS_WIN) return winSequence();
   if (IS_MAC) return macSequence();

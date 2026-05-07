@@ -109,6 +109,7 @@ interface X11 {
   XNextEvent: (display: Pointer, eventReturn: Pointer) => number;
   XFlush: (display: Pointer) => number;
   XDeleteProperty: (display: Pointer, w: bigint, property: bigint) => number;
+  XConnectionNumber: (display: Pointer) => number;
   // Error handler suppression
   XSetErrorHandler: (handler: Pointer) => Pointer;
 }
@@ -272,6 +273,7 @@ function tryDlopen(): void {
       XNextEvent:             { args: [T.ptr, T.ptr], returns: T.i32 },
       XFlush:                 { args: [T.ptr], returns: T.i32 },
       XDeleteProperty:        { args: [T.ptr, T.u64, T.u64], returns: T.i32 },
+      XConnectionNumber:      { args: [T.ptr], returns: T.i32 },
     });
     _x11 = x11.symbols;
     _dlopenHandles.push(x11);

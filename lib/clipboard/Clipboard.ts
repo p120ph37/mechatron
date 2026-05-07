@@ -24,7 +24,7 @@ export const Clipboard = {
   },
 
   async getImage(image: Image): Promise<boolean> {
-    const result = getNative("clipboard").clipboard_getImage();
+    const result = await getNative("clipboard").clipboard_getImage();
     if (!result) return false;
     image.destroy();
     image.create(result.width, result.height);
