@@ -78,6 +78,23 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			}
 		},
 
+		// ---- setPos without getPos (exercises cells where getPos is skipped) ----
+		// Some cells (e.g. linux-napi[portal], linux-nolib[portal], linux-nolib[vt])
+		// support cursor warping but cannot read the cursor position back.  This
+		// test drops the round-trip verification so setPos itself stays exercised
+		// in the matrix cross-check on those cells.
+
+		{
+			name: "setPos no-readback",
+			functions: ["mouse_setPos"],
+			test: async function () {
+				// Doesn't throw is the contract; verifying the move would
+				// require getPos which isn't available on every backend.
+				await Mouse.setPos(100, 100);
+				await Mouse.setPos(0, 0);
+			}
+		},
+
 		// ---- press + getState ----
 
 		{
