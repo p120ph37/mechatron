@@ -1,7 +1,3 @@
-#[cfg(windows)]
-#[path = "../../src/win_pin.rs"]
-mod win_pin;
-
 #[cfg(target_os = "linux")]
 use mechatron_shared::x11 as x11_mod;
 #[cfg(target_os = "linux")]

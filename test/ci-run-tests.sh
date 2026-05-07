@@ -81,189 +81,20 @@ guard_junit() {
 }
 
 # ── Windows ia32: legacy node runner, napi-only, no coverage ──────
+# (Bun has no 32-bit Windows build, so this cell uses test/test.js
+# directly with a downloaded 32-bit Node binary.)
 if [ "$MATRIX_ARCH" = "ia32" ]; then
   NODE_VERSION=$(node -v)
   curl -sLO "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x86.zip"
   unzip -q "node-${NODE_VERSION}-win-x86.zip"
   IA32_NODE="./node-${NODE_VERSION}-win-x86/node"
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}.xml"
-  REPORT_DIR="${RUNNER_TEMP}/node-reports"
-  DUMP_DIR="${RUNNER_TEMP}/dumps"
-  mkdir -p "$REPORT_DIR" "$DUMP_DIR"
 
-  # Configure Windows Error Reporting to write a full minidump for any
-  # process crash into $DUMP_DIR.  This catches the intermittent
-  # shutdown segfault (napi-rs cdylib unload on ia32, see napi-rs #297
-  # and #1145) which Node's --report-on-fatalerror handler cannot —
-  # the crash happens after Node's main thread returns, in CRT/loader
-  # cleanup.  Requires admin (CI runners run as admin).
-  #
-  # Use PowerShell rather than reg.exe because Git Bash's MSYS layer
-  # path-translates backslash-prefixed arguments, mangling the
-  # 'HKLM\SOFTWARE\...' key path before reg.exe sees it.
-  WIN_DUMP_DIR=$(cygpath -w "$DUMP_DIR" 2>/dev/null || echo "$DUMP_DIR")
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "
-    \$k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps';
-    if (-not (Test-Path \$k)) { New-Item -Path \$k -Force | Out-Null };
-    Set-ItemProperty -Path \$k -Name DumpFolder -Value '$WIN_DUMP_DIR' -Type ExpandString;
-    Set-ItemProperty -Path \$k -Name DumpType   -Value 2  -Type DWord;
-    Set-ItemProperty -Path \$k -Name DumpCount  -Value 30 -Type DWord;
-  "
-
-  # Canonical run — produces JUnit and is the cell's pass/fail status.
   RC=0
-  run_and_log "$IA32_NODE" \
-    --report-on-fatalerror --report-directory="$REPORT_DIR" \
-    test/test.js all --backend napi --junit "$JUNIT_FILE" \
+  run_and_log "$IA32_NODE" test/test.js all --backend napi --junit "$JUNIT_FILE" \
     || RC=$?
-  if [ "$RC" != 0 ]; then
-    echo ">>> [ia32] node exited rc=$RC; diagnostic reports (if any):"
-    ls -la "$REPORT_DIR" || true
-    for rpt in "$REPORT_DIR"/*.json; do
-      [ -f "$rpt" ] || continue
-      echo "--- $rpt ---"
-      cat "$rpt"
-    done
-  fi
-
-  # Diagnostic crash-bait loop: re-run the memory test up to 50 times
-  # to surface the intermittent shutdown segfault.  Use procdump
-  # (Sysinternals) to capture a minidump — it attaches via debug API
-  # and catches exceptions that WER LocalDumps misses (the crash
-  # occurs in a context where WER/SEH are already torn down).
-  #
-  # procdump -e    = write dump on unhandled exception
-  # procdump -t    = write dump on process exit (fallback)
-  # procdump -ma   = full memory dump
-  # procdump -x    = launch-and-monitor mode
-  PROCDUMP=""
-  if command -v procdump >/dev/null 2>&1; then
-    PROCDUMP="procdump"
-  else
-    # GitHub Actions windows-2022 runners ship procdump in C:\tools
-    for candidate in \
-      "C:/tools/procdump.exe" \
-      "C:/tools/procdump/procdump.exe" \
-      "C:/ProgramData/chocolatey/bin/procdump.exe"; do
-      if [ -x "$candidate" ]; then PROCDUMP="$candidate"; break; fi
-    done
-  fi
-  if [ -z "$PROCDUMP" ]; then
-    echo ">>> [ia32] procdump not found, installing via choco"
-    choco install procdump -y --no-progress 2>&1 | tail -3
-    PROCDUMP="C:/ProgramData/chocolatey/bin/procdump.exe"
-  fi
-  echo ">>> [ia32] procdump: $PROCDUMP"
-
-  IA32_NODE_WIN=$(cygpath -w "$IA32_NODE" 2>/dev/null || echo "$IA32_NODE")
-
-  # Bisection harness: identify which memory op triggers the V8
-  # ThreadIsolation shutdown crash on ia32.  We've previously observed the
-  # full memory test surviving 50 iterations once and crashing at iteration
-  # 2/17 on others — crash rate is variable, so use high iteration counts.
-  #
-  # 'full' first as a control: confirms repro before bisecting.  If 'full'
-  # doesn't crash within its iteration budget, this whole run is variance.
-  BAIT_RC=0
-  # 'full' first as control (75 iters).  Then heavy/combination cases that
-  # exercise cumulative state buildup (50 iters each since each iter does
-  # many inner ops).  Skip trivially-passing simple cases (load, info,
-  # mem-current, getRegions, getRegion, simple read/write variants) — they
-  # all passed 25/25 in the prior run with zero crashes, so we have high
-  # confidence they aren't the trigger.
-  # Bisection now includes a V8 warmup phase before each non-'full' case
-  # to build up JIT pages.  Hypothesis: the crash needs *vulnerable* V8
-  # state (many tracked JIT pages), not just *corrupt* state.  A trivial
-  # bisection case on a fresh process may have nothing to corrupt.
-  #
-  # 'warmup-only' = warmup + module load + exit (no memory ops at all)
-  # 'no-warmup-*' = same case body but skips warmup (control)
-  # Verification of the fix: prior runs proved the trigger is the 16-byte
-  # writeData(writable.start, ...) on self, where writable.start is the
-  # first writable region returned by getRegions() — almost always a V8
-  # heap page on Node.  Test now uses mem.addressOf(ourBuffer) to get a
-  # known-safe target address.  Run 'full' at high iter count to confirm
-  # the fix.  No crash @ 250 iters = fix verified.
-  BISECT_CASES=(
-    full
-  )
-  BISECT_ITERS=250
-  echo ">>> [ia32] bisection harness ($BISECT_ITERS iters per case)"
-  declare -A BISECT_RESULT
-  for case_name in "${BISECT_CASES[@]}"; do
-    case_rc=0
-    crash_iter=0
-    echo "=== bisect case: $case_name ===" >>"$TEST_LOG"
-    for i in $(seq 1 $BISECT_ITERS); do
-      iter_rc=0
-      echo "--- $case_name iter $i ---" >>"$TEST_LOG"
-      "$PROCDUMP" -accepteula -e -ma -x "$(cygpath -w "$DUMP_DIR")" \
-        "$IA32_NODE_WIN" test/memory-bisect.js "$case_name" --backend napi \
-        >>"$TEST_LOG" 2>&1 || iter_rc=$?
-      if [ "$iter_rc" != 0 ]; then
-        case_rc=$iter_rc
-        crash_iter=$i
-        break
-      fi
-    done
-    if [ "$case_rc" = 0 ]; then
-      echo ">>> [ia32] bisect $case_name: OK ($BISECT_ITERS/$BISECT_ITERS)"
-      BISECT_RESULT[$case_name]="OK"
-    else
-      echo ">>> [ia32] bisect $case_name: CRASH (iter $crash_iter)"
-      BISECT_RESULT[$case_name]="CRASH@$crash_iter"
-      BAIT_RC=$case_rc
-    fi
-  done
-
-  echo ">>> [ia32] bisection summary:"
-  for case_name in "${BISECT_CASES[@]}"; do
-    printf "  %-22s %s\n" "$case_name" "${BISECT_RESULT[$case_name]}"
-  done
-
-  # Analyze any captured minidumps with cdb !analyze.  The Windows SDK's
-  # debugger ships in the GitHub-hosted runner image; pick the right
-  # arch-flavoured cdb that matches our ia32 binaries.
-  shopt -s nullglob
-  DUMPS=("$DUMP_DIR"/*.dmp)
-  shopt -u nullglob
-  if [ ${#DUMPS[@]} -gt 0 ]; then
-    CDB=""
-    for candidate in \
-      "C:/Program Files (x86)/Windows Kits/10/Debuggers/x86/cdb.exe" \
-      "C:/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe"; do
-      if [ -x "$candidate" ]; then CDB="$candidate"; break; fi
-    done
-    if [ -n "$CDB" ]; then
-      # Symbol path: our PDBs (next to the .node files) plus Microsoft's
-      # public symbol server for ntdll/kernel32 frames.
-      MECH_PDB_DIRS=$(pwd)/napi/keyboard
-      for s in mouse clipboard screen window process memory; do
-        MECH_PDB_DIRS="$MECH_PDB_DIRS;$(pwd)/napi/$s"
-      done
-      MS_SYMBOLS="srv*${RUNNER_TEMP}\\symbols*https://msdl.microsoft.com/download/symbols"
-      SYM_PATH="${MECH_PDB_DIRS};${MS_SYMBOLS}"
-      for dump in "${DUMPS[@]}"; do
-        echo "=== ia32 minidump analysis: $(basename "$dump") ==="
-        "$CDB" -y "$SYM_PATH" -lines -z "$dump" -c '!analyze -v; ~*kvn 30; lm vm; q' \
-          2>&1 | tee -a "$TEST_LOG" || true
-        echo "=== end minidump analysis ==="
-      done
-    else
-      echo ">>> [ia32] cdb.exe not found; minidumps preserved for offline analysis"
-    fi
-  else
-    echo ">>> [ia32] no minidumps captured"
-  fi
-
-  # Surface bait-loop crash in the cell exit code.  The canonical RC
-  # (with JUnit) is preserved; if it already failed, that wins.  If the
-  # canonical run passed but the bait loop triggered a crash, fail the
-  # cell anyway so the CI status reflects the captured dump.
-  if [ "$RC" = 0 ] && [ "$BAIT_RC" != 0 ]; then RC=$BAIT_RC; fi
-
   guard_junit "$RC" "$JUNIT_FILE" "ia32" \
-    "node exited rc=$RC after writing JUnit (likely a shutdown crash; see test-output.txt, node-reports, and dumps)."
+    "node exited rc=$RC after writing JUnit (likely a shutdown crash)."
   exit "$RC"
 fi
 

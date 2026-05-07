@@ -12,18 +12,6 @@
 
 module.exports = function (mechatron, log, assert, waitFor) {
 
-	// Bisection support: set MECHATRON_BISECT_SKIP=section1,section2,...
-	// to skip named sections of testMemory.  Used by test/memory-bisect.js
-	// to narrow down the ia32 shutdown crash trigger.
-	var _skipSet = {};
-	if (process.env.MECHATRON_BISECT_SKIP) {
-		var _skipList = process.env.MECHATRON_BISECT_SKIP.split(",");
-		for (var _i = 0; _i < _skipList.length; ++_i) {
-			_skipSet[_skipList[_i].trim()] = true;
-		}
-	}
-	function bisectSkip(section) { return _skipSet[section] === true; }
-
 	async function testMemory() {
 		log("  Memory... ");
 
@@ -33,7 +21,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		// --- Segment (data type) ---
 		var Segment = mechatron.Segment;
-		if (Segment && !bisectSkip("types")) {
+		if (Segment) {
 			var seg = new Segment();
 			assert(seg.valid === false, "empty segment invalid");
 			assert(seg.base === 0, "empty segment base");
@@ -84,7 +72,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Module (data type only) ---
-		if (!bisectSkip("types")) {
 		var mod = new Module();
 		assert(mod.valid === false, "empty module invalid");
 		assert(mod.name === "", "empty module name");
@@ -114,10 +101,8 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		// Module static compare
 		assert(Module.compare(mod, modCl) === 0, "Module.compare eq");
-		} // end !bisectSkip("types")
 
 		// --- Invalid memory ---
-		if (!bisectSkip("invalid")) {
 		var mem = new Memory();
 		assert(!await mem.isValid(), "empty invalid");
 
@@ -137,7 +122,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		// Invalid find
 		assert((await mem.find("  ")).length === 0, "invalid find empty");
-		} // end !bisectSkip("invalid")
 
 		// --- Open current process ---
 		var proc = await Process.getCurrent();
@@ -264,7 +248,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(memCl.getProcess().eq(proc), "clone getProcess eq");
 
 		// --- Cross-process memory write verification ---
-		if (!bisectSkip("crossproc")) {
 		var _cp = require("child_process");
 		var _path = require("path");
 
@@ -418,7 +401,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			try { _child.stdin.end(); } catch (_) {}
 			try { _child.kill(); } catch (_) {}
 		}
-		} // end !bisectSkip("crossproc")
 
 		// --- task_for_pid failure path (macOS, non-root -> root process) ---
 		if (process.platform === "darwin" &&
@@ -456,7 +438,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Multi-value (count > 1) typed reads ---
-		if (!bisectSkip("multivalue") && readable && readable.size >= 32n) {
+		if (readable && readable.size >= 32n) {
 			var mv8 = await mem.readInt8(readable.start, 4);
 			assert(Array.isArray(mv8), "readInt8 count=4 returns array");
 			assert(mv8.length === 4, "readInt8 count=4 length");
@@ -482,41 +464,19 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		}
 
 		// --- Flag-bearing reads: SKIP_ERRORS / AUTO_ACCESS ---
-		if (!bisectSkip("flagged") && readable) {
+		// Reads on self are safe — they just copy into our own buffer.
+		// Flag-bearing WRITES on self are split into a separate test
+		// (testMemoryFlaggedWrites) because they need addressOf() to
+		// target a buffer we own (writing into V8 heap regions returned
+		// by getRegions() corrupts the runtime).
+		if (readable) {
 			var spanStart = readable.start;
 			var spanLen = Number(readable.size * 2n < 1048576n ? readable.size * 2n : 1048576n);
 			var spanBuf = Buffer.alloc(spanLen);
-			if (!bisectSkip("flagged-read-skiperr")) {
-				var gotSkip = await mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
-				assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
-			}
-			if (!bisectSkip("flagged-read-autoaccess")) {
-				var gotAuto = await mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
-				assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
-			}
-
-			// Use a Buffer we own as the write target.  Writing to a random
-			// "writable region" returned by getRegions() on the current
-			// process targets V8 heap pages, which Node's GC depends on
-			// being intact — corrupting them with arbitrary bytes causes
-			// shutdown crashes (observed as v8::ThreadIsolation::
-			// JitPageReference::Size NULL_CLASS_PTR_READ on Windows ia32).
-			//
-			// addressOf throws on nolib (pure JS cannot introspect Buffer
-			// pointers), so the self-write tests are skipped there.
-			var wDestAddr = null;
-			try { wDestAddr = mem.addressOf(Buffer.alloc(64)); } catch (_) {}
-			if (wDestAddr !== null) {
-				var wBuf = Buffer.alloc(16);
-				if (!bisectSkip("flagged-write-skiperr")) {
-					var wroteSkip = await mem.writeData(wDestAddr, wBuf, 16, Memory.SKIP_ERRORS);
-					assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
-				}
-				if (!bisectSkip("flagged-write-autoaccess")) {
-					var wroteAuto = await mem.writeData(wDestAddr, wBuf, 16, Memory.AUTO_ACCESS);
-					assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
-				}
-			}
+			var gotSkip = await mem.readData(spanStart, spanBuf, spanLen, Memory.SKIP_ERRORS);
+			assert(typeof gotSkip === "number", "readData SKIP_ERRORS returns number");
+			var gotAuto = await mem.readData(spanStart, spanBuf, spanLen, Memory.AUTO_ACCESS);
+			assert(typeof gotAuto === "number", "readData AUTO_ACCESS returns number");
 		}
 
 		// --- readData with zero length early-out ---
@@ -525,6 +485,33 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 		await proc.close();
 
+		log("OK\n");
+		return true;
+	}
+
+	async function testMemoryFlaggedWrites() {
+		log("  Memory flagged writes... ");
+		var Process = mechatron.Process;
+		var Memory  = mechatron.Memory;
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+
+		// Target a buffer we own.  The flag-bearing writeData paths
+		// (SKIP_ERRORS / AUTO_ACCESS) iterate regions and call
+		// WriteProcessMemory / process_vm_writev / mach_vm_write — all of
+		// which write the source bytes into the target address.  On the
+		// current process that means corrupting whatever lives there;
+		// using addressOf() lets us target memory we own so the test is
+		// non-destructive.
+		var wDest = Buffer.alloc(64);
+		var wDestAddr = mem.addressOf(wDest);
+		var wBuf = Buffer.alloc(16);
+		var wroteSkip = await mem.writeData(wDestAddr, wBuf, 16, Memory.SKIP_ERRORS);
+		assert(typeof wroteSkip === "number", "writeData SKIP_ERRORS returns number");
+		var wroteAuto = await mem.writeData(wDestAddr, wBuf, 16, Memory.AUTO_ACCESS);
+		assert(typeof wroteAuto === "number", "writeData AUTO_ACCESS returns number");
+
+		await proc.close();
 		log("OK\n");
 		return true;
 	}
@@ -623,6 +610,12 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			name: "memory addressOf",
 			functions: ["memory_bufferAddress"],
 			test: testAddressOf,
+		},
+		{
+			name: "memory flagged writes",
+			functions: ["memory_writeData", "memory_bufferAddress",
+				"process_getCurrent", "process_close"],
+			test: testMemoryFlaggedWrites,
 		},
 		{
 			name: "memory setAccess",
