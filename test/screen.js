@@ -205,15 +205,15 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(typeof native.screen_getPortalToken === "function", "getPortalToken exists");
 				assert(typeof native.screen_setPortalToken === "function", "setPortalToken exists");
 
-				var initial = native.screen_getPortalToken();
+				var initial = await native.screen_getPortalToken();
 				assert(initial === null || typeof initial === "string", "initial token is null or string");
 
 				var testToken = "test_restore_token_" + Date.now();
-				native.screen_setPortalToken(testToken);
-				var stored = native.screen_getPortalToken();
+				await native.screen_setPortalToken(testToken);
+				var stored = await native.screen_getPortalToken();
 				assert(stored === testToken, "token round-trips");
 
-				native.screen_setPortalToken(initial);
+				await native.screen_setPortalToken(initial);
 			}
 		},
 

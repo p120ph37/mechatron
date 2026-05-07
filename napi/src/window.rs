@@ -312,17 +312,15 @@ unsafe fn enum_windows(win: Window, pattern: Option<&regex::Regex>, pid_filter: 
     }
 }
 
-// --- NAPI exports (Linux) ---
+// --- Platform-level functions (Linux) ---
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_isValid")]
-pub fn window_is_valid(handle: f64) -> bool {
+fn platform_window_is_valid(handle: f64) -> bool {
     unsafe { win_is_valid(handle as u64) }
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_close")]
-pub fn window_close(handle: f64) {
+fn platform_window_close(handle: f64) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return; }
@@ -333,8 +331,7 @@ pub fn window_close(handle: f64) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_isTopMost")]
-pub fn window_is_top_most(handle: f64) -> bool {
+fn platform_window_is_top_most(handle: f64) -> bool {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return false; }
@@ -344,8 +341,7 @@ pub fn window_is_top_most(handle: f64) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_isBorderless")]
-pub fn window_is_borderless(handle: f64) -> bool {
+fn platform_window_is_borderless(handle: f64) -> bool {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return false; }
@@ -360,8 +356,7 @@ pub fn window_is_borderless(handle: f64) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_isMinimized")]
-pub fn window_is_minimized(handle: f64) -> bool {
+fn platform_window_is_minimized(handle: f64) -> bool {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return false; }
@@ -371,8 +366,7 @@ pub fn window_is_minimized(handle: f64) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_isMaximized")]
-pub fn window_is_maximized(handle: f64) -> bool {
+fn platform_window_is_maximized(handle: f64) -> bool {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return false; }
@@ -382,8 +376,7 @@ pub fn window_is_maximized(handle: f64) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setTopMost")]
-pub fn window_set_top_most(handle: f64, top_most: bool) {
+fn platform_window_set_top_most(handle: f64, top_most: bool) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return; }
@@ -393,8 +386,7 @@ pub fn window_set_top_most(handle: f64, top_most: bool) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setBorderless")]
-pub fn window_set_borderless(handle: f64, borderless: bool) {
+fn platform_window_set_borderless(handle: f64, borderless: bool) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return; }
@@ -418,8 +410,7 @@ pub fn window_set_borderless(handle: f64, borderless: bool) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setMinimized")]
-pub fn window_set_minimized(handle: f64, minimized: bool) {
+fn platform_window_set_minimized(handle: f64, minimized: bool) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return; }
@@ -429,8 +420,7 @@ pub fn window_set_minimized(handle: f64, minimized: bool) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setMaximized")]
-pub fn window_set_maximized(handle: f64, maximized: bool) {
+fn platform_window_set_maximized(handle: f64, maximized: bool) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return; }
@@ -441,8 +431,7 @@ pub fn window_set_maximized(handle: f64, maximized: bool) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getProcess")]
-pub fn window_get_process(handle: f64) -> f64 {
+fn platform_window_get_process(handle: f64) -> f64 {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return 0.0; }
@@ -451,8 +440,7 @@ pub fn window_get_process(handle: f64) -> f64 {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getPID")]
-pub fn window_get_pid(handle: f64) -> f64 {
+fn platform_window_get_pid(handle: f64) -> f64 {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return 0.0; }
@@ -461,20 +449,17 @@ pub fn window_get_pid(handle: f64) -> f64 {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getHandle")]
-pub fn window_get_handle(handle: f64) -> f64 {
+fn platform_window_get_handle(handle: f64) -> f64 {
     handle
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setHandle")]
-pub fn window_set_handle(_handle: f64, new_handle: f64) -> bool {
+fn platform_window_set_handle(_handle: f64, new_handle: f64) -> bool {
     unsafe { validate_handle(new_handle as u64) != 0 || new_handle == 0.0 }
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getTitle")]
-pub fn window_get_title(handle: f64) -> String {
+fn platform_window_get_title(handle: f64) -> String {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return String::new(); }
@@ -483,8 +468,7 @@ pub fn window_get_title(handle: f64) -> String {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setTitle")]
-pub fn window_set_title(handle: f64, title: String) {
+fn platform_window_set_title(handle: f64, title: String) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) { return; }
@@ -497,29 +481,21 @@ pub fn window_set_title(handle: f64, title: String) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getBounds")]
-pub fn window_get_bounds(env: Env, handle: f64) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
+fn platform_window_get_bounds(handle: f64) -> (i32, i32, i32, i32) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) {
-            obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
-            return Ok(obj);
+            return (0, 0, 0, 0);
         }
         let _xe = XDismissErrors::new();
         let client = get_client(h as Window);
         let frame = get_frame(h as Window);
-        obj.set("x", client.0 - frame.0)?;
-        obj.set("y", client.1 - frame.1)?;
-        obj.set("w", client.2 + frame.2)?;
-        obj.set("h", client.3 + frame.3)?;
+        (client.0 - frame.0, client.1 - frame.1, client.2 + frame.2, client.3 + frame.3)
     }
-    Ok(obj)
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setBounds")]
-pub fn window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) {
+fn platform_window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
         let hh = handle as u64;
         if !win_is_valid(hh) { return; }
@@ -533,25 +509,19 @@ pub fn window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getClient")]
-pub fn window_get_client(env: Env, handle: f64) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
+fn platform_window_get_client(handle: f64) -> (i32, i32, i32, i32) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) {
-            obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
-            return Ok(obj);
+            return (0, 0, 0, 0);
         }
         let _xe = XDismissErrors::new();
-        let c = get_client(h as Window);
-        obj.set("x", c.0)?; obj.set("y", c.1)?; obj.set("w", c.2)?; obj.set("h", c.3)?;
+        get_client(h as Window)
     }
-    Ok(obj)
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setClient")]
-pub fn window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) {
+fn platform_window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
         let hh = handle as u64;
         if !win_is_valid(hh) { return; }
@@ -562,48 +532,37 @@ pub fn window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_mapToClient")]
-pub fn window_map_to_client(env: Env, handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
+fn platform_window_map_to_client(handle: f64, x: i32, y: i32) -> (i32, i32) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) {
-            obj.set("x", x)?; obj.set("y", y)?;
-            return Ok(obj);
+            return (x, y);
         }
         let _xe = XDismissErrors::new();
         let c = get_client(h as Window);
-        obj.set("x", x - c.0)?;
-        obj.set("y", y - c.1)?;
+        (x - c.0, y - c.1)
     }
-    Ok(obj)
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_mapToScreen")]
-pub fn window_map_to_screen(env: Env, handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
+fn platform_window_map_to_screen(handle: f64, x: i32, y: i32) -> (i32, i32) {
     unsafe {
         let h = handle as u64;
         if !win_is_valid(h) {
-            obj.set("x", x)?; obj.set("y", y)?;
-            return Ok(obj);
+            return (x, y);
         }
         let _xe = XDismissErrors::new();
         let c = get_client(h as Window);
-        obj.set("x", x + c.0)?;
-        obj.set("y", y + c.1)?;
+        (x + c.0, y + c.1)
     }
-    Ok(obj)
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getList")]
-pub fn window_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsObject> {
+fn platform_window_get_list(regex_str: Option<String>) -> Vec<f64> {
     unsafe {
         let d = get_display();
         if d.is_null() {
-            return Ok(env.create_array(0)?.coerce_to_object()?);
+            return Vec::new();
         }
         load_atoms();
         let _xe = XDismissErrors::new();
@@ -613,17 +572,12 @@ pub fn window_get_list(env: Env, regex_str: Option<String>) -> Result<napi::JsOb
         let root = XDefaultRootWindow(d);
         enum_windows(root, pattern.as_ref(), 0, &mut results);
 
-        let mut arr = env.create_array(results.len() as u32)?;
-        for (i, &h) in results.iter().enumerate() {
-            arr.set(i as u32, h as f64)?;
-        }
-        Ok(arr.coerce_to_object()?)
+        results.into_iter().map(|h| h as f64).collect()
     }
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_getActive")]
-pub fn window_get_active() -> f64 {
+fn platform_window_get_active() -> f64 {
     unsafe {
         let d = get_display();
         if d.is_null() { return 0.0; }
@@ -644,8 +598,7 @@ pub fn window_get_active() -> f64 {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_setActive")]
-pub fn window_set_active(handle: f64) {
+fn platform_window_set_active(handle: f64) {
     unsafe {
         let h = handle as u64;
         if h == 0 { return; }
@@ -655,131 +608,452 @@ pub fn window_set_active(handle: f64) {
 }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "window_isAxEnabled")]
-pub fn window_is_ax_enabled(_prompt: Option<bool>) -> bool {
+fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool {
     true
 }
 
 // ==================== Non-Linux stubs ====================
 
 #[cfg(not(target_os = "linux"))]
+fn platform_window_is_valid(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_close(_handle: f64) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_is_top_most(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_is_borderless(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_is_minimized(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_is_maximized(_handle: f64) -> bool { false }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_top_most(_handle: f64, _top_most: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_borderless(_handle: f64, _borderless: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_minimized(_handle: f64, _minimized: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_maximized(_handle: f64, _maximized: bool) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_process(_handle: f64) -> f64 { 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_pid(_handle: f64) -> f64 { 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_handle(handle: f64) -> f64 { handle }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_handle(_handle: f64, new_handle: f64) -> bool { new_handle == 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_title(_handle: f64) -> String { String::new() }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_title(_handle: f64, _title: String) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_bounds(_handle: f64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_bounds(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_client(_handle: f64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_client(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_map_to_client(_handle: f64, x: i32, y: i32) -> (i32, i32) { (x, y) }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_map_to_screen(_handle: f64, x: i32, y: i32) -> (i32, i32) { (x, y) }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_list(_regex_str: Option<String>) -> Vec<f64> { Vec::new() }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_get_active() -> f64 { 0.0 }
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_set_active(_handle: f64) {}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool { false }
+
+// ==================== Helper structs for complex returns ====================
+
+#[napi(object)]
+pub struct WindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+#[napi(object)]
+pub struct WindowPoint {
+    pub x: i32,
+    pub y: i32,
+}
+
+// ==================== AsyncTask wrappers ====================
+
+struct IsValidTask { handle: f64 }
+impl Task for IsValidTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_is_valid(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct CloseTask { handle: f64 }
+impl Task for CloseTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_close(self.handle); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct IsTopMostTask { handle: f64 }
+impl Task for IsTopMostTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_is_top_most(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct IsBorderlessTask { handle: f64 }
+impl Task for IsBorderlessTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_is_borderless(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct IsMinimizedTask { handle: f64 }
+impl Task for IsMinimizedTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_is_minimized(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct IsMaximizedTask { handle: f64 }
+impl Task for IsMaximizedTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_is_maximized(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct SetTopMostTask { handle: f64, top_most: bool }
+impl Task for SetTopMostTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_top_most(self.handle, self.top_most); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct SetBorderlessTask { handle: f64, borderless: bool }
+impl Task for SetBorderlessTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_borderless(self.handle, self.borderless); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct SetMinimizedTask { handle: f64, minimized: bool }
+impl Task for SetMinimizedTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_minimized(self.handle, self.minimized); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct SetMaximizedTask { handle: f64, maximized: bool }
+impl Task for SetMaximizedTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_maximized(self.handle, self.maximized); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct GetProcessTask { handle: f64 }
+impl Task for GetProcessTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_process(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+struct GetPIDTask { handle: f64 }
+impl Task for GetPIDTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_pid(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+struct GetHandleTask { handle: f64 }
+impl Task for GetHandleTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_handle(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+struct SetHandleTask { handle: f64, new_handle: f64 }
+impl Task for SetHandleTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_set_handle(self.handle, self.new_handle)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+struct GetTitleTask { handle: f64 }
+impl Task for GetTitleTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> { Ok(platform_window_get_title(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
+}
+
+struct SetTitleTask { handle: f64, title: String }
+impl Task for SetTitleTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_title(self.handle, self.title.clone()); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct GetBoundsTask { handle: f64 }
+impl Task for GetBoundsTask {
+    type Output = (i32, i32, i32, i32);
+    type JsValue = WindowBounds;
+    fn compute(&mut self) -> Result<(i32, i32, i32, i32)> { Ok(platform_window_get_bounds(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: (i32, i32, i32, i32)) -> Result<WindowBounds> {
+        Ok(WindowBounds { x: out.0, y: out.1, w: out.2, h: out.3 })
+    }
+}
+
+struct SetBoundsTask { handle: f64, x: i32, y: i32, w: i32, h: i32 }
+impl Task for SetBoundsTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_bounds(self.handle, self.x, self.y, self.w, self.h); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct GetClientTask { handle: f64 }
+impl Task for GetClientTask {
+    type Output = (i32, i32, i32, i32);
+    type JsValue = WindowBounds;
+    fn compute(&mut self) -> Result<(i32, i32, i32, i32)> { Ok(platform_window_get_client(self.handle)) }
+    fn resolve(&mut self, _env: Env, out: (i32, i32, i32, i32)) -> Result<WindowBounds> {
+        Ok(WindowBounds { x: out.0, y: out.1, w: out.2, h: out.3 })
+    }
+}
+
+struct SetClientTask { handle: f64, x: i32, y: i32, w: i32, h: i32 }
+impl Task for SetClientTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_client(self.handle, self.x, self.y, self.w, self.h); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct MapToClientTask { handle: f64, x: i32, y: i32 }
+impl Task for MapToClientTask {
+    type Output = (i32, i32);
+    type JsValue = WindowPoint;
+    fn compute(&mut self) -> Result<(i32, i32)> { Ok(platform_window_map_to_client(self.handle, self.x, self.y)) }
+    fn resolve(&mut self, _env: Env, out: (i32, i32)) -> Result<WindowPoint> {
+        Ok(WindowPoint { x: out.0, y: out.1 })
+    }
+}
+
+struct MapToScreenTask { handle: f64, x: i32, y: i32 }
+impl Task for MapToScreenTask {
+    type Output = (i32, i32);
+    type JsValue = WindowPoint;
+    fn compute(&mut self) -> Result<(i32, i32)> { Ok(platform_window_map_to_screen(self.handle, self.x, self.y)) }
+    fn resolve(&mut self, _env: Env, out: (i32, i32)) -> Result<WindowPoint> {
+        Ok(WindowPoint { x: out.0, y: out.1 })
+    }
+}
+
+struct GetListTask { regex_str: Option<String> }
+impl Task for GetListTask {
+    type Output = Vec<f64>;
+    type JsValue = Vec<f64>;
+    fn compute(&mut self) -> Result<Vec<f64>> { Ok(platform_window_get_list(self.regex_str.clone())) }
+    fn resolve(&mut self, _env: Env, out: Vec<f64>) -> Result<Vec<f64>> { Ok(out) }
+}
+
+struct GetActiveTask;
+impl Task for GetActiveTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_window_get_active()) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+struct SetActiveTask { handle: f64 }
+impl Task for SetActiveTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_window_set_active(self.handle); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+struct IsAxEnabledTask { prompt: Option<bool> }
+impl Task for IsAxEnabledTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_window_is_ax_enabled(self.prompt)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+// ==================== NAPI exports (AsyncTask) ====================
+
 #[napi(js_name = "window_isValid")]
-pub fn window_is_valid(_handle: f64) -> bool { false }
+pub fn window_is_valid(handle: f64) -> AsyncTask<IsValidTask> {
+    AsyncTask::new(IsValidTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_close")]
-pub fn window_close(_handle: f64) {}
+pub fn window_close(handle: f64) -> AsyncTask<CloseTask> {
+    AsyncTask::new(CloseTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_isTopMost")]
-pub fn window_is_top_most(_handle: f64) -> bool { false }
+pub fn window_is_top_most(handle: f64) -> AsyncTask<IsTopMostTask> {
+    AsyncTask::new(IsTopMostTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_isBorderless")]
-pub fn window_is_borderless(_handle: f64) -> bool { false }
+pub fn window_is_borderless(handle: f64) -> AsyncTask<IsBorderlessTask> {
+    AsyncTask::new(IsBorderlessTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_isMinimized")]
-pub fn window_is_minimized(_handle: f64) -> bool { false }
+pub fn window_is_minimized(handle: f64) -> AsyncTask<IsMinimizedTask> {
+    AsyncTask::new(IsMinimizedTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_isMaximized")]
-pub fn window_is_maximized(_handle: f64) -> bool { false }
+pub fn window_is_maximized(handle: f64) -> AsyncTask<IsMaximizedTask> {
+    AsyncTask::new(IsMaximizedTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setTopMost")]
-pub fn window_set_top_most(_handle: f64, _top_most: bool) {}
+pub fn window_set_top_most(handle: f64, top_most: bool) -> AsyncTask<SetTopMostTask> {
+    AsyncTask::new(SetTopMostTask { handle, top_most })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setBorderless")]
-pub fn window_set_borderless(_handle: f64, _borderless: bool) {}
+pub fn window_set_borderless(handle: f64, borderless: bool) -> AsyncTask<SetBorderlessTask> {
+    AsyncTask::new(SetBorderlessTask { handle, borderless })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setMinimized")]
-pub fn window_set_minimized(_handle: f64, _minimized: bool) {}
+pub fn window_set_minimized(handle: f64, minimized: bool) -> AsyncTask<SetMinimizedTask> {
+    AsyncTask::new(SetMinimizedTask { handle, minimized })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setMaximized")]
-pub fn window_set_maximized(_handle: f64, _maximized: bool) {}
+pub fn window_set_maximized(handle: f64, maximized: bool) -> AsyncTask<SetMaximizedTask> {
+    AsyncTask::new(SetMaximizedTask { handle, maximized })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getProcess")]
-pub fn window_get_process(_handle: f64) -> f64 { 0.0 }
+pub fn window_get_process(handle: f64) -> AsyncTask<GetProcessTask> {
+    AsyncTask::new(GetProcessTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getPID")]
-pub fn window_get_pid(_handle: f64) -> f64 { 0.0 }
+pub fn window_get_pid(handle: f64) -> AsyncTask<GetPIDTask> {
+    AsyncTask::new(GetPIDTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getHandle")]
-pub fn window_get_handle(handle: f64) -> f64 { handle }
+pub fn window_get_handle(handle: f64) -> AsyncTask<GetHandleTask> {
+    AsyncTask::new(GetHandleTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setHandle")]
-pub fn window_set_handle(_handle: f64, new_handle: f64) -> bool { new_handle == 0.0 }
+pub fn window_set_handle(handle: f64, new_handle: f64) -> AsyncTask<SetHandleTask> {
+    AsyncTask::new(SetHandleTask { handle, new_handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getTitle")]
-pub fn window_get_title(_handle: f64) -> String { String::new() }
+pub fn window_get_title(handle: f64) -> AsyncTask<GetTitleTask> {
+    AsyncTask::new(GetTitleTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setTitle")]
-pub fn window_set_title(_handle: f64, _title: String) {}
+pub fn window_set_title(handle: f64, title: String) -> AsyncTask<SetTitleTask> {
+    AsyncTask::new(SetTitleTask { handle, title })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getBounds")]
-pub fn window_get_bounds(env: Env, _handle: f64) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
-    Ok(obj)
+pub fn window_get_bounds(handle: f64) -> AsyncTask<GetBoundsTask> {
+    AsyncTask::new(GetBoundsTask { handle })
 }
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setBounds")]
-pub fn window_set_bounds(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+pub fn window_set_bounds(handle: f64, x: i32, y: i32, w: i32, h: i32) -> AsyncTask<SetBoundsTask> {
+    AsyncTask::new(SetBoundsTask { handle, x, y, w, h })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getClient")]
-pub fn window_get_client(env: Env, _handle: f64) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    obj.set("x", 0)?; obj.set("y", 0)?; obj.set("w", 0)?; obj.set("h", 0)?;
-    Ok(obj)
+pub fn window_get_client(handle: f64) -> AsyncTask<GetClientTask> {
+    AsyncTask::new(GetClientTask { handle })
 }
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setClient")]
-pub fn window_set_client(_handle: f64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+pub fn window_set_client(handle: f64, x: i32, y: i32, w: i32, h: i32) -> AsyncTask<SetClientTask> {
+    AsyncTask::new(SetClientTask { handle, x, y, w, h })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_mapToClient")]
-pub fn window_map_to_client(env: Env, _handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    obj.set("x", x)?; obj.set("y", y)?;
-    Ok(obj)
+pub fn window_map_to_client(handle: f64, x: i32, y: i32) -> AsyncTask<MapToClientTask> {
+    AsyncTask::new(MapToClientTask { handle, x, y })
 }
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_mapToScreen")]
-pub fn window_map_to_screen(env: Env, _handle: f64, x: i32, y: i32) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    obj.set("x", x)?; obj.set("y", y)?;
-    Ok(obj)
+pub fn window_map_to_screen(handle: f64, x: i32, y: i32) -> AsyncTask<MapToScreenTask> {
+    AsyncTask::new(MapToScreenTask { handle, x, y })
 }
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getList")]
-pub fn window_get_list(env: Env, _regex_str: Option<String>) -> Result<napi::JsObject> {
-    Ok(env.create_array(0)?.coerce_to_object()?)
+pub fn window_get_list(regex_str: Option<String>) -> AsyncTask<GetListTask> {
+    AsyncTask::new(GetListTask { regex_str })
 }
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_getActive")]
-pub fn window_get_active() -> f64 { 0.0 }
+pub fn window_get_active() -> AsyncTask<GetActiveTask> {
+    AsyncTask::new(GetActiveTask)
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_setActive")]
-pub fn window_set_active(_handle: f64) {}
+pub fn window_set_active(handle: f64) -> AsyncTask<SetActiveTask> {
+    AsyncTask::new(SetActiveTask { handle })
+}
 
-#[cfg(not(target_os = "linux"))]
 #[napi(js_name = "window_isAxEnabled")]
-pub fn window_is_ax_enabled(_prompt: Option<bool>) -> bool { false }
+pub fn window_is_ax_enabled(prompt: Option<bool>) -> AsyncTask<IsAxEnabledTask> {
+    AsyncTask::new(IsAxEnabledTask { prompt })
+}
