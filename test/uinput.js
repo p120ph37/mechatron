@@ -20,7 +20,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 	function testUinput() {
 		log("  uinput... ");
 
-		var ui = require("../lib/input/uinput");
+		// lib/ under Bun (preserves coverage on the TS source); dist/
+		// under Node (can't require .ts directly — used by Windows ia32
+		// legacy runner via test/test.js).
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		var ui = IS_BUN
+			? require("../lib/input/uinput")
+			: require("../dist/input/uinput");
 
 		// ── Keysym → evdev mapping ──────────────────────────────────
 		// Spot-check that the X11 keysym → Linux evdev code mapping
