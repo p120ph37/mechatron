@@ -6,110 +6,115 @@
  * Other platforms: not available.
  */
 
-import { readdirSync, readFileSync, readlinkSync, existsSync } from "fs";
+import { promises as fsp } from "fs";
 
 const IS_LINUX = process.platform === "linux";
 
-function procExists(pid: number): boolean {
-  return existsSync(`/proc/${pid}`);
+async function procExists(pid: number): Promise<boolean> {
+  try {
+    await fsp.access(`/proc/${pid}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function procReadFile(pid: number, file: string): string {
+async function procReadFile(pid: number, file: string): Promise<string> {
   try {
-    return readFileSync(`/proc/${pid}/${file}`, "utf8");
+    return await fsp.readFile(`/proc/${pid}/${file}`, "utf8");
   } catch {
     return "";
   }
 }
 
-function procGetName(pid: number): string {
-  const cmdline = procReadFile(pid, "cmdline");
+async function procGetName(pid: number): Promise<string> {
+  const cmdline = await procReadFile(pid, "cmdline");
   if (cmdline) {
     const arg0 = cmdline.split("\0")[0] || "";
     const slash = arg0.lastIndexOf("/");
     return slash >= 0 ? arg0.substring(slash + 1) : arg0;
   }
-  const status = procReadFile(pid, "status");
+  const status = await procReadFile(pid, "status");
   const m = status.match(/^Name:\s*(.+)$/m);
   return m ? m[1] : "";
 }
 
-function procGetPath(pid: number): string {
+async function procGetPath(pid: number): Promise<string> {
   try {
-    return readlinkSync(`/proc/${pid}/exe`);
+    return await fsp.readlink(`/proc/${pid}/exe`);
   } catch {
     return "";
   }
 }
 
-function procIsDebugged(pid: number): boolean {
-  const status = procReadFile(pid, "status");
+async function procIsDebugged(pid: number): Promise<boolean> {
+  const status = await procReadFile(pid, "status");
   const m = status.match(/^TracerPid:\s*(\d+)$/m);
   return m ? parseInt(m[1], 10) !== 0 : false;
 }
 
-export function process_open(pid: number): boolean {
+export async function process_open(pid: number): Promise<boolean> {
   return procExists(pid);
 }
 
-export function process_close(_pid: number): void {}
+export async function process_close(_pid: number): Promise<void> {}
 
-export function process_isValid(pid: number): boolean {
-  return pid > 0 && procExists(pid);
+export async function process_isValid(pid: number): Promise<boolean> {
+  return pid > 0 && await procExists(pid);
 }
 
-export function process_is64Bit(_pid: number): boolean {
+export async function process_is64Bit(_pid: number): Promise<boolean> {
   return process.arch === "x64" || process.arch === "arm64";
 }
 
-export function process_isDebugged(pid: number): boolean {
+export async function process_isDebugged(pid: number): Promise<boolean> {
   return procIsDebugged(pid);
 }
 
-export function process_getHandle(pid: number): number {
+export async function process_getHandle(pid: number): Promise<number> {
   return pid;
 }
 
-export function process_getName(pid: number): string {
+export async function process_getName(pid: number): Promise<string> {
   return procGetName(pid);
 }
 
-export function process_getPath(pid: number): string {
+export async function process_getPath(pid: number): Promise<string> {
   return procGetPath(pid);
 }
 
-export function process_exit(pid: number): void {
+export async function process_exit(pid: number): Promise<void> {
   if (pid <= 0) return;
   try { process.kill(pid, "SIGTERM"); } catch {}
 }
 
-export function process_kill(pid: number): void {
+export async function process_kill(pid: number): Promise<void> {
   if (pid <= 0) return;
   try { process.kill(pid, "SIGKILL"); } catch {}
 }
 
-export function process_hasExited(pid: number): boolean {
-  return !procExists(pid);
+export async function process_hasExited(pid: number): Promise<boolean> {
+  return !(await procExists(pid));
 }
 
-export function process_getCurrent(): number {
+export async function process_getCurrent(): Promise<number> {
   return process.pid;
 }
 
-export function process_isSys64Bit(): boolean {
+export async function process_isSys64Bit(): Promise<boolean> {
   return process.arch === "x64" || process.arch === "arm64";
 }
 
-export function process_getList(regex?: string): number[] {
+export async function process_getList(regex?: string): Promise<number[]> {
   const pattern = regex ? new RegExp(regex) : null;
   const pids: number[] = [];
   try {
-    const entries = readdirSync("/proc");
+    const entries = await fsp.readdir("/proc");
     for (const e of entries) {
       const pid = parseInt(e, 10);
       if (isNaN(pid) || pid <= 0) continue;
       if (pattern) {
-        const name = procGetName(pid);
+        const name = await procGetName(pid);
         if (!pattern.test(name)) continue;
       }
       pids.push(pid);
@@ -118,10 +123,10 @@ export function process_getList(regex?: string): number[] {
   return pids;
 }
 
-export function process_getModules(pid: number, regex?: string): Array<{
+export async function process_getModules(pid: number, regex?: string): Promise<Array<{
   valid: boolean; name: string; path: string; base: bigint; size: bigint; pid: number;
-}> {
-  const maps = procReadFile(pid, "maps");
+}>> {
+  const maps = await procReadFile(pid, "maps");
   if (!maps) return [];
   const pattern = regex ? new RegExp(regex) : null;
   const modules = new Map<string, { base: bigint; end: bigint }>();
@@ -154,10 +159,10 @@ export function process_getModules(pid: number, regex?: string): Array<{
   return result;
 }
 
-export function process_getSegments(pid: number, base: bigint): Array<{
+export async function process_getSegments(pid: number, base: bigint): Promise<Array<{
   valid: boolean; base: bigint; size: bigint; name: string;
-}> {
-  const maps = procReadFile(pid, "maps");
+}>> {
+  const maps = await procReadFile(pid, "maps");
   if (!maps) return [];
   const entries: Array<{ start: bigint; end: bigint; perms: string; path: string }> = [];
   const modBases = new Map<string, bigint>();

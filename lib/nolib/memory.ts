@@ -6,7 +6,9 @@
  * CAP_SYS_PTRACE.
  */
 
-import { openSync, readSync, writeSync, closeSync, readFileSync, existsSync } from "fs";
+import { promises as fsp, type promises as Fsp } from "fs";
+
+type FileHandle = Fsp.FileHandle;
 
 if (process.platform !== "linux") {
   throw new Error("nolib/memory: requires Linux");
@@ -44,9 +46,9 @@ const FLAG_AUTO_ACCESS = 2;
 
 // ── Internal helpers ─────────────────────────────────────────────────
 
-function parseMaps(pid: number): RegionInfo[] {
+async function parseMaps(pid: number): Promise<RegionInfo[]> {
   let txt: string;
-  try { txt = readFileSync(`/proc/${pid}/maps`, "utf8"); }
+  try { txt = await fsp.readFile(`/proc/${pid}/maps`, "utf8"); }
   catch { return []; }
   const out: RegionInfo[] = [];
   for (const line of txt.split("\n")) {
@@ -75,47 +77,51 @@ function parseMaps(pid: number): RegionInfo[] {
   return out;
 }
 
-function procRead(pid: number, addr: bigint, buf: Uint8Array): number {
+async function procRead(pid: number, addr: bigint, buf: Uint8Array): Promise<number> {
   if (buf.length === 0) return 0;
-  let fd: number;
-  try { fd = openSync(`/proc/${pid}/mem`, "r"); }
+  let fh: FileHandle;
+  try { fh = await fsp.open(`/proc/${pid}/mem`, "r"); }
   catch { return 0; }
   try {
-    return readSync(fd, buf, 0, buf.length, Number(addr));
+    const { bytesRead } = await fh.read(buf, 0, buf.length, Number(addr));
+    return bytesRead;
   } catch {
     return 0;
   } finally {
-    closeSync(fd);
+    try { await fh.close(); } catch {}
   }
 }
 
-function procReadFd(fd: number, addr: bigint, buf: Uint8Array): number {
+async function procReadFh(fh: FileHandle, addr: bigint, buf: Uint8Array): Promise<number> {
   if (buf.length === 0) return 0;
   try {
-    return readSync(fd, buf, 0, buf.length, Number(addr));
+    const { bytesRead } = await fh.read(buf, 0, buf.length, Number(addr));
+    return bytesRead;
   } catch {
     return 0;
   }
 }
 
-function procWrite(pid: number, addr: bigint, buf: Uint8Array): number {
+async function procWrite(pid: number, addr: bigint, buf: Uint8Array): Promise<number> {
   if (buf.length === 0) return 0;
-  let fd: number;
-  try { fd = openSync(`/proc/${pid}/mem`, "r+"); }
+  let fh: FileHandle;
+  try { fh = await fsp.open(`/proc/${pid}/mem`, "r+"); }
   catch { return 0; }
   try {
-    return writeSync(fd, buf, 0, buf.length, Number(addr));
+    const { bytesWritten } = await fh.write(buf, 0, buf.length, Number(addr));
+    return bytesWritten;
   } catch {
     return 0;
   } finally {
-    closeSync(fd);
+    try { await fh.close(); } catch {}
   }
 }
 
-function procWriteFd(fd: number, addr: bigint, buf: Uint8Array): number {
+async function procWriteFh(fh: FileHandle, addr: bigint, buf: Uint8Array): Promise<number> {
   if (buf.length === 0) return 0;
   try {
-    return writeSync(fd, buf, 0, buf.length, Number(addr));
+    const { bytesWritten } = await fh.write(buf, 0, buf.length, Number(addr));
+    return bytesWritten;
   } catch {
     return 0;
   }
@@ -123,10 +129,10 @@ function procWriteFd(fd: number, addr: bigint, buf: Uint8Array): number {
 
 // Read AT_PAGESZ from /proc/self/auxv
 let cachedPageSize = 0;
-function getPageSize(): number {
+async function getPageSize(): Promise<number> {
   if (cachedPageSize > 0) return cachedPageSize;
   try {
-    const buf = readFileSync("/proc/self/auxv");
+    const buf = await fsp.readFile("/proc/self/auxv");
     const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     const is64 = process.arch === "x64" || process.arch === "arm64";
     const entrySize = is64 ? 16 : 8;
@@ -173,82 +179,89 @@ function findInBuffer(buf: Uint8Array, len: number, pat: (number | null)[]): num
 
 // ── NAPI-compatible exports ──────────────────────────────────────────
 
-export function memory_isValid(pid: number): boolean {
-  return pid > 0 && existsSync(`/proc/${pid}`);
+export async function memory_isValid(pid: number): Promise<boolean> {
+  if (pid <= 0) return false;
+  try {
+    await fsp.access(`/proc/${pid}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function memory_getRegion(pid: number, address: bigint): RegionInfo {
-  const regions = parseMaps(pid);
+export async function memory_getRegion(pid: number, address: bigint): Promise<RegionInfo> {
+  const regions = await parseMaps(pid);
   for (const r of regions) {
     if (address >= r.start && address < r.stop) return r;
   }
   return emptyRegion();
 }
 
-export function memory_getRegions(pid: number, start?: bigint, stop?: bigint): RegionInfo[] {
+export async function memory_getRegions(pid: number, start?: bigint, stop?: bigint): Promise<RegionInfo[]> {
   const startAddr = start ?? 0n;
   const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
-  return parseMaps(pid).filter(r => r.stop > startAddr && r.start < stopAddr);
+  const regions = await parseMaps(pid);
+  return regions.filter(r => r.stop > startAddr && r.start < stopAddr);
 }
 
-export function memory_setAccess(_pid: number, _regionStart: bigint, _readable: boolean, _writable: boolean, _executable: boolean): boolean {
+export async function memory_setAccess(_pid: number, _regionStart: bigint, _readable: boolean, _writable: boolean, _executable: boolean): Promise<boolean> {
   return false;
 }
 
-export function memory_setAccessFlags(_pid: number, _regionStart: bigint, _flags: number): boolean {
+export async function memory_setAccessFlags(_pid: number, _regionStart: bigint, _flags: number): Promise<boolean> {
   return false;
 }
 
-export function memory_getPtrSize(pid: number): number {
-  if (!memory_isValid(pid)) return 0;
+export async function memory_getPtrSize(pid: number): Promise<number> {
+  if (!(await memory_isValid(pid))) return 0;
   try {
-    const fd = openSync(`/proc/${pid}/exe`, "r");
+    const fh = await fsp.open(`/proc/${pid}/exe`, "r");
     try {
       const hdr = Buffer.alloc(5);
-      readSync(fd, hdr, 0, 5, 0);
+      await fh.read(hdr, 0, 5, 0);
       if (hdr[0] === 0x7F && hdr[1] === 0x45 && hdr[2] === 0x4C && hdr[3] === 0x46) {
         return hdr[4] === 2 ? 8 : 4;
       }
     } finally {
-      closeSync(fd);
+      try { await fh.close(); } catch {}
     }
   } catch {}
   return process.arch === "x64" || process.arch === "arm64" ? 8 : 4;
 }
 
-export function memory_getMinAddress(pid: number): bigint {
-  const regions = parseMaps(pid);
+export async function memory_getMinAddress(pid: number): Promise<bigint> {
+  const regions = await parseMaps(pid);
   return regions.length > 0 ? regions[0].start : 0n;
 }
 
-export function memory_getMaxAddress(pid: number): bigint {
-  const regions = parseMaps(pid);
+export async function memory_getMaxAddress(pid: number): Promise<bigint> {
+  const regions = await parseMaps(pid);
   return regions.length > 0 ? regions[regions.length - 1].stop : 0n;
 }
 
-export function memory_getPageSize(_pid: number): number {
+export async function memory_getPageSize(_pid: number): Promise<number> {
   return getPageSize();
 }
 
-export function memory_readData(pid: number, address: bigint, length: number, flags?: number): Buffer | null {
+export async function memory_readData(pid: number, address: bigint, length: number, flags?: number): Promise<Buffer | null> {
   const len = length | 0;
   if (len <= 0) return null;
   const f = flags === undefined ? FLAG_DEFAULT : flags;
 
   if (f === FLAG_DEFAULT) {
     const buf = new Uint8Array(len);
-    const got = procRead(pid, address, buf);
+    const got = await procRead(pid, address, buf);
     return got > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
   }
 
   // FLAG_SKIP_ERRORS / FLAG_AUTO_ACCESS (auto_access degrades to skip on Linux)
-  let fd: number;
-  try { fd = openSync(`/proc/${pid}/mem`, "r"); }
+  let fh: FileHandle;
+  try { fh = await fsp.open(`/proc/${pid}/mem`, "r"); }
   catch { return null; }
   try {
     const buf = new Uint8Array(len);
     const stop = address + BigInt(len);
-    const regions = parseMaps(pid);
+    const regions = await parseMaps(pid);
     let bytes = 0;
     let a = address;
     let idx = 0;
@@ -267,7 +280,7 @@ export function memory_readData(pid: number, address: bigint, length: number, fl
       const offset = Number(a - address);
       if (region.readable) {
         const slice = new Uint8Array(regionLen);
-        const n = procReadFd(fd, a, slice);
+        const n = await procReadFh(fh, a, slice);
         if (n > 0) buf.set(slice.subarray(0, n), offset);
       }
       bytes += regionLen;
@@ -277,11 +290,11 @@ export function memory_readData(pid: number, address: bigint, length: number, fl
     bytes += Number(stop > a ? stop - a : 0n);
     return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
   } finally {
-    closeSync(fd);
+    try { await fh.close(); } catch {}
   }
 }
 
-export function memory_writeData(pid: number, address: bigint, data: Buffer | Uint8Array, flags?: number): number {
+export async function memory_writeData(pid: number, address: bigint, data: Buffer | Uint8Array, flags?: number): Promise<number> {
   const f = flags === undefined ? FLAG_DEFAULT : flags;
   const buf: Uint8Array = data;
   const len = buf.length;
@@ -289,12 +302,12 @@ export function memory_writeData(pid: number, address: bigint, data: Buffer | Ui
 
   if (f === FLAG_DEFAULT) return procWrite(pid, address, buf);
 
-  let fd: number;
-  try { fd = openSync(`/proc/${pid}/mem`, "r+"); }
+  let fh: FileHandle;
+  try { fh = await fsp.open(`/proc/${pid}/mem`, "r+"); }
   catch { return 0; }
   try {
     const stop = address + BigInt(len);
-    const regions = parseMaps(pid);
+    const regions = await parseMaps(pid);
     let bytes = 0;
     let a = address;
     for (const region of regions) {
@@ -310,7 +323,7 @@ export function memory_writeData(pid: number, address: bigint, data: Buffer | Ui
       const regionLen = Number(end - a);
       const offset = Number(a - address);
       if (region.writable) {
-        procWriteFd(fd, a, buf.subarray(offset, offset + regionLen));
+        await procWriteFh(fh, a, buf.subarray(offset, offset + regionLen));
       }
       bytes += regionLen;
       a = end;
@@ -318,15 +331,15 @@ export function memory_writeData(pid: number, address: bigint, data: Buffer | Ui
     bytes += Number(stop > a ? stop - a : 0n);
     return bytes;
   } finally {
-    closeSync(fd);
+    try { await fh.close(); } catch {}
   }
 }
 
-export function memory_find(
+export async function memory_find(
   pid: number, pattern: string,
   start?: bigint, stop?: bigint,
   limit?: number, _flags?: string,
-): bigint[] {
+): Promise<bigint[]> {
   const startAddr = start ?? 0n;
   const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
   const max = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
@@ -334,11 +347,11 @@ export function memory_find(
   const out: bigint[] = [];
   if (pat.length === 0) return out;
 
-  const regions = parseMaps(pid);
+  const regions = await parseMaps(pid);
   const CHUNK_CAP = 256 * 1024 * 1024;
 
-  let fd: number;
-  try { fd = openSync(`/proc/${pid}/mem`, "r"); }
+  let fh: FileHandle;
+  try { fh = await fsp.open(`/proc/${pid}/mem`, "r"); }
   catch { return out; }
   try {
     for (const region of regions) {
@@ -350,7 +363,7 @@ export function memory_find(
       const readSize = Number(readEnd - readStart);
       if (readSize <= 0 || readSize > CHUNK_CAP) continue;
       const buf = new Uint8Array(readSize);
-      const got = procReadFd(fd, readStart, buf);
+      const got = await procReadFh(fh, readStart, buf);
       if (got <= 0) continue;
       const hits = findInBuffer(buf, got, pat);
       for (const off of hits) {
@@ -359,11 +372,11 @@ export function memory_find(
       }
     }
   } finally {
-    closeSync(fd);
+    try { await fh.close(); } catch {}
   }
   return out;
 }
 
-export function memory_bufferAddress(_buf: Buffer): bigint {
+export async function memory_bufferAddress(_buf: Buffer): Promise<bigint> {
   throw new Error("memory_bufferAddress: not supported in nolib backend (requires native pointer access)");
 }
