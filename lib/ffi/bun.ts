@@ -102,7 +102,9 @@ const _cstrCache = new Map<string, Uint8Array>();
  * helper normalises the Pointer union returned by F.ptr().
  */
 export function bp(view: ArrayBufferView): bigint {
-  const p = _ffi!.ptr(view);
+  const F = getBunFFI();
+  if (!F) throw new Error("bun:ffi not available");
+  const p = F.ptr(view);
   return typeof p === "bigint" ? p : BigInt(p as number);
 }
 
