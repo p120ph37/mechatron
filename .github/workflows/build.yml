@@ -193,13 +193,19 @@ jobs:
           if (exFiles.length > 0) {
             const allOk = {};  // column -> Set<fn>
             const allEx = {};  // column -> Set<fn>
+            const allSkippedCols = new Set();
+            const testedCols = new Set();
             for (const ef of exFiles) {
               const col = ef.platform + "-" + ef.backend;
+              testedCols.add(col);
               if (!allOk[col]) allOk[col] = new Set();
               if (!allEx[col]) allEx[col] = new Set();
               for (const fn of ef.okCells || []) allOk[col].add(fn);
               for (const fn of ef.exercised || []) allEx[col].add(fn);
+              for (const sc of ef.skippedColumns || []) allSkippedCols.add(sc);
             }
+            // Skipped columns that were never tested by any run
+            const untestedCols = [...allSkippedCols].filter(c => !testedCols.has(c)).sort();
             const gaps = [];
             for (const [col, okSet] of Object.entries(allOk)) {
               const exSet = allEx[col] || new Set();
@@ -207,12 +213,21 @@ jobs:
                 if (!exSet.has(fn)) gaps.push({ col, fn });
               }
             }
-            if (gaps.length > 0) {
-              allPassed = false;
-              comment += `<details>\n<summary>:warning: <b>Matrix cross-check</b> — ${gaps.length} ok cell(s) not exercised</summary>\n\n`;
-              comment += `| Function | Column |\n|----------|--------|\n`;
-              for (const g of gaps.sort((a, b) => a.fn.localeCompare(b.fn) || a.col.localeCompare(b.col))) {
-                comment += `| ${g.fn} | ${g.col} |\n`;
+            if (gaps.length > 0 || untestedCols.length > 0) {
+              if (gaps.length > 0) allPassed = false;
+              comment += `<details>\n<summary>:warning: <b>Matrix cross-check</b>`;
+              if (gaps.length > 0) comment += ` — ${gaps.length} ok cell(s) not exercised`;
+              if (untestedCols.length > 0) comment += ` — ${untestedCols.length} column(s) untested`;
+              comment += `</summary>\n\n`;
+              if (gaps.length > 0) {
+                comment += `| Function | Column |\n|----------|--------|\n`;
+                for (const g of gaps.sort((a, b) => a.fn.localeCompare(b.fn) || a.col.localeCompare(b.col))) {
+                  comment += `| ${g.fn} | ${g.col} |\n`;
+                }
+              }
+              if (untestedCols.length > 0) {
+                comment += `\n**Untested columns** (no backend available in any run):\n`;
+                for (const c of untestedCols) comment += `- \`${c}\`\n`;
               }
               comment += `\n</details>\n\n`;
             } else {

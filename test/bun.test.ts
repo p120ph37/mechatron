@@ -148,6 +148,8 @@ describe(`mechatron [${backend}]`, () => {
     const unexercised = okCells.filter((fn: string) => !exercisedFunctions.has(fn));
     log(`\nMatrix cross-check: ${exercisedFunctions.size}/${okCells.length} ok cells exercised.`);
     if (unexercised.length > 0) log(` Missing: ${unexercised.join(", ")}`);
+    const skippedCols: string[] = compatMatrix.getSkippedColumns();
+    if (skippedCols.length > 0) log(` Skipped columns (no backend): ${skippedCols.join(", ")}`);
     log("\n");
 
     const outDir = process.env.RUNNER_TEMP;
@@ -161,7 +163,8 @@ describe(`mechatron [${backend}]`, () => {
       fs.writeFileSync(
         path.join(exDir, fname),
         JSON.stringify({ platform: process.platform, arch: process.arch,
-          backend, exercised: [...exercisedFunctions], okCells }) + "\n",
+          backend, exercised: [...exercisedFunctions], okCells,
+          skippedColumns: skippedCols }) + "\n",
       );
     }
   });

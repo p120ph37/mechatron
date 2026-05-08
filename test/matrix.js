@@ -151,6 +151,31 @@ module.exports = {
 				}
 				return cells;
 			},
+
+			getSkippedColumns: function () {
+				if (!matrix) return [];
+				var skipped = [];
+				var subsystems = Object.keys(matrix);
+				for (var s = 0; s < subsystems.length; s++) {
+					var sub = subsystems[s];
+					var column = columnForSubsystem(mechatron, sub);
+					if (column) continue;
+					var firstFn = Object.keys(matrix[sub])[0];
+					if (!firstFn) continue;
+					var matrixColumns = Object.keys(matrix[sub][firstFn]);
+					var platformPrefix = process.platform + "-";
+					for (var c = 0; c < matrixColumns.length; c++) {
+						if (matrixColumns[c].indexOf(platformPrefix) === 0) {
+							skipped.push(matrixColumns[c]);
+						}
+					}
+				}
+				var unique = [];
+				for (var i = 0; i < skipped.length; i++) {
+					if (unique.indexOf(skipped[i]) === -1) unique.push(skipped[i]);
+				}
+				return unique;
+			},
 		};
 	},
 };
