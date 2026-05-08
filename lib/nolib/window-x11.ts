@@ -321,7 +321,17 @@ export async function window_setTitle(handle: bigint, title: string): Promise<vo
   const c = await getXConnection();
   if (!c) return;
   const data = Buffer.from(title, "utf8");
+  // WM_NAME (legacy ICCCM): latin-1 STRING property.
   c.changeProperty({ window: h, property: 39 /* WM_NAME */, type: 31 /* STRING */, format: 8, mode: 0, data });
+  // _NET_WM_NAME (EWMH): UTF-8 string. window_getTitle reads this first,
+  // so modern apps that publish their own _NET_WM_NAME at startup would
+  // otherwise mask our WM_NAME change. Set both to keep the round-trip
+  // consistent.
+  const nameAtom = await c.internAtom("_NET_WM_NAME", false);
+  const utf8Type = await c.internAtom("UTF8_STRING", false);
+  if (nameAtom !== 0 && utf8Type !== 0) {
+    c.changeProperty({ window: h, property: nameAtom, type: utf8Type, format: 8, mode: 0, data });
+  }
 }
 
 export async function window_getBounds(handle: bigint): Promise<{ x: number; y: number; w: number; h: number }> {
