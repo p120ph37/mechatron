@@ -112,6 +112,8 @@ function zpixmapToArgb(src: Buffer, w: number, h: number): Uint32Array {
   return pixels;
 }
 
+export { zpixmapToArgb as _zpixmapToArgbForTests };
+
 export function _resetXprotoForTests(): void {
   _resetXConnForTests();
   _xtestChecked = false;

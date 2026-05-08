@@ -277,6 +277,9 @@ export function getBackend(subsystem: Subsystem): string | null {
   return _backend[subsystem] || null;
 }
 
+export { parseEntries as _parseEntriesForTests };
+export { defaultOrder as _defaultOrderForTests };
+
 /** Force-clear cached backend for a subsystem (for testing). */
 export function _resetBackend(subsystem: Subsystem): void {
   delete _cache[subsystem];

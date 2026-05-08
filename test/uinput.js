@@ -196,6 +196,54 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(synOnly.readUInt16LE(16) === ui.EV_SYN, "lone SYN type");
 		assert(synOnly.readUInt16LE(18) === ui.SYN_REPORT, "lone SYN code");
 
+		// ── makeInject* factory functions ────────────────────────────────
+		// These are higher-order functions that return injectors.  Test with
+		// a mock emitter to verify event construction without /dev/uinput.
+		var emittedEvents = null;
+		function mockEmit(events) { emittedEvents = events; return true; }
+
+		// makeInjectKeysym
+		var injectKeysym = ui.makeInjectKeysym(mockEmit);
+		assert(typeof injectKeysym === "function", "makeInjectKeysym returns function");
+		assert(injectKeysym(0x0061, true) === true, "inject keysym 'a' press");
+		assert(emittedEvents.length === 1, "keysym emits 1 event");
+		assert(emittedEvents[0].type === ui.EV_KEY, "keysym event type");
+		assert(emittedEvents[0].value === 1, "keysym press value=1");
+		assert(injectKeysym(0x0061, false) === true, "inject keysym 'a' release");
+		assert(emittedEvents[0].value === 0, "keysym release value=0");
+		assert(injectKeysym(0, true) === false, "inject unknown keysym returns false");
+
+		// makeInjectMouseButton
+		var injectBtn = ui.makeInjectMouseButton(mockEmit);
+		assert(typeof injectBtn === "function", "makeInjectMouseButton returns function");
+		var mc = require(IS_BUN ? "../lib/mouse/constants" : "../dist/mouse/constants");
+		assert(injectBtn(mc.BUTTON_LEFT, true) === true, "inject LEFT press");
+		assert(emittedEvents[0].code === mc.BTN_LEFT, "inject LEFT uses BTN_LEFT");
+		assert(injectBtn(99, true) === false, "inject unknown button returns false");
+
+		// makeInjectScroll
+		var injectScrollV = ui.makeInjectScroll(mockEmit, ui.REL_WHEEL);
+		assert(typeof injectScrollV === "function", "makeInjectScroll returns function");
+		assert(injectScrollV(3) === true, "scroll 3");
+		assert(emittedEvents[0].code === ui.REL_WHEEL, "scroll axis");
+		assert(emittedEvents[0].value === 3, "scroll value");
+		assert(injectScrollV(0) === true, "scroll 0 is no-op true");
+
+		// makeInjectRelMotion
+		var injectRel = ui.makeInjectRelMotion(mockEmit);
+		assert(typeof injectRel === "function", "makeInjectRelMotion returns function");
+		assert(injectRel(10, -5) === true, "inject rel motion");
+		assert(emittedEvents.length === 2, "rel motion emits 2 events");
+		assert(injectRel(0, 0) === true, "rel motion (0,0) is no-op true");
+
+		// makeInjectAbsMotion
+		var injectAbs = ui.makeInjectAbsMotion(mockEmit);
+		assert(typeof injectAbs === "function", "makeInjectAbsMotion returns function");
+		assert(injectAbs(100, 200) === true, "inject abs motion");
+		assert(emittedEvents.length === 2, "abs motion emits 2 events");
+		assert(emittedEvents[0].code === ui.ABS_X, "abs motion X code");
+		assert(emittedEvents[1].code === ui.ABS_Y, "abs motion Y code");
+
 		log("OK\n");
 		return true;
 	}

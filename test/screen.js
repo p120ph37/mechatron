@@ -18,6 +18,81 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	return [
 
+		// --- Screen pure class tests (no backend) ---
+		{
+			name: "Screen class pure methods",
+			functions: [], unit: true,
+			test: async function () {
+				// Default constructor — no backend needed
+				var s = new Screen();
+				assert(s.getBounds() instanceof Bounds, "default getBounds");
+				assert(s.getUsable() instanceof Bounds, "default getUsable");
+				assert(s.getBounds().isZero(), "default bounds is zero");
+				assert(s.getUsable().isZero(), "default usable is zero");
+
+				// Bounds+usable constructor
+				var b = new Bounds(0, 0, 1920, 1080);
+				var u = new Bounds(0, 48, 1920, 1032);
+				var s2 = new Screen(b, u);
+				assert(s2.getBounds().eq(b), "custom bounds");
+				assert(s2.getUsable().eq(u), "custom usable");
+
+				// isLandscape / isPortrait
+				assert(s2.isLandscape() === true, "1920x1080 is landscape");
+				assert(s2.isPortrait() === false, "1920x1080 not portrait");
+
+				var tall = new Screen(new Bounds(0, 0, 1080, 1920), new Bounds());
+				assert(tall.isPortrait() === true, "1080x1920 is portrait");
+				assert(tall.isLandscape() === false, "1080x1920 not landscape");
+
+				var sq = new Screen(new Bounds(0, 0, 500, 500), new Bounds());
+				assert(sq.isPortrait() === false, "square not portrait");
+				assert(sq.isLandscape() === false, "square not landscape");
+
+				// clone
+				var cl = s2.clone();
+				assert(cl.getBounds().eq(s2.getBounds()), "clone bounds eq");
+				assert(cl.getUsable().eq(s2.getUsable()), "clone usable eq");
+
+				// copy constructor
+				var cp = new Screen(s2);
+				assert(cp.getBounds().eq(s2.getBounds()), "copy ctor bounds eq");
+
+				// Static: empty state
+				assert(Screen.getList().length >= 0, "getList array");
+				assert(typeof Screen.isCompositing() === "boolean", "isCompositing bool");
+				Screen.setCompositing(false);
+				assert(Screen.isCompositing() === true, "setCompositing is no-op");
+
+				var tb = Screen.getTotalBounds();
+				assert(tb instanceof Bounds, "getTotalBounds returns Bounds");
+				var tu = Screen.getTotalUsable();
+				assert(tu instanceof Bounds, "getTotalUsable returns Bounds");
+
+				// getScreen with coordinates (returns null when no screens loaded)
+				var found = Screen.getScreen(100, 200);
+				assert(found === null || found instanceof Screen, "getScreen(x,y) type");
+				var Point = mechatron.Point;
+				var found2 = Screen.getScreen(new Point(50, 50));
+				assert(found2 === null || found2 instanceof Screen, "getScreen(Point) type");
+				var found3 = Screen.getScreen({ x: 10, y: 20 });
+				assert(found3 === null || found3 instanceof Screen, "getScreen({x,y}) type");
+
+				// getScreen with window-like object (async path)
+				var mockWin = {
+					isValid: function() { return Promise.resolve(true); },
+					getBounds: function() { return Promise.resolve({ x: 0, y: 0, w: 100, h: 100 }); },
+					getHandle: function() { return 0; }
+				};
+				var foundWin = await Screen.getScreen(mockWin);
+				assert(foundWin === null || foundWin instanceof Screen, "getScreen(window) type");
+
+				// getMain
+				var main = Screen.getMain();
+				assert(main === null || main instanceof Screen, "getMain type");
+			}
+		},
+
 		// --- Screen class construction / clone ---
 		{
 			name: "Screen construction and clone",

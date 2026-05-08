@@ -22,7 +22,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile SPACE",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("{SPACE}");
 				assert(list.length === 2, "compile SPACE length");
@@ -35,7 +36,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile TAB+ESC",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("{TAB}{ESCAPE}");
 				assert(list.length === 4, "compile TAB+ESC length");
@@ -44,7 +46,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile F1-F12",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("{F1}{F2}{F3}{F4}{F5}{F6}{F7}{F8}{F9}{F10}{F11}{F12}");
 				assert(list.length === 24, "compile F1-F12 length");
@@ -53,7 +56,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile modifiers",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("{SHIFT}{CONTROL}{ALT}");
 				assert(list.length === 6, "compile modifiers length");
@@ -62,7 +66,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile SPACE repetition",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("{SPACE 3}");
 				assert(list.length === 6, "compile SPACE x3 length");
@@ -71,7 +76,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile plain characters",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("abc");
 				assert(list.length === 6, "compile 'abc' length");
@@ -80,7 +86,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile modifier prefix +a",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("+a");
 				assert(list.length >= 4, "compile +a has shift down+up + a down+up");
@@ -90,7 +97,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile modifier group +(ab)",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("+(ab)");
 				assert(list !== null, "compile +(ab) not null");
@@ -100,7 +108,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile error cases",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				assert(Keyboard.compile("}").length === 0, "compile unmatched } empty");
 				assert(Keyboard.compile("{").length === 0, "compile unmatched { empty");
@@ -112,7 +121,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile whitespace",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("\t\n");
 				assert(list !== null && list.length === 0, "compile whitespace empty");
@@ -121,10 +131,44 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "compile repetition zero",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var list = Keyboard.compile("{SPACE 0}");
 				assert(list !== null && list.length === 0, "compile SPACE x0 empty");
+			},
+		},
+
+		{
+			name: "compile edge cases",
+			functions: [],
+			unit: true,
+			test: async function () {
+				// token overflow (> 16 chars)
+				assert(Keyboard.compile("{ABCDEFGHIJKLMNOPQ}").length === 0, "token overflow");
+				// count overflow (> 4 digits)
+				assert(Keyboard.compile("{SPACE 12345}").length === 0, "count overflow");
+				// negative count
+				assert(Keyboard.compile("{SPACE -1}").length === 0, "negative count");
+				// count > 99
+				assert(Keyboard.compile("{SPACE 100}").length === 0, "count > 99");
+				// NaN count
+				assert(Keyboard.compile("{SPACE abc}").length === 0, "NaN count");
+				// duplicate modifier
+				assert(Keyboard.compile("++a").length === 0, "duplicate modifier");
+				// group nesting overflow (> 4 levels)
+				assert(Keyboard.compile("(((((a)))))").length === 0, "group overflow");
+				// all four modifier prefixes
+				var list = Keyboard.compile("%a");
+				assert(list.length >= 4, "alt modifier prefix");
+				list = Keyboard.compile("^a");
+				assert(list.length >= 4, "control modifier prefix");
+				list = Keyboard.compile("$a");
+				assert(list.length >= 4, "system modifier prefix");
+				// plain unknown character
+				assert(Keyboard.compile("\x01").length === 0, "unknown char");
+				// empty string
+				assert(Keyboard.compile("").length === 0, "empty string");
 			},
 		},
 
@@ -132,7 +176,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "KEYS record",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				assert(typeof KEYS === "object", "KEYS is object");
 				assert(typeof KEYS.KEY_SPACE === "number", "KEY_SPACE is number");
@@ -147,7 +192,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
 		{
 			name: "getAllKeys and getKeyNames",
-			functions: ["keyboard_ctor"],
+			functions: [],
+			unit: true,
 			test: async function () {
 				var allKeys = mechatron.getAllKeys();
 				assert(allKeys.length > 0, "getAllKeys non-empty");

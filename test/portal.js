@@ -544,8 +544,65 @@ function testDbusWire() {
 		return true;
 	}
 
+	function testInstallerCoverage() {
+		log("  installer coverage... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+
+		// Re-load installer with a temp TOKENS_FILE so bun's coverage
+		// tracker sees it in require.cache at exit time (the earlier
+		// testTokens test deletes it from cache, losing coverage).
+		var tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mechatron-inst-"));
+		var tokensFile = path.join(tmpDir, "tokens");
+		process.env.MECHATRON_TOKENS_FILE = tokensFile;
+		var modPath = require.resolve("../lib/gext/installer");
+		delete require.cache[modPath];
+		var inst = require("../lib/gext/installer");
+		assert(inst.TOKENS_FILE === tokensFile, "TOKENS_FILE env picked up");
+
+		// generateToken → uuidv4: pure, no file I/O
+		var t = inst.generateToken();
+		assert(typeof t === "string" && t.length === 36, "generateToken UUID length");
+		assert(/^[0-9a-f]{8}-/.test(t), "generateToken UUID format");
+
+		// getInstalledTokens: no file yet → []
+		assert(inst.getInstalledTokens().length === 0, "no tokens initially");
+
+		// installToken creates dir + file
+		inst.installToken(t);
+		assert(fs.existsSync(tokensFile), "tokens file created");
+		var listed = inst.getInstalledTokens();
+		assert(listed.length === 1 && listed[0] === t, "1 token after install");
+
+		// revokeToken: success case
+		assert(inst.revokeToken(t) === true, "revokeToken success");
+		assert(inst.getInstalledTokens().length === 0, "0 tokens after revoke");
+
+		// revokeToken: missing token
+		assert(inst.revokeToken("not-a-token") === false, "revokeToken false for missing");
+
+		// provisionToken: generates + installs
+		var p = inst.provisionToken();
+		assert(/^[0-9a-f-]{36}$/.test(p), "provisionToken UUID");
+		assert(inst.getInstalledTokens().indexOf(p) !== -1, "provisioned in file");
+
+		// isExtensionInstalled / isExtensionEnabled
+		assert(typeof inst.isExtensionInstalled() === "boolean", "isExtensionInstalled boolean");
+		assert(typeof inst.isExtensionEnabled() === "boolean", "isExtensionEnabled boolean");
+
+		// Cleanup temp files but do NOT delete require.cache — leave the
+		// module in cache so bun's coverage tracker sees it at exit.
+		try { fs.unlinkSync(tokensFile); } catch(_) {}
+		try { fs.rmdirSync(tmpDir); } catch(_) {}
+		delete process.env.MECHATRON_TOKENS_FILE;
+
+		log("OK\n");
+		return true;
+	}
+
 	return [
 		{ name: "tokens", functions: [], unit: true, test: testTokens },
+		{ name: "installer coverage", functions: [], unit: true, test: testInstallerCoverage },
 		{ name: "gext token", functions: [], unit: true, test: testGextWindowAccessors },
 		{ name: "atspi avail", functions: [], unit: true, test: testAtSpiAvailability },
 		{ name: "remote-desktop", functions: [], unit: true, test: testRemoteDesktop },

@@ -652,11 +652,31 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(cp.readUInt32LE(20) === 4, "length 4 units");
 		assert(cp[24] === 1 && cp[27] === 4, "data copied");
 
+		// ChangeProperty with format=32 (exercises different length calc)
+		var cp32Data = Buffer.from([0, 0, 0, 1, 0, 0, 0, 2]);
+		var cp32 = req.encodeChangeProperty({
+			window: 0xA, property: 10, type: 20, format: 32,
+			data: cp32Data, mode: req.PROP_MODE_APPEND,
+		});
+		assert(cp32.readUInt8(1) === req.PROP_MODE_APPEND, "mode Append");
+		assert(cp32.readUInt8(16) === 32, "format 32");
+		assert(cp32.readUInt32LE(20) === 2, "length 2 (8 bytes / 4)");
+
 		// ── GetProperty ─────────────────────────────────────────────
 		var gp = req.encodeGetProperty({ window: 0xB, property: 10 });
 		assert(gp.readUInt8(0) === req.OP_GET_PROPERTY, "opcode 20");
 		assert(gp.readUInt32LE(4) === 0xB, "window");
 		assert(gp.readUInt32LE(20) === 1024, "default longLength");
+
+		// GetProperty with explicit options
+		var gpEx = req.encodeGetProperty({
+			window: 0xC, property: 20, type: 30,
+			longOffset: 5, longLength: 2048, delete: true,
+		});
+		assert(gpEx.readUInt8(1) === 1, "delete flag");
+		assert(gpEx.readUInt32LE(12) === 30, "explicit type");
+		assert(gpEx.readUInt32LE(16) === 5, "longOffset");
+		assert(gpEx.readUInt32LE(20) === 2048, "explicit longLength");
 		var gpReply = Buffer.alloc(32 + 8);
 		gpReply.writeUInt8(1, 0); gpReply.writeUInt8(32, 1);  // format 32
 		gpReply.writeUInt32LE(2, 4);          // 2 extra 4-byte units
@@ -670,6 +690,34 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(gpParsed.type === 6, "gp type");
 		assert(gpParsed.value.length === 8, "gp value 8 bytes");
 		assert(gpParsed.value.readUInt32LE(0) === 0xCAFE, "gp first val");
+
+		// GetProperty reply with format=0 (property doesn't exist)
+		var gpNone = Buffer.alloc(32);
+		gpNone.writeUInt8(1, 0);
+		gpNone.writeUInt8(0, 1);  // format 0
+		var gpNoneParsed = req.parseGetPropertyReply(gpNone);
+		assert(gpNoneParsed.format === 0, "gp format=0 (not found)");
+		assert(gpNoneParsed.value.length === 0, "gp format=0 → empty value");
+
+		// GetProperty reply with format=8 and bytesAfter
+		var gpF8 = Buffer.alloc(32 + 8);
+		gpF8.writeUInt8(1, 0); gpF8.writeUInt8(8, 1);
+		gpF8.writeUInt32LE(2, 4);           // extra length
+		gpF8.writeUInt32LE(31, 8);          // type = STRING
+		gpF8.writeUInt32LE(100, 12);        // bytes-after
+		gpF8.writeUInt32LE(5, 16);          // value-length (5 bytes)
+		gpF8.write("Hello", 32, "utf8");
+		var gpF8P = req.parseGetPropertyReply(gpF8);
+		assert(gpF8P.format === 8, "gp format=8");
+		assert(gpF8P.bytesAfter === 100, "gp bytesAfter");
+		assert(gpF8P.value.length === 5, "gp format=8 value 5 bytes");
+		assert(gpF8P.value.toString("utf8") === "Hello", "gp format=8 string");
+
+		// GetProperty reply short → throws
+		var gpShort = false;
+		try { req.parseGetPropertyReply(Buffer.alloc(16)); }
+		catch (e) { gpShort = true; }
+		assert(gpShort, "parseGetPropertyReply rejects short buffer");
 
 		// ── SendEvent ───────────────────────────────────────────────
 		var seEvent = Buffer.alloc(32);
@@ -726,6 +774,115 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(qkParsed.keys[0] === 0x42, "qk key byte 0");
 		assert(qkParsed.keys[31] === 0xFF, "qk key byte 31");
 
+		// ── CreateWindow ────────────────────────────────────────────
+		var cw2 = req.encodeCreateWindow(0x1234, 0x100, 10, 20, 640, 480);
+		assert(cw2.length === 32, "CreateWindow is 32 bytes");
+		assert(cw2.readUInt8(0) === req.OP_CREATE_WINDOW, "opcode 1");
+		assert(cw2.readUInt32LE(4) === 0x1234, "wid");
+		assert(cw2.readUInt32LE(8) === 0x100, "parent");
+		assert(cw2.readInt16LE(12) === 10, "x");
+		assert(cw2.readInt16LE(14) === 20, "y");
+		assert(cw2.readUInt16LE(16) === 640, "width");
+		assert(cw2.readUInt16LE(18) === 480, "height");
+		assert(cw2.readUInt16LE(22) === 2, "class = InputOnly");
+		assert(cw2.readUInt32LE(28) === 0, "value_mask = none");
+
+		// ── DeleteProperty ──────────────────────────────────────────
+		var dp = req.encodeDeleteProperty(0xA, 0xB);
+		assert(dp.length === 12, "DeleteProperty is 12 bytes");
+		assert(dp.readUInt8(0) === req.OP_DELETE_PROPERTY, "opcode 19");
+		assert(dp.readUInt32LE(4) === 0xA, "window");
+		assert(dp.readUInt32LE(8) === 0xB, "property atom");
+
+		// ── SetSelectionOwner ───────────────────────────────────────
+		var sso = req.encodeSetSelectionOwner(0xABC, 0xDEF, 12345);
+		assert(sso.length === 16, "SetSelectionOwner is 16 bytes");
+		assert(sso.readUInt8(0) === req.OP_SET_SELECTION_OWNER, "opcode 22");
+		assert(sso.readUInt32LE(4) === 0xABC, "owner");
+		assert(sso.readUInt32LE(8) === 0xDEF, "selection");
+		assert(sso.readUInt32LE(12) === 12345, "timestamp");
+		var ssoDefault = req.encodeSetSelectionOwner(0, 0x1);
+		assert(ssoDefault.readUInt32LE(12) === 0, "timestamp default=0");
+
+		// ── GetSelectionOwner ───────────────────────────────────────
+		var gso = req.encodeGetSelectionOwner(0x42);
+		assert(gso.length === 8, "GetSelectionOwner is 8 bytes");
+		assert(gso.readUInt8(0) === req.OP_GET_SELECTION_OWNER, "opcode 23");
+		assert(gso.readUInt32LE(4) === 0x42, "selection atom");
+
+		var gsoReply = Buffer.alloc(32);
+		gsoReply.writeUInt8(1, 0);
+		gsoReply.writeUInt32LE(0xBEEF, 8);
+		var gsoParsed = req.parseGetSelectionOwnerReply(gsoReply);
+		assert(gsoParsed.owner === 0xBEEF, "owner window id");
+
+		// None case
+		var gsoNone = Buffer.alloc(32);
+		gsoNone.writeUInt8(1, 0);
+		assert(req.parseGetSelectionOwnerReply(gsoNone).owner === 0, "owner=None=0");
+
+		// ── ConvertSelection ────────────────────────────────────────
+		var cs = req.encodeConvertSelection(0xA, 0xB, 0xC, 0xD, 999);
+		assert(cs.length === 24, "ConvertSelection is 24 bytes");
+		assert(cs.readUInt8(0) === req.OP_CONVERT_SELECTION, "opcode 24");
+		assert(cs.readUInt32LE(4) === 0xA, "requestor");
+		assert(cs.readUInt32LE(8) === 0xB, "selection");
+		assert(cs.readUInt32LE(12) === 0xC, "target");
+		assert(cs.readUInt32LE(16) === 0xD, "property");
+		assert(cs.readUInt32LE(20) === 999, "timestamp");
+		var csDefault = req.encodeConvertSelection(0, 0, 0, 0);
+		assert(csDefault.readUInt32LE(20) === 0, "timestamp default=0");
+
+		// ── parseSelectionRequestEvent ───────────────────────────────
+		var srBuf = Buffer.alloc(32);
+		srBuf.writeUInt8(req.EVENT_SELECTION_REQUEST, 0);
+		srBuf.writeUInt32LE(1000, 4);       // time
+		srBuf.writeUInt32LE(0x100, 8);      // owner
+		srBuf.writeUInt32LE(0x200, 12);     // requestor
+		srBuf.writeUInt32LE(0x300, 16);     // selection
+		srBuf.writeUInt32LE(0x400, 20);     // target
+		srBuf.writeUInt32LE(0x500, 24);     // property
+		var srParsed = req.parseSelectionRequestEvent(srBuf);
+		assert(srParsed.time === 1000, "selReq time");
+		assert(srParsed.owner === 0x100, "selReq owner");
+		assert(srParsed.requestor === 0x200, "selReq requestor");
+		assert(srParsed.selection === 0x300, "selReq selection");
+		assert(srParsed.target === 0x400, "selReq target");
+		assert(srParsed.property === 0x500, "selReq property");
+
+		// ── parseSelectionNotifyEvent ────────────────────────────────
+		var snBuf = Buffer.alloc(32);
+		snBuf.writeUInt8(req.EVENT_SELECTION_NOTIFY, 0);
+		snBuf.writeUInt32LE(2000, 4);       // time
+		snBuf.writeUInt32LE(0x200, 8);      // requestor
+		snBuf.writeUInt32LE(0x300, 12);     // selection
+		snBuf.writeUInt32LE(0x400, 16);     // target
+		snBuf.writeUInt32LE(0x500, 20);     // property
+		var snParsed = req.parseSelectionNotifyEvent(snBuf);
+		assert(snParsed.time === 2000, "selNotify time");
+		assert(snParsed.requestor === 0x200, "selNotify requestor");
+		assert(snParsed.selection === 0x300, "selNotify selection");
+		assert(snParsed.target === 0x400, "selNotify target");
+		assert(snParsed.property === 0x500, "selNotify property");
+
+		// property=0 means conversion failed (None)
+		var snNone = Buffer.alloc(32);
+		snNone.writeUInt8(req.EVENT_SELECTION_NOTIFY, 0);
+		assert(req.parseSelectionNotifyEvent(snNone).property === 0, "selNotify property=None");
+
+		// ── parseConnectionSetupReply: authenticate ─────────────────
+		var authReason = "Need better auth";
+		var authReasonPad = (authReason.length + 3) & ~3;
+		var authBuf = Buffer.alloc(8 + authReasonPad);
+		authBuf.writeUInt8(2, 0);                    // Authenticate
+		authBuf.writeUInt16LE(11, 2);
+		authBuf.writeUInt16LE(0, 4);
+		authBuf.writeUInt16LE(authReasonPad / 4, 6);
+		authBuf.write(authReason, 8, "utf8");
+		var authReply = wire.parseConnectionSetupReply(authBuf);
+		assert(authReply.kind === "authenticate", "authenticate reply kind");
+		assert(authReply.reason === authReason, "authenticate reason string");
+
 		// ── Mechanism registry: xproto present and probed correctly ──
 		// xproto is in the registry on all platforms (probed via $DISPLAY).
 		if (mechatron.isAvailable("keyboard")) {
@@ -745,5 +902,49 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 	return [
 		{ name: "xproto", functions: [], unit: true, test: testXproto },
+		{
+			name: "xproto zpixmapToArgb + reset",
+			functions: [], unit: true,
+			test: function () {
+				var IS_BUN = typeof globalThis.Bun !== "undefined";
+				if (!IS_BUN) return true;
+				var xproto = require("../lib/x11proto/xproto");
+
+				// zpixmapToArgb: converts ZPixmap BGR0 to ARGB with alpha=0xFF
+				var src = Buffer.alloc(8); // 2 pixels
+				src.writeUInt32LE(0x00FF8040, 0); // B=40, G=80, R=FF, pad=00
+				src.writeUInt32LE(0x00112233, 4);
+				var pixels = xproto._zpixmapToArgbForTests(src, 2, 1);
+				assert(pixels.length === 2, "zpixmap 2 pixels");
+				assert((pixels[0] & 0xFF000000) >>> 0 === 0xFF000000, "pixel 0 alpha=FF");
+				assert((pixels[0] & 0x00FFFFFF) === 0x00FF8040, "pixel 0 RGB preserved");
+				assert((pixels[1] & 0xFF000000) >>> 0 === 0xFF000000, "pixel 1 alpha=FF");
+
+				// empty image
+				var empty = xproto._zpixmapToArgbForTests(Buffer.alloc(0), 0, 0);
+				assert(empty.length === 0, "zpixmap empty");
+
+				// _resetXprotoForTests: safe to call without a connection
+				xproto._resetXprotoForTests();
+			}
+		},
+		{
+			name: "xconn lifecycle helpers",
+			functions: [], unit: true,
+			test: function () {
+				var IS_BUN = typeof globalThis.Bun !== "undefined";
+				if (!IS_BUN) return true;
+				var xconn = require("../lib/x11proto/xconn");
+				// getXConnectionSync returns null when no connection opened
+				assert(xconn.getXConnectionSync() === null, "getXConnectionSync null initially");
+				assert(xconn.xconnOpenReason() === null, "xconnOpenReason null initially");
+				// closeXConnection is safe to call without a connection
+				xconn.closeXConnection();
+				assert(xconn.getXConnectionSync() === null, "still null after close");
+				// _resetXConnForTests clears reason and connection
+				xconn._resetXConnForTests();
+				assert(xconn.xconnOpenReason() === null, "reason null after reset");
+			}
+		},
 	];
 };
