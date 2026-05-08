@@ -217,6 +217,28 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
+# ── Linux-only: FFI + nolib[x11] window + screen (xproto path) ──
+# Exercises lib/nolib/window-x11.ts and lib/nolib/screen-x11.ts which
+# have no other CI cell: the portal and gext runs use their own variant,
+# and the nolib[x11] input cell above only overrides keyboard+mouse.
+if [ "$RUNNER_OS" = "Linux" ]; then
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-x11-winscrn.xml"
+  BE_COV_DIR="$COV_DIR/nolib-x11-winscrn"
+  mkdir -p "$BE_COV_DIR"
+  BE_RC=0
+  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND_WINDOW='nolib[x11]' \
+  MECHATRON_BACKEND_SCREEN='nolib[x11]' \
+  MECHATRON_SKIP_UNIT=1 \
+    run_bun "nolib-x11-winscrn" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
+      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
+    || BE_RC=$?
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-x11-winscrn" \
+    "bun test for nolib-x11-winscrn exited ${BE_RC} without producing a JUnit report."
+  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
+fi
+
 # ── Linux-only: nolib[vt] screen (framebuffer) ──────────────────
 # If /dev/fb0 is already a real device, run the test directly against
 # the real framebuffer.  Otherwise generate a synthetic pixel file at
