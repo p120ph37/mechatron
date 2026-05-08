@@ -1099,7 +1099,21 @@ export function window_setTitle(handle: bigint, title: string): void {
     const F = x11ffi();
     const d = getDisplay();
     if (!X || !F || !d) return;
+    // WM_NAME (legacy ICCCM): latin-1 STRING property.
     X.XStoreName(d, BigInt(h), F.ptr(cstr(title)));
+    // _NET_WM_NAME (EWMH): UTF-8 string. window_getTitle reads this
+    // first, so modern apps that publish their own _NET_WM_NAME at
+    // startup would otherwise mask our XStoreName change. Set both
+    // to keep the round-trip consistent.
+    const netWmName = atom("_NET_WM_NAME", false);
+    const utf8Type = atom("UTF8_STRING", false);
+    if (netWmName !== 0n && utf8Type !== 0n) {
+      const buf = cstr(title);
+      X.XChangeProperty(
+        d, BigInt(h), netWmName, utf8Type,
+        8, PropModeReplace, F.ptr(buf), buf.length - 1,
+      );
+    }
   } else if (IS_WIN) {
     if (!win_isValid(h)) return;
     win_setTitle(h, title);
