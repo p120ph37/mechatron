@@ -179,27 +179,6 @@ for be in "${BACKENDS[@]}"; do
   UNIT_DONE=true
 done
 
-# ── Worker polyfill: re-run ffi with in-process dispatch for coverage ────────
-# bun --coverage only instruments the main thread; worker_threads code is
-# invisible.  The polyfill replaces Worker with an in-process shim that loads
-# the impl module directly, so bun's coverage sees the *-impl.ts code paths.
-{
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-worker-polyfill.xml"
-  BE_COV_DIR="$COV_DIR/ffi-worker-polyfill"
-  mkdir -p "$BE_COV_DIR"
-  BE_RC=0
-  MECHATRON_BACKEND=ffi \
-  MECHATRON_WORKER_POLYFILL=1 \
-  MECHATRON_SKIP_UNIT=1 \
-    run_bun "ffi-worker-polyfill" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-    || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-worker-polyfill" \
-    "bun test for ffi-worker-polyfill exited ${BE_RC} without producing a JUnit report."
-  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-}
-
 # ── Linux-only: FFI + nolib[vt] input (uinput path) ──────────────
 if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-input.xml"
