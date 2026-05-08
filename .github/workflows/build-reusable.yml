@@ -82,17 +82,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
           # libei-dev: available as a package on ubuntu-24.04+; on older
-          # runners (ubuntu-22.04 arm64) we build from source so the
-          # keyboard-portal / mouse-portal napi crates can link libei.
+          # runners (ubuntu-22.04 arm64) we install the Noble .debs
+          # directly — libei1 only requires libc6 >= 2.17 so it's
+          # binary-compatible with Jammy's glibc 2.35.
           if ! sudo apt-get install -y libei-dev 2>/dev/null; then
-            echo ">>> libei-dev not in repos — building from source"
-            sudo apt-get install -y meson ninja-build libevdev-dev libsystemd-dev libxkbcommon-dev python3-jinja2
-            git clone --depth 1 --branch 1.3.0 https://gitlab.freedesktop.org/libinput/libei.git /tmp/libei
-            meson setup /tmp/libei/build /tmp/libei --prefix=/usr --buildtype=release \
-              -Dtests=disabled -Ddocumentation='[]'
-            ninja -C /tmp/libei/build
-            sudo ninja -C /tmp/libei/build install
-            sudo ldconfig
+            echo ">>> libei-dev not in repos — installing Noble debs"
+            LIBEI_POOL="http://ports.ubuntu.com/ubuntu-ports/pool/main/libe/libei"
+            curl -sL "$LIBEI_POOL/libei1_1.2.1-1_arm64.deb" -o /tmp/libei1.deb
+            curl -sL "$LIBEI_POOL/libei-dev_1.2.1-1_arm64.deb" -o /tmp/libei-dev.deb
+            sudo dpkg -i /tmp/libei1.deb /tmp/libei-dev.deb
           fi
           # Clipboard tools for nolib[sh] subprocess clipboard variant
           # (xclip for X11, wl-clipboard for Wayland).
