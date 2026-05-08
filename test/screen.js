@@ -109,6 +109,16 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					var r3 = unionBounds({x:0,y:0,w:10,h:10}, {x:100,y:100,w:20,h:20});
 					assert(r3.x === 0 && r3.y === 0, "union disjoint origin");
 					assert(r3.w === 120 && r3.h === 120, "union disjoint size");
+
+					// intersectBounds (screen-x11)
+					var intersect = require("../lib/nolib/screen-x11")._intersectBoundsForTests;
+					var i0 = intersect({x:0,y:0,w:100,h:100}, {x:50,y:50,w:100,h:100});
+					assert(i0.x === 50 && i0.y === 50, "intersect overlap origin");
+					assert(i0.w === 50 && i0.h === 50, "intersect overlap size");
+					var i1 = intersect({x:0,y:0,w:10,h:10}, {x:100,y:100,w:20,h:20});
+					assert(i1.w === 0 && i1.h === 0, "intersect disjoint empty");
+					var i2 = intersect({x:0,y:0,w:50,h:50}, {x:0,y:0,w:50,h:50});
+					assert(i2.x === 0 && i2.w === 50 && i2.h === 50, "intersect identical");
 				}
 			}
 		},

@@ -855,6 +855,19 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				var prefAfter = mechatron.getPreferredMechanisms("input");
 				assert(prefAfter === null || Array.isArray(prefAfter), "pref after reset");
 
+				// Env-var mechanism preference (covers envForCapability parsing)
+				mechatron.resetMechanism("screen");
+				var origEnv = process.env.MECHATRON_SCREEN_MECHANISM;
+				process.env.MECHATRON_SCREEN_MECHANISM = "framebuffer,xrandr";
+				mechatron.resetMechanism("screen");
+				var envPref = mechatron.getPreferredMechanisms("screen");
+				assert(envPref !== null && envPref.length === 2, "env pref parsed 2 entries");
+				assert(envPref[0] === "framebuffer", "env pref[0] = framebuffer");
+				assert(envPref[1] === "xrandr", "env pref[1] = xrandr");
+				if (origEnv === undefined) delete process.env.MECHATRON_SCREEN_MECHANISM;
+				else process.env.MECHATRON_SCREEN_MECHANISM = origEnv;
+				mechatron.resetMechanism("screen");
+
 				// Clipboard and screen capabilities
 				var clipMechs = mechatron.listMechanisms("clipboard");
 				assert(Array.isArray(clipMechs), "clipboard mechanisms array");
@@ -867,6 +880,42 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(typeof screenCaps.requiresElevatedPrivileges === "boolean", "screen requiresElevatedPrivileges");
 				assert(typeof screenCaps.requiresUserApproval === "boolean", "screen requiresUserApproval");
 				assert(typeof screenCaps.supportsOffScreen === "boolean", "screen supportsOffScreen");
+			}
+		},
+
+		{
+			name: "Platform screen permission save/load",
+			functions: [], unit: true,
+			test: async function () {
+				var Platform = mechatron.Platform;
+				var path = require("path");
+				var os = require("os");
+				var tmpFile = path.join(os.tmpdir(), "mechatron-perm-test-" + process.pid + ".json");
+
+				// save with no handle → false
+				var saved = await Platform.saveScreenPermission(tmpFile);
+				assert(saved === false, "save with no handle returns false");
+
+				// Set a handle, save, then load
+				var platformMod = require("../lib/platform");
+				platformMod._setSavedScreenHandle({ token: "test123", stream: 42 });
+				saved = await Platform.saveScreenPermission(tmpFile);
+				assert(saved === true, "save with handle returns true");
+
+				// Clear handle, load from file
+				platformMod._setSavedScreenHandle(null);
+				var loaded = await Platform.loadScreenPermission(tmpFile);
+				assert(loaded === true, "load returns true");
+				var handle = platformMod._getSavedScreenHandle();
+				assert(handle && handle.token === "test123", "loaded handle token");
+
+				// Load from nonexistent file → false
+				loaded = await Platform.loadScreenPermission("/tmp/nonexistent-" + process.pid);
+				assert(loaded === false, "load nonexistent returns false");
+
+				// Cleanup
+				platformMod._setSavedScreenHandle(null);
+				try { require("fs").unlinkSync(tmpFile); } catch(e) {}
 			}
 		},
 	];

@@ -22,6 +22,8 @@ function intersectBounds(a: RawRect, b: RawRect): RawRect {
   return r > l && bot > t ? { x: l, y: t, w: r - l, h: bot - t } : { x: 0, y: 0, w: 0, h: 0 };
 }
 
+export { intersectBounds as _intersectBoundsForTests };
+
 export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
   const c = await getXConnection();
   if (!c) return null;
