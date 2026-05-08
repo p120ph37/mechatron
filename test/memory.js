@@ -481,6 +481,45 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		return true;
 	}
 
+	async function testMemoryFlaggedIO() {
+		log("  Memory flagged IO... ");
+		var Process = mechatron.Process;
+		var Memory  = mechatron.Memory;
+		var proc = await Process.getCurrent();
+		var mem = new Memory(proc);
+		assert(await mem.isValid(), "flaggedIO: mem valid");
+
+		var regions = await mem.getRegions();
+		var writable = null;
+		for (var ri = 0; ri < regions.length; ri++) {
+			if (regions[ri].readable && regions[ri].writable && regions[ri].size >= 64n) {
+				writable = regions[ri];
+				break;
+			}
+		}
+		if (writable) {
+			var addr = writable.start;
+			var rBuf = Buffer.alloc(16);
+			var readBytes = await mem.readData(addr, rBuf, 16, Memory.SKIP_ERRORS);
+			assert(typeof readBytes === "number",
+				"flaggedIO: SKIP_ERRORS readData returns number");
+
+			if (readBytes > 0) {
+				var wrote = await mem.writeData(addr, rBuf, readBytes, Memory.SKIP_ERRORS);
+				assert(typeof wrote === "number", "flaggedIO: SKIP_ERRORS writeData returns number");
+			}
+
+			var rBuf2 = Buffer.alloc(16);
+			var readAuto = await mem.readData(addr, rBuf2, 16, Memory.AUTO_ACCESS);
+			assert(typeof readAuto === "number",
+				"flaggedIO: AUTO_ACCESS readData returns number");
+		}
+
+		await proc.close();
+		log("OK\n");
+		return true;
+	}
+
 	async function testTaskForPidRoot() {
 		// macOS task_for_pid privilege check: when root drops to a
 		// non-root user, attaching Memory to PID 1 (launchd) must fail
@@ -626,6 +665,12 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			functions: ["memory_writeData", "memory_bufferAddress",
 				"process_getCurrent", "process_close"],
 			test: testMemoryFlaggedWrites,
+		},
+		{
+			name: "memory flagged IO",
+			functions: ["memory_readData", "memory_writeData", "memory_getRegions",
+				"process_getCurrent", "process_close"],
+			test: testMemoryFlaggedIO,
 		},
 		{
 			name: "memory task_for_pid (root)",

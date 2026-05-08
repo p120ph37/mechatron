@@ -983,6 +983,23 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					});
 				});
 
+				// openSocket timeout: connect to a black-hole IP where SYN is
+				// silently dropped, exercising the setTimeout path in openSocket.
+				await new Promise(function (resolve) {
+					var start = Date.now();
+					XConnection.connect({
+						display: "198.51.100.1:0",
+						connectTimeoutMs: 500,
+					}).then(function () {
+						assert(false, "should not connect to black-hole IP");
+					}).catch(function (e) {
+						var elapsed = Date.now() - start;
+						assert(e instanceof Error, "timeout produces Error");
+						assert(/timeout/i.test(e.message), "error mentions timeout");
+						assert(elapsed >= 400, "waited at least 400ms (got " + elapsed + ")");
+						resolve();
+					});
+				});
 
 			}
 		},

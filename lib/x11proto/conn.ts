@@ -40,7 +40,6 @@ import {
   XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
   type QueryExtensionReply, type XError,
   // New opcodes
-  encodeGetWindowAttributes, parseGetWindowAttributesReply, type GetWindowAttributesReply,
   encodeDestroyWindow, encodeMapWindow,
   encodeConfigureWindow, type ConfigureWindowArgs,
   encodeGetGeometry, parseGetGeometryReply, type GetGeometryReply,
@@ -499,11 +498,6 @@ export class XConnection {
   }
 
   // ── Core protocol helpers ─────────────────────────────────────────────────
-
-  async getWindowAttributes(window: number): Promise<GetWindowAttributesReply> {
-    const reply = await this.sendRequest(encodeGetWindowAttributes(window));
-    return parseGetWindowAttributesReply(reply);
-  }
 
   destroyWindow(window: number): void {
     this.sendRequestNoReply(encodeDestroyWindow(window));
