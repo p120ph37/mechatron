@@ -179,7 +179,7 @@ function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
   // Try the thread-safe libc-pointer path first.
   try {
     const T = ffi.FFIType;
-    const handle = ffi.dlopen("libc.so.6", {
+    const handle = ffi.dlopen<{ getuid: () => number }>("libc.so.6", {
       getuid: { args: [], returns: T.u32 },
     });
     // bun:ffi exposes the raw symbol address via `.ptr`, but stored as a
