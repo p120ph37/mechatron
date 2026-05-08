@@ -80,7 +80,7 @@ jobs:
         #   window_getList() has something to enumerate.
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+          sudo apt-get install -y libxrandr-dev libxtst-dev libei-dev xvfb openbox x11-utils x11-apps
           # Clipboard tools for nolib[sh] subprocess clipboard variant
           # (xclip for X11, wl-clipboard for Wayland).
           sudo apt-get install -y xclip wl-clipboard
@@ -154,7 +154,7 @@ jobs:
           # one npm package: $PKG below maps each crate back to the
           # subsystem's package directory (`keyboard-x11` → `keyboard`).
           if [ "${{ runner.os }}" = "Linux" ]; then
-            SUBS="keyboard-x11 keyboard-portal mouse clipboard screen window process memory"
+            SUBS="keyboard-x11 keyboard-portal mouse-x11 mouse-portal clipboard screen window process memory"
           else
             SUBS="keyboard mouse clipboard screen window process memory"
           fi

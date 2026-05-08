@@ -96,7 +96,7 @@ const TASK_DYLD_INFO_COUNT: u32 = 6; // sizeof(task_dyld_info) / sizeof(natural_
 // task_dyld_info struct
 #[cfg(target_os = "macos")]
 #[repr(C)]
-struct TaskDyldInfo {
+pub struct TaskDyldInfo {
     all_image_info_addr: u64,
     all_image_info_size: u64,
     all_image_info_format: i32,
@@ -923,7 +923,7 @@ pub struct NapiSegmentInfo {
 
 // ── AsyncTask wrappers ──────────────────────────────────────────────────
 
-struct ProcessOpenTask { pid: i32 }
+pub struct ProcessOpenTask { pid: i32 }
 impl Task for ProcessOpenTask {
     type Output = bool;
     type JsValue = bool;
@@ -931,7 +931,7 @@ impl Task for ProcessOpenTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessCloseTask { pid: i32 }
+pub struct ProcessCloseTask { pid: i32 }
 impl Task for ProcessCloseTask {
     type Output = ();
     type JsValue = ();
@@ -939,7 +939,7 @@ impl Task for ProcessCloseTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct ProcessIsValidTask { pid: i32 }
+pub struct ProcessIsValidTask { pid: i32 }
 impl Task for ProcessIsValidTask {
     type Output = bool;
     type JsValue = bool;
@@ -947,7 +947,7 @@ impl Task for ProcessIsValidTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessIs64BitTask { pid: i32 }
+pub struct ProcessIs64BitTask { pid: i32 }
 impl Task for ProcessIs64BitTask {
     type Output = bool;
     type JsValue = bool;
@@ -955,7 +955,7 @@ impl Task for ProcessIs64BitTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessIsDebuggedTask { pid: i32 }
+pub struct ProcessIsDebuggedTask { pid: i32 }
 impl Task for ProcessIsDebuggedTask {
     type Output = bool;
     type JsValue = bool;
@@ -963,7 +963,7 @@ impl Task for ProcessIsDebuggedTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessGetPidTask { pid: i32 }
+pub struct ProcessGetPidTask { pid: i32 }
 impl Task for ProcessGetPidTask {
     type Output = f64;
     type JsValue = f64;
@@ -971,7 +971,7 @@ impl Task for ProcessGetPidTask {
     fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
 }
 
-struct ProcessGetHandleTask { pid: i32 }
+pub struct ProcessGetHandleTask { pid: i32 }
 impl Task for ProcessGetHandleTask {
     type Output = f64;
     type JsValue = f64;
@@ -979,7 +979,7 @@ impl Task for ProcessGetHandleTask {
     fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
 }
 
-struct ProcessGetNameTask { pid: i32 }
+pub struct ProcessGetNameTask { pid: i32 }
 impl Task for ProcessGetNameTask {
     type Output = String;
     type JsValue = String;
@@ -987,7 +987,7 @@ impl Task for ProcessGetNameTask {
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
-struct ProcessGetPathTask { pid: i32 }
+pub struct ProcessGetPathTask { pid: i32 }
 impl Task for ProcessGetPathTask {
     type Output = String;
     type JsValue = String;
@@ -995,7 +995,7 @@ impl Task for ProcessGetPathTask {
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
-struct ProcessExitTask { pid: i32 }
+pub struct ProcessExitTask { pid: i32 }
 impl Task for ProcessExitTask {
     type Output = ();
     type JsValue = ();
@@ -1003,7 +1003,7 @@ impl Task for ProcessExitTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct ProcessKillTask { pid: i32 }
+pub struct ProcessKillTask { pid: i32 }
 impl Task for ProcessKillTask {
     type Output = ();
     type JsValue = ();
@@ -1011,7 +1011,7 @@ impl Task for ProcessKillTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct ProcessHasExitedTask { pid: i32 }
+pub struct ProcessHasExitedTask { pid: i32 }
 impl Task for ProcessHasExitedTask {
     type Output = bool;
     type JsValue = bool;
@@ -1019,7 +1019,7 @@ impl Task for ProcessHasExitedTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessGetModulesTask { pid: i32, regex_str: Option<String> }
+pub struct ProcessGetModulesTask { pid: i32, regex_str: Option<String> }
 impl Task for ProcessGetModulesTask {
     type Output = Vec<NapiModuleInfo>;
     type JsValue = Vec<NapiModuleInfo>;
@@ -1029,7 +1029,7 @@ impl Task for ProcessGetModulesTask {
     fn resolve(&mut self, _env: Env, out: Vec<NapiModuleInfo>) -> Result<Vec<NapiModuleInfo>> { Ok(out) }
 }
 
-struct ProcessGetListTask { regex_str: Option<String> }
+pub struct ProcessGetListTask { regex_str: Option<String> }
 impl Task for ProcessGetListTask {
     type Output = Vec<i32>;
     type JsValue = Vec<i32>;
@@ -1039,7 +1039,7 @@ impl Task for ProcessGetListTask {
     fn resolve(&mut self, _env: Env, out: Vec<i32>) -> Result<Vec<i32>> { Ok(out) }
 }
 
-struct ProcessGetCurrentTask;
+pub struct ProcessGetCurrentTask;
 impl Task for ProcessGetCurrentTask {
     type Output = f64;
     type JsValue = f64;
@@ -1047,7 +1047,7 @@ impl Task for ProcessGetCurrentTask {
     fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
 }
 
-struct ProcessIsSys64BitTask;
+pub struct ProcessIsSys64BitTask;
 impl Task for ProcessIsSys64BitTask {
     type Output = bool;
     type JsValue = bool;
@@ -1055,7 +1055,7 @@ impl Task for ProcessIsSys64BitTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct ProcessGetSegmentsTask { pid: i32, base: u64 }
+pub struct ProcessGetSegmentsTask { pid: i32, base: u64 }
 impl Task for ProcessGetSegmentsTask {
     type Output = Vec<NapiSegmentInfo>;
     type JsValue = Vec<NapiSegmentInfo>;

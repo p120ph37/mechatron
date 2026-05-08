@@ -701,7 +701,7 @@ fn u64_to_bi(val: u64) -> BigInt {
 
 // ==================== AsyncTask wrappers ====================
 
-struct IsValidTask { handle: u64 }
+pub struct IsValidTask { handle: u64 }
 impl Task for IsValidTask {
     type Output = bool;
     type JsValue = bool;
@@ -709,7 +709,7 @@ impl Task for IsValidTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct CloseTask { handle: u64 }
+pub struct CloseTask { handle: u64 }
 impl Task for CloseTask {
     type Output = ();
     type JsValue = ();
@@ -717,7 +717,7 @@ impl Task for CloseTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct IsTopMostTask { handle: u64 }
+pub struct IsTopMostTask { handle: u64 }
 impl Task for IsTopMostTask {
     type Output = bool;
     type JsValue = bool;
@@ -725,7 +725,7 @@ impl Task for IsTopMostTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct IsBorderlessTask { handle: u64 }
+pub struct IsBorderlessTask { handle: u64 }
 impl Task for IsBorderlessTask {
     type Output = bool;
     type JsValue = bool;
@@ -733,7 +733,7 @@ impl Task for IsBorderlessTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct IsMinimizedTask { handle: u64 }
+pub struct IsMinimizedTask { handle: u64 }
 impl Task for IsMinimizedTask {
     type Output = bool;
     type JsValue = bool;
@@ -741,7 +741,7 @@ impl Task for IsMinimizedTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct IsMaximizedTask { handle: u64 }
+pub struct IsMaximizedTask { handle: u64 }
 impl Task for IsMaximizedTask {
     type Output = bool;
     type JsValue = bool;
@@ -749,7 +749,7 @@ impl Task for IsMaximizedTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct SetTopMostTask { handle: u64, top_most: bool }
+pub struct SetTopMostTask { handle: u64, top_most: bool }
 impl Task for SetTopMostTask {
     type Output = ();
     type JsValue = ();
@@ -757,7 +757,7 @@ impl Task for SetTopMostTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct SetBorderlessTask { handle: u64, borderless: bool }
+pub struct SetBorderlessTask { handle: u64, borderless: bool }
 impl Task for SetBorderlessTask {
     type Output = ();
     type JsValue = ();
@@ -765,7 +765,7 @@ impl Task for SetBorderlessTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct SetMinimizedTask { handle: u64, minimized: bool }
+pub struct SetMinimizedTask { handle: u64, minimized: bool }
 impl Task for SetMinimizedTask {
     type Output = ();
     type JsValue = ();
@@ -773,7 +773,7 @@ impl Task for SetMinimizedTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct SetMaximizedTask { handle: u64, maximized: bool }
+pub struct SetMaximizedTask { handle: u64, maximized: bool }
 impl Task for SetMaximizedTask {
     type Output = ();
     type JsValue = ();
@@ -781,7 +781,7 @@ impl Task for SetMaximizedTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetProcessTask { handle: u64 }
+pub struct GetProcessTask { handle: u64 }
 impl Task for GetProcessTask {
     type Output = i32;
     type JsValue = i32;
@@ -789,7 +789,7 @@ impl Task for GetProcessTask {
     fn resolve(&mut self, _env: Env, out: i32) -> Result<i32> { Ok(out) }
 }
 
-struct GetPIDTask { handle: u64 }
+pub struct GetPIDTask { handle: u64 }
 impl Task for GetPIDTask {
     type Output = i32;
     type JsValue = i32;
@@ -797,7 +797,7 @@ impl Task for GetPIDTask {
     fn resolve(&mut self, _env: Env, out: i32) -> Result<i32> { Ok(out) }
 }
 
-struct GetHandleTask { handle: u64 }
+pub struct GetHandleTask { handle: u64 }
 impl Task for GetHandleTask {
     type Output = u64;
     type JsValue = BigInt;
@@ -805,7 +805,7 @@ impl Task for GetHandleTask {
     fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
 }
 
-struct SetHandleTask { handle: u64, new_handle: u64 }
+pub struct SetHandleTask { handle: u64, new_handle: u64 }
 impl Task for SetHandleTask {
     type Output = bool;
     type JsValue = bool;
@@ -813,7 +813,7 @@ impl Task for SetHandleTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetTitleTask { handle: u64 }
+pub struct GetTitleTask { handle: u64 }
 impl Task for GetTitleTask {
     type Output = String;
     type JsValue = String;
@@ -821,7 +821,7 @@ impl Task for GetTitleTask {
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
-struct SetTitleTask { handle: u64, title: String }
+pub struct SetTitleTask { handle: u64, title: String }
 impl Task for SetTitleTask {
     type Output = ();
     type JsValue = ();
@@ -829,7 +829,7 @@ impl Task for SetTitleTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetBoundsTask { handle: u64 }
+pub struct GetBoundsTask { handle: u64 }
 impl Task for GetBoundsTask {
     type Output = (i32, i32, i32, i32);
     type JsValue = WindowBounds;
@@ -839,7 +839,7 @@ impl Task for GetBoundsTask {
     }
 }
 
-struct SetBoundsTask { handle: u64, x: i32, y: i32, w: i32, h: i32 }
+pub struct SetBoundsTask { handle: u64, x: i32, y: i32, w: i32, h: i32 }
 impl Task for SetBoundsTask {
     type Output = ();
     type JsValue = ();
@@ -847,7 +847,7 @@ impl Task for SetBoundsTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetClientTask { handle: u64 }
+pub struct GetClientTask { handle: u64 }
 impl Task for GetClientTask {
     type Output = (i32, i32, i32, i32);
     type JsValue = WindowBounds;
@@ -857,7 +857,7 @@ impl Task for GetClientTask {
     }
 }
 
-struct SetClientTask { handle: u64, x: i32, y: i32, w: i32, h: i32 }
+pub struct SetClientTask { handle: u64, x: i32, y: i32, w: i32, h: i32 }
 impl Task for SetClientTask {
     type Output = ();
     type JsValue = ();
@@ -865,7 +865,7 @@ impl Task for SetClientTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct MapToClientTask { handle: u64, x: i32, y: i32 }
+pub struct MapToClientTask { handle: u64, x: i32, y: i32 }
 impl Task for MapToClientTask {
     type Output = (i32, i32);
     type JsValue = WindowPoint;
@@ -875,7 +875,7 @@ impl Task for MapToClientTask {
     }
 }
 
-struct MapToScreenTask { handle: u64, x: i32, y: i32 }
+pub struct MapToScreenTask { handle: u64, x: i32, y: i32 }
 impl Task for MapToScreenTask {
     type Output = (i32, i32);
     type JsValue = WindowPoint;
@@ -885,7 +885,7 @@ impl Task for MapToScreenTask {
     }
 }
 
-struct GetListTask { regex_str: Option<String> }
+pub struct GetListTask { regex_str: Option<String> }
 impl Task for GetListTask {
     type Output = Vec<u64>;
     type JsValue = Vec<BigInt>;
@@ -895,7 +895,7 @@ impl Task for GetListTask {
     }
 }
 
-struct GetActiveTask;
+pub struct GetActiveTask;
 impl Task for GetActiveTask {
     type Output = u64;
     type JsValue = BigInt;
@@ -903,7 +903,7 @@ impl Task for GetActiveTask {
     fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
 }
 
-struct SetActiveTask { handle: u64 }
+pub struct SetActiveTask { handle: u64 }
 impl Task for SetActiveTask {
     type Output = ();
     type JsValue = ();
@@ -911,7 +911,7 @@ impl Task for SetActiveTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct IsAxEnabledTask { prompt: Option<bool> }
+pub struct IsAxEnabledTask { prompt: Option<bool> }
 impl Task for IsAxEnabledTask {
     type Output = bool;
     type JsValue = bool;

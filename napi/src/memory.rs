@@ -8,7 +8,7 @@ pub fn memory_buffer_address(buf: Buffer) -> BigInt {
     u64_to_bi(buf.as_ptr() as u64)
 }
 
-struct RegionInfo {
+pub struct RegionInfo {
     valid: bool,
     bound: bool,
     start: u64,
@@ -1062,7 +1062,7 @@ fn platform_write_data(pid: i32, addr: u64, data: &[u8], f: i32) -> f64 {
 
 // ── AsyncTask structs ──────────────────────────────────────────────────
 
-struct IsValidTask { pid: i32 }
+pub struct IsValidTask { pid: i32 }
 impl Task for IsValidTask {
     type Output = bool;
     type JsValue = bool;
@@ -1070,7 +1070,7 @@ impl Task for IsValidTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetRegionTask { pid: i32, addr: u64 }
+pub struct GetRegionTask { pid: i32, addr: u64 }
 impl Task for GetRegionTask {
     type Output = RegionInfo;
     type JsValue = NapiRegion;
@@ -1078,7 +1078,7 @@ impl Task for GetRegionTask {
     fn resolve(&mut self, _env: Env, out: RegionInfo) -> Result<NapiRegion> { Ok(region_to_napi(&out)) }
 }
 
-struct GetRegionsTask { pid: i32, start: u64, stop: u64 }
+pub struct GetRegionsTask { pid: i32, start: u64, stop: u64 }
 impl Task for GetRegionsTask {
     type Output = Vec<RegionInfo>;
     type JsValue = Vec<NapiRegion>;
@@ -1086,7 +1086,7 @@ impl Task for GetRegionsTask {
     fn resolve(&mut self, _env: Env, out: Vec<RegionInfo>) -> Result<Vec<NapiRegion>> { Ok(out.iter().map(|r| region_to_napi(r)).collect()) }
 }
 
-struct SetAccessTask { pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool }
+pub struct SetAccessTask { pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool }
 impl Task for SetAccessTask {
     type Output = bool;
     type JsValue = bool;
@@ -1094,7 +1094,7 @@ impl Task for SetAccessTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct SetAccessFlagsTask { pid: i32, region_start: u64, flags: u32 }
+pub struct SetAccessFlagsTask { pid: i32, region_start: u64, flags: u32 }
 impl Task for SetAccessFlagsTask {
     type Output = bool;
     type JsValue = bool;
@@ -1102,7 +1102,7 @@ impl Task for SetAccessFlagsTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetPtrSizeTask { pid: i32 }
+pub struct GetPtrSizeTask { pid: i32 }
 impl Task for GetPtrSizeTask {
     type Output = f64;
     type JsValue = f64;
@@ -1110,7 +1110,7 @@ impl Task for GetPtrSizeTask {
     fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
 }
 
-struct GetMinAddressTask { pid: i32 }
+pub struct GetMinAddressTask { pid: i32 }
 impl Task for GetMinAddressTask {
     type Output = u64;
     type JsValue = BigInt;
@@ -1118,7 +1118,7 @@ impl Task for GetMinAddressTask {
     fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
 }
 
-struct GetMaxAddressTask { pid: i32 }
+pub struct GetMaxAddressTask { pid: i32 }
 impl Task for GetMaxAddressTask {
     type Output = u64;
     type JsValue = BigInt;
@@ -1126,7 +1126,7 @@ impl Task for GetMaxAddressTask {
     fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
 }
 
-struct GetPageSizeTask { pid: i32 }
+pub struct GetPageSizeTask { pid: i32 }
 impl Task for GetPageSizeTask {
     type Output = f64;
     type JsValue = f64;
@@ -1134,7 +1134,7 @@ impl Task for GetPageSizeTask {
     fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
 }
 
-struct FindTask { pid: i32, pattern_bytes: Vec<Option<u8>>, start: u64, stop: u64, max_results: usize }
+pub struct FindTask { pid: i32, pattern_bytes: Vec<Option<u8>>, start: u64, stop: u64, max_results: usize }
 impl Task for FindTask {
     type Output = Vec<u64>;
     type JsValue = Vec<BigInt>;
@@ -1147,7 +1147,7 @@ impl Task for FindTask {
     }
 }
 
-struct ReadDataTask { pid: i32, addr: u64, len: usize, flags: i32 }
+pub struct ReadDataTask { pid: i32, addr: u64, len: usize, flags: i32 }
 impl Task for ReadDataTask {
     type Output = Option<Vec<u8>>;
     type JsValue = Either<Buffer, ()>;
@@ -1160,7 +1160,7 @@ impl Task for ReadDataTask {
     }
 }
 
-struct WriteDataTask { pid: i32, addr: u64, data: Vec<u8>, flags: i32 }
+pub struct WriteDataTask { pid: i32, addr: u64, data: Vec<u8>, flags: i32 }
 impl Task for WriteDataTask {
     type Output = f64;
     type JsValue = f64;

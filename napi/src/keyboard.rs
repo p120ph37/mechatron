@@ -11,7 +11,13 @@
 // one of those crates per backend variant rather than runtime-dispatching
 // at the language level.
 
+// Pulled in only by the cfg-gated macOS/Windows export blocks below.
+// On Linux this file is intentionally empty (the per-variant crates
+// `mechatron-keyboard-x11` and `mechatron-keyboard-portal` carry the
+// keyboard implementation instead).
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi::bindgen_prelude::*;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi_derive::napi;
 
 // ==================== macOS ====================
@@ -128,7 +134,7 @@ fn platform_get_key_state(keycode: i32) -> bool {
 // ==================== AsyncTask wrappers ====================
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-struct PressTask(u32);
+pub struct PressTask(u32);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for PressTask {
     type Output = ();
@@ -138,7 +144,7 @@ impl Task for PressTask {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-struct ReleaseTask(u32);
+pub struct ReleaseTask(u32);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for ReleaseTask {
     type Output = ();
@@ -148,7 +154,7 @@ impl Task for ReleaseTask {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-struct GetKeyStateTask(i32);
+pub struct GetKeyStateTask(i32);
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for GetKeyStateTask {
     type Output = bool;

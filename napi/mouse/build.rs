@@ -3,17 +3,9 @@ extern crate napi_build;
 fn main() {
     napi_build::setup();
 
-    #[cfg(target_os = "linux")]
-    {
-        println!("cargo:rustc-link-lib=X11");
-        println!("cargo:rustc-link-lib=Xtst");
-        println!("cargo:rustc-link-lib=rt");
-        // Temporary: mouse still bundles ei_input alongside the X11 path
-        // until it's split into mechatron-mouse-x11 / mechatron-mouse-portal
-        // (mirroring the keyboard split).  Drop this link directive when
-        // that split happens.
-        println!("cargo:rustc-link-lib=ei");
-    }
+    // mechatron-mouse is the non-Linux base crate (macOS / Windows).
+    // Linux variants live in mechatron-mouse-x11 and mechatron-mouse-portal
+    // which link their respective system libs.
 
     #[cfg(target_os = "macos")]
     {

@@ -634,7 +634,7 @@ fn platform_get_sequence() -> f64 {
 // AsyncTask wrappers
 // =============================================================================
 
-struct ClearTask;
+pub struct ClearTask;
 impl Task for ClearTask {
     type Output = bool;
     type JsValue = bool;
@@ -642,7 +642,7 @@ impl Task for ClearTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct HasTextTask;
+pub struct HasTextTask;
 impl Task for HasTextTask {
     type Output = bool;
     type JsValue = bool;
@@ -650,7 +650,7 @@ impl Task for HasTextTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetTextTask;
+pub struct GetTextTask;
 impl Task for GetTextTask {
     type Output = String;
     type JsValue = String;
@@ -658,7 +658,7 @@ impl Task for GetTextTask {
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
-struct SetTextTask { text: String }
+pub struct SetTextTask { text: String }
 impl Task for SetTextTask {
     type Output = bool;
     type JsValue = bool;
@@ -666,7 +666,7 @@ impl Task for SetTextTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct HasImageTask;
+pub struct HasImageTask;
 impl Task for HasImageTask {
     type Output = bool;
     type JsValue = bool;
@@ -674,7 +674,7 @@ impl Task for HasImageTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetImageTask;
+pub struct GetImageTask;
 impl Task for GetImageTask {
     type Output = Option<(u32, u32, Vec<u32>)>;
     type JsValue = Either<ClipboardImage, ()>;
@@ -693,7 +693,7 @@ impl Task for GetImageTask {
     }
 }
 
-struct SetImageTask { width: u32, height: u32, data: Vec<u32> }
+pub struct SetImageTask { width: u32, height: u32, data: Vec<u32> }
 impl Task for SetImageTask {
     type Output = bool;
     type JsValue = bool;
@@ -703,7 +703,7 @@ impl Task for SetImageTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
-struct GetSequenceTask;
+pub struct GetSequenceTask;
 impl Task for GetSequenceTask {
     type Output = f64;
     type JsValue = f64;

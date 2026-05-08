@@ -1,7 +1,23 @@
 /**
- * napi mouse backend — loads @mechatronic/napi-mouse .node binary.
+ * napi mouse backend — base loader for non-Linux platforms.
+ *
+ * macOS / Windows have a single OS-native input API with no variant
+ * fan-out, so this file directly loads `mechatron-mouse.<platform>.node`
+ * from the @mechatronic/napi-mouse package.
+ *
+ * On Linux the package instead ships variant-specific binaries
+ * (mechatron-mouse-x11, mechatron-mouse-portal) which are loaded by
+ * lib/napi/mouse-x11.ts and lib/napi/mouse-portal.ts.  This base file is
+ * reached only as a fallback for an unsupported variant (e.g. an explicit
+ * napi[vt] request); throw at load so the dispatcher in lib/backend.ts
+ * moves on to the next backend.
  */
+
 import { loadNapi } from "./resolve";
+
+if (process.platform === "linux") {
+  throw new Error("napi/mouse: Linux requires a variant — use napi[x11] or napi[portal]");
+}
 
 const native = loadNapi("mouse");
 

@@ -5,6 +5,8 @@ members = [
     "keyboard-x11",
     "keyboard-portal",
     "mouse",
+    "mouse-x11",
+    "mouse-portal",
     "clipboard",
     "screen",
     "window",

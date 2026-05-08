@@ -11,7 +11,7 @@ use crate::x11::*;
 
 type Rect = (i32, i32, i32, i32);
 
-struct RawScreenData {
+pub struct RawScreenData {
     bx: i32, by: i32, bw: i32, bh: i32,
     ux: i32, uy: i32, uw: i32, uh: i32,
 }
@@ -478,7 +478,7 @@ fn platform_set_portal_token(_token: String) {
 // AsyncTask wrappers
 // =============================================================================
 
-struct SynchronizeTask;
+pub struct SynchronizeTask;
 impl Task for SynchronizeTask {
     type Output = Option<Vec<RawScreenData>>;
     type JsValue = Either<napi::JsObject, napi::JsNull>;
@@ -512,7 +512,7 @@ impl Task for SynchronizeTask {
     }
 }
 
-struct GrabScreenTask {
+pub struct GrabScreenTask {
     x: i32,
     y: i32,
     w: i32,
@@ -533,7 +533,7 @@ impl Task for GrabScreenTask {
     }
 }
 
-struct GetPortalTokenTask;
+pub struct GetPortalTokenTask;
 impl Task for GetPortalTokenTask {
     type Output = Option<String>;
     type JsValue = Option<String>;
@@ -545,7 +545,7 @@ impl Task for GetPortalTokenTask {
     }
 }
 
-struct SetPortalTokenTask {
+pub struct SetPortalTokenTask {
     token: String,
 }
 impl Task for SetPortalTokenTask {

@@ -1,6 +1,6 @@
 #![allow(non_upper_case_globals, dead_code)]
 
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{c_char, c_void};
 use std::os::unix::io::RawFd;
 use std::sync::{mpsc, Mutex, Once};
 

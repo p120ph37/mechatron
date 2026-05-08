@@ -45,7 +45,7 @@ fn platform_get_key_state(keycode: i32) -> bool {
 
 // ==================== AsyncTask wrappers ====================
 
-struct PressTask(u32);
+pub struct PressTask(u32);
 impl Task for PressTask {
     type Output = ();
     type JsValue = ();
@@ -53,7 +53,7 @@ impl Task for PressTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct ReleaseTask(u32);
+pub struct ReleaseTask(u32);
 impl Task for ReleaseTask {
     type Output = ();
     type JsValue = ();
@@ -61,7 +61,7 @@ impl Task for ReleaseTask {
     fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
 }
 
-struct GetKeyStateTask(i32);
+pub struct GetKeyStateTask(i32);
 impl Task for GetKeyStateTask {
     type Output = bool;
     type JsValue = bool;
