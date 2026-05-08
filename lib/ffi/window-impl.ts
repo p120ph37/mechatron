@@ -15,7 +15,7 @@ import {
   sendClientMessage, IsViewable, PropModeReplace, CurrentTime,
 } from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
-import { getBunFFI, bp, cstr, type Pointer } from "./bun";
+import { getBunFFI, bp, cstr, cstringFromPtr, type Pointer } from "./bun";
 import {
   cg, cf, ax, macFFI, cfStringFromJS, cfStringToJS, cfBool,
   kCFNumberSInt32Type, kCFNumberFloat64Type,
@@ -164,7 +164,11 @@ function getTitle(win: bigint): string {
   if (wmName !== 0n) {
     const r = getWindowProperty(win, wmName);
     if (r && r.nitems > 0n) {
-      const s = new (F as any).CString(r.data) as string;
+      // r.data is a bigint (XGetWindowProperty allocates the buffer);
+      // F.CString rejects bigint pointers — see CLAUDE.md item on
+      // bun:ffi pointer-handling. cstringFromPtr copies via libc memcpy
+      // into a JS buffer and decodes UTF-8 there.
+      const s = cstringFromPtr(r.data as bigint, Number(r.nitems));
       X.XFree(r.data);
       if (s) return s;
     } else if (r) {
@@ -175,7 +179,7 @@ function getTitle(win: bigint): string {
   if (xaWmName !== 0n) {
     const r = getWindowProperty(win, xaWmName);
     if (r) {
-      const s = new (F as any).CString(r.data) as string;
+      const s = cstringFromPtr(r.data as bigint, Number(r.nitems));
       X.XFree(r.data);
       return s;
     }

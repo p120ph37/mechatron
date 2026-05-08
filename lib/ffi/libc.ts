@@ -30,6 +30,14 @@ export interface LibC {
     fd: number, offset: bigint,
   ) => bigint;
   munmap: (addr: bigint, length: bigint) => number;
+  // Memory copy.  Used to bring data from a foreign-allocated buffer
+  // (e.g. an XGetWindowProperty result) into a JS-owned Uint8Array
+  // without going through `F.CString` / `F.toArrayBuffer`, which reject
+  // bigint pointer args (see CLAUDE.md "bun:ffi pointer-handling").
+  memcpy: (dest: bigint, src: bigint, n: bigint) => bigint;
+  // strnlen — bounded version of strlen.  Same caveat as memcpy: avoids
+  // the bun-managed CString constructor which can't take a bigint ptr.
+  strnlen: (s: bigint, maxlen: bigint) => bigint;
 }
 
 // mmap prot/flags (Linux, same across x86_64/aarch64/arm/riscv64).
@@ -65,12 +73,17 @@ function openLibc(): void {
   const T = _ffi.FFIType;
   try {
     const h = _ffi.dlopen<LibC>("libc.so.6", {
-      open:   { args: [T.u64, T.i32, T.i32], returns: T.i32 },
-      close:  { args: [T.i32], returns: T.i32 },
-      read:   { args: [T.i32, T.u64, T.u64], returns: T.i64 },
-      ioctl:  { args: [T.i32, T.u64, T.u64], returns: T.i32 },
-      mmap:   { args: [T.u64, T.u64, T.i32, T.i32, T.i32, T.u64], returns: T.u64 },
-      munmap: { args: [T.u64, T.u64], returns: T.i32 },
+      open:    { args: [T.u64, T.i32, T.i32], returns: T.i32 },
+      close:   { args: [T.i32], returns: T.i32 },
+      read:    { args: [T.i32, T.u64, T.u64], returns: T.i64 },
+      ioctl:   { args: [T.i32, T.u64, T.u64], returns: T.i32 },
+      mmap:    { args: [T.u64, T.u64, T.i32, T.i32, T.i32, T.u64], returns: T.u64 },
+      munmap:  { args: [T.u64, T.u64], returns: T.i32 },
+      // Pointer-typed args use i64 so a full 64-bit address (potentially
+      // above the 53-bit safe integer ceiling under ASLR) survives the
+      // bun:ffi boundary as a bigint without truncation.
+      memcpy:  { args: [T.i64, T.i64, T.u64], returns: T.i64 },
+      strnlen: { args: [T.i64, T.u64], returns: T.u64 },
     });
     _libc = h.symbols;
     _dlopenHandle = h;

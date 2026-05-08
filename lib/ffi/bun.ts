@@ -108,6 +108,37 @@ export function bp(view: ArrayBufferView): bigint {
   return typeof p === "bigint" ? p : BigInt(p as number);
 }
 
+/**
+ * Decode a NUL-terminated C string at a (possibly 64-bit) pointer.
+ *
+ * Bun's `new F.CString(ptr)` rejects bigint args at runtime — when given
+ * one it returns a String *object* whose value is the bun TypeError
+ * message rather than throwing or returning the C string.  This helper
+ * reads the bytes via libc memcpy into a JS-owned buffer (so the source
+ * pointer can be a full 64-bit bigint without lossy Number() narrowing)
+ * and decodes UTF-8.  `byteLen`, when provided, is treated as an upper
+ * bound; the actual string length is determined by libc's strnlen.
+ */
+export function cstringFromPtr(ptr: Pointer, byteLen?: number): string {
+  if (ptr === 0n || ptr === 0 || ptr == null) return "";
+  // Normalise to bigint so the libc memcpy/strnlen calls receive the
+  // full 64-bit address regardless of how bun:ffi surfaced the pointer.
+  const big: bigint = typeof ptr === "bigint" ? ptr : BigInt(ptr);
+  // require lazily to avoid forcing libc.ts to load if not needed.
+  const { libc, libcFFI } = require("./libc") as typeof import("./libc");
+  const lc = libc();
+  const lf = libcFFI();
+  if (!lc || !lf) return "";
+  const max = BigInt(byteLen ?? 0x10000);
+  const len = Number(lc.strnlen(big, max));
+  if (len === 0) return "";
+  const buf = new Uint8Array(len);
+  const dest = lf.ptr(buf);
+  const destBig: bigint = typeof dest === "bigint" ? dest : BigInt(dest as number);
+  lc.memcpy(destBig, big, BigInt(len));
+  return new TextDecoder("utf-8").decode(buf);
+}
+
 /** Like cstr() but caches the result — use for repeated short strings. */
 export function cstrCached(s: string): Uint8Array {
   let buf = _cstrCache.get(s);
