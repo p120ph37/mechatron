@@ -111,7 +111,14 @@ interface X11 {
   XDeleteProperty: (display: Pointer, w: bigint, property: bigint) => number;
   XConnectionNumber: (display: Pointer) => number;
   // Error handler suppression
-  XSetErrorHandler: (handler: Pointer) => Pointer;
+  // The dlopen binding below uses T.i64 for both arg and return so that
+  // a 64-bit C function pointer survives the boundary verbatim — the
+  // JS Number type only carries 53 bits of integer precision, and we
+  // can't assume libc loads under the (signed) 53-bit ceiling on every
+  // architecture or with future ASLR ranges. Callers pass a bigint;
+  // the fallback JSCallback path coerces its number-typed `.ptr` via
+  // BigInt(...) before installing.
+  XSetErrorHandler: (handler: bigint) => bigint;
 }
 
 interface XTest {
@@ -191,10 +198,7 @@ function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
     const RTLD_DEFAULT = 0n;
     const fnAddr = dl.symbols.dlsym(RTLD_DEFAULT, Buffer.from("rand\0"));
     if (typeof fnAddr === "bigint" && fnAddr !== 0n) {
-      // T.ptr accepts JS number; user-space libc addresses on x86_64/arm64
-      // fit comfortably in 53 bits (typical 0x7f...), so Number(bigint) is
-      // lossless in practice.
-      x.XSetErrorHandler(Number(fnAddr) as Pointer);
+      x.XSetErrorHandler(fnAddr);
       return;
     }
   } catch (_) {
@@ -210,7 +214,8 @@ function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
       () => 0,
       { args: [T.ptr, T.ptr], returns: T.i32 },
     );
-    x.XSetErrorHandler(_errorHandlerCb.ptr);
+    // .ptr is a number; T.i64 args expect bigint, so coerce.
+    x.XSetErrorHandler(BigInt(_errorHandlerCb.ptr as unknown as number));
   } catch (_) {
     _errorHandlerCb = null;
   }
@@ -295,7 +300,10 @@ function tryDlopen(): void {
       },
       XDestroyImage:          { args: [T.u64], returns: T.i32 },
       XGetPixel:              { args: [T.u64, T.i32, T.i32], returns: T.u64 },
-      XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
+      // i64 (not ptr) so we can pass a bigint dlsym() result without
+      // truncating high pointer bits — see the X11 interface comment
+      // and installSilentErrorHandler() below.
+      XSetErrorHandler:       { args: [T.i64], returns: T.i64 },
       XCreateSimpleWindow:    {
         args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32, T.u32, T.u64, T.u64],
         returns: T.u64,
