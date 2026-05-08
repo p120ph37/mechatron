@@ -452,7 +452,9 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 					observed = await vw.getTitle();
 					if (observed === newTitle) break;
 				}
-				assert(typeof observed === "string", "getTitle returns string");
+				assert(observed === newTitle,
+					"getTitle returns set title (got: " + JSON.stringify(observed) +
+					", typeof: " + typeof observed + ")");
 				if (orig) await vw.setTitle(orig);
 			}
 		},
