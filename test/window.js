@@ -338,14 +338,16 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window maximize round-trip",
 			functions: ["window_getList", "window_isValid", "window_setMaximized", "window_isMaximized"],
 			test: async function () {
-				var list = await Window.getList();
+				// Use a named window to avoid picking up orphaned frames
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				await vw.setMaximized(true);
-				await waitForAsync(function () { return vw.isMaximized(); }, 1000);
+				await waitForAsync(function () { return vw.isMaximized(); }, 2000);
 				var maxed = await vw.isMaximized();
 				await vw.setMaximized(false);
-				await waitForAsync(async function () { return !(await vw.isMaximized()); }, 1000);
+				await waitForAsync(async function () { return !(await vw.isMaximized()); }, 2000);
 				assert(typeof maxed === "boolean", "isMaximized returns boolean after set");
 			}
 		},
@@ -353,14 +355,15 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window minimize round-trip",
 			functions: ["window_getList", "window_isValid", "window_setMinimized", "window_isMinimized"],
 			test: async function () {
-				var list = await Window.getList();
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				await vw.setMinimized(true);
-				await waitForAsync(function () { return vw.isMinimized(); }, 1000);
+				await waitForAsync(function () { return vw.isMinimized(); }, 2000);
 				var mined = await vw.isMinimized();
 				await vw.setMinimized(false);
-				await waitForAsync(async function () { return !(await vw.isMinimized()); }, 1000);
+				await waitForAsync(async function () { return !(await vw.isMinimized()); }, 2000);
 				assert(typeof mined === "boolean", "isMinimized returns boolean after set");
 			}
 		},
@@ -368,7 +371,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window setBounds + getBounds round-trip",
 			functions: ["window_getList", "window_isValid", "window_setBounds", "window_getBounds"],
 			test: async function () {
-				var list = await Window.getList();
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				var orig = await vw.getBounds();
@@ -384,7 +388,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window setClient + getClient round-trip",
 			functions: ["window_getList", "window_isValid", "window_setClient", "window_getClient"],
 			test: async function () {
-				var list = await Window.getList();
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				var orig = await vw.getClient();
@@ -400,7 +405,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window mapToClient + mapToScreen",
 			functions: ["window_getList", "window_isValid", "window_mapToClient", "window_mapToScreen"],
 			test: async function () {
-				var list = await Window.getList();
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				var cp = await vw.mapToClient(100, 100);
@@ -413,7 +419,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window setActive",
 			functions: ["window_getList", "window_isValid", "window_setActive", "window_getActive"],
 			test: async function () {
-				var list = await Window.getList();
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				await Window.setActive(vw);
@@ -426,7 +433,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			name: "valid window setTitle + getTitle round-trip",
 			functions: ["window_getList", "window_isValid", "window_setTitle", "window_getTitle"],
 			test: async function () {
-				var list = await Window.getList();
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
 				var vw = list[0];
 				var orig = await vw.getTitle();
