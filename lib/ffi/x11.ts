@@ -111,7 +111,12 @@ interface X11 {
   XDeleteProperty: (display: Pointer, w: bigint, property: bigint) => number;
   XConnectionNumber: (display: Pointer) => number;
   // Error handler suppression
-  XSetErrorHandler: (handler: Pointer) => Pointer;
+  // Pointer-typed args/returns are declared as i64 in the FFI binding — see
+  // the dlopen call below — so a libc function-pointer (bigint) can be
+  // installed as the silent X error handler from any thread without a
+  // JSCallback. The TypeScript type stays Pointer for ergonomics; the
+  // bigint cast happens in installSilentErrorHandler.
+  XSetErrorHandler: (handler: Pointer | bigint) => Pointer | bigint;
 }
 
 interface XTest {
@@ -152,29 +157,56 @@ let _xrandrAvailable = false;
 
 const _dlopenHandles: any[] = [];
 
-// Keep a strong reference to the error-handler JSCallback — if it's GC'd
-// while Xlib still holds the function pointer, the next X error becomes a
-// SIGSEGV.  One handler per process is sufficient; Xlib stores the latest
-// pointer globally.
-let _errorHandler: { ptr: Pointer; close(): void } | null = null;
+// XSetErrorHandler is process-global. A JSCallback is bound to the JS
+// context of the thread that created it; if thread A installs its
+// JSCallback as the X error handler, an X error triggered by thread B's
+// X call invokes the callback synchronously from B's stack, which bun
+// cannot service across thread contexts (results in SIGTRAP or recursive
+// JS errors).
+//
+// The handler does no JS work — it just needs to return so Xlib stops
+// short of its built-in print-and-exit. So instead of a JSCallback, we
+// install a *plain C function* whose call site is thread-safe by
+// construction. `getuid` from libc is convenient: it takes no args (so
+// the Display*/XErrorEvent* the caller passes in registers are ignored),
+// returns an int, and has no observable side-effects beyond a syscall.
+// The X error code path then continues normally and the calling wrapper
+// observes the failure through its own return value.
+let _errorHandlerCb: { ptr: Pointer; close(): void } | null = null;
 
 function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
-  if (_errorHandler) return;
+  if (process.env.MECHATRON_NO_X_ERROR_HANDLER === "1") return;
+  // Try the thread-safe libc-pointer path first.
+  try {
+    const T = ffi.FFIType;
+    const handle = ffi.dlopen("libc.so.6", {
+      getuid: { args: [], returns: T.u32 },
+    });
+    // bun:ffi exposes the raw symbol address via `.ptr`, but stored as a
+    // Float64 by bit-pattern. Reinterpret to a bigint and pass via T.i64
+    // (XSetErrorHandler is re-declared with i64 below to accept it).
+    const f64 = new Float64Array([(handle.symbols.getuid as any).ptr]);
+    const fnAddr = new BigUint64Array(f64.buffer)[0];
+    if (fnAddr !== 0n) {
+      x.XSetErrorHandler(fnAddr as unknown as Pointer);
+      return;
+    }
+  } catch (_) {
+    // fall through to JSCallback path
+  }
+  // JSCallback fallback. Only safe when there is exactly one thread
+  // making X calls (or all threads use the same handler-installer
+  // ordering); see comment above.
+  if (_errorHandlerCb) return;
   const T = ffi.FFIType;
   try {
-    _errorHandler = new ffi.JSCallback(
-      // (Display* display, XErrorEvent* ev) -> int
-      // Ignore the error; Xlib will return normally and the calling
-      // wrapper observes the failure through its own return value.
+    _errorHandlerCb = new ffi.JSCallback(
       () => 0,
       { args: [T.ptr, T.ptr], returns: T.i32 },
     );
-    x.XSetErrorHandler(_errorHandler.ptr);
+    x.XSetErrorHandler(_errorHandlerCb.ptr);
   } catch (_) {
-    // Older Bun versions without JSCallback leave the default handler
-    // in place; errors will still crash the process but at least the
-    // FFI backend loads.
-    _errorHandler = null;
+    _errorHandlerCb = null;
   }
 }
 
@@ -257,7 +289,10 @@ function tryDlopen(): void {
       },
       XDestroyImage:          { args: [T.u64], returns: T.i32 },
       XGetPixel:              { args: [T.u64, T.i32, T.i32], returns: T.u64 },
-      XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
+      // i64 instead of ptr — we may install a raw libc function pointer
+      // (passed as a bigint) rather than a JSCallback. ptr rejects bigint,
+      // i64 accepts it and is ABI-equivalent at the register level.
+      XSetErrorHandler:       { args: [T.i64], returns: T.i64 },
       XCreateSimpleWindow:    {
         args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32, T.u32, T.u64, T.u64],
         returns: T.u64,

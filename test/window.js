@@ -438,9 +438,19 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				if (list.length === 0) return;
 				var vw = list[0];
 				var orig = await vw.getTitle();
-				await vw.setTitle("mechatron_test_title");
-				await new Promise(function (r) { setTimeout(r, 100); });
-				var t = await vw.getTitle();
+				var newTitle = "mechatron_test_title";
+				await vw.setTitle(newTitle);
+				// Title set is asynchronous on Windows (DWM redraw queue) and
+				// may race with intervening window manager events on Linux.
+				// Poll for up to ~1s before failing the round-trip assertion.
+				var observed = "";
+				for (var i = 0; i < 20; i++) {
+					await new Promise(function (r) { setTimeout(r, 50); });
+					observed = await vw.getTitle();
+					if (observed === newTitle) break;
+				}
+				assert(observed === newTitle,
+					"getTitle returns set title (got: " + JSON.stringify(observed) + ")");
 				if (orig) await vw.setTitle(orig);
 			}
 		},
