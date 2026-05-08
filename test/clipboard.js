@@ -186,6 +186,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 			}
 		},
 		{
+			name: "clear returns boolean",
+			functions: ["clipboard_clear"],
+			test: async function () {
+				assert(typeof (await Clipboard.clear()) === "boolean", "clear returns boolean");
+			}
+		},
+		{
 			name: "hasText after setText",
 			functions: ["clipboard_setText", "clipboard_hasText"],
 			test: async function () {

@@ -78,6 +78,17 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			}
 		},
 
+		// ---- setPos fire-and-forget (no getPos readback) ----
+
+		{
+			name: "setPos fire-and-forget",
+			functions: ["mouse_setPos"],
+			test: async function () {
+				await Mouse.setPos(200, 150);
+				await Mouse.setPos(50, 50);
+			}
+		},
+
 		// ---- press + getState ----
 
 		{
