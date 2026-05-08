@@ -918,6 +918,11 @@ unsafe fn receive_mime(
 
 // ── Availability check ──────────────────────────────────────────────────
 
+// Retained as part of the clipboard_wl public surface even though the
+// portal crate doesn't call it (the loader checks Wayland availability
+// at .node load time via the libwayland-client dlopen rather than at
+// the language level).  Dead-code-allowed so the build stays warning-clean.
+#[allow(dead_code)]
 pub fn is_available() -> bool {
     get_handle().is_some()
 }

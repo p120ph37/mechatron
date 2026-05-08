@@ -3,10 +3,9 @@ extern crate napi_build;
 fn main() {
     napi_build::setup();
 
-    #[cfg(target_os = "linux")]
-    {
-        println!("cargo:rustc-link-lib=X11");
-    }
+    // mechatron-clipboard is the non-Linux base crate (macOS / Windows).
+    // Linux variants live in mechatron-clipboard-x11 and
+    // mechatron-clipboard-portal which link their respective system libs.
 
     #[cfg(target_os = "macos")]
     {

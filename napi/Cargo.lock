@@ -188,8 +188,6 @@ dependencies = [
 name = "mechatron-clipboard"
 version = "0.0.0"
 dependencies = [
- "libc",
- "mechatron-shared",
  "napi",
  "napi-build",
  "napi-derive",
@@ -198,8 +196,30 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
- "png",
  "windows",
+]
+
+[[package]]
+name = "mechatron-clipboard-portal"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "png",
+]
+
+[[package]]
+name = "mechatron-clipboard-x11"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "png",
 ]
 
 [[package]]
@@ -295,14 +315,33 @@ version = "0.0.0"
 dependencies = [
  "core-graphics",
  "foreign-types",
- "libc",
- "mechatron-shared",
  "napi",
  "napi-build",
  "napi-derive",
  "objc2",
  "objc2-app-kit",
  "windows",
+]
+
+[[package]]
+name = "mechatron-screen-portal"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "napi",
+ "napi-build",
+ "napi-derive",
+]
+
+[[package]]
+name = "mechatron-screen-x11"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "mechatron-shared",
+ "napi",
+ "napi-build",
+ "napi-derive",
 ]
 
 [[package]]

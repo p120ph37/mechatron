@@ -1,9 +1,7 @@
-#[cfg(target_os = "linux")]
-use mechatron_shared::x11 as x11_mod;
-#[cfg(target_os = "linux")]
-mod x11 {
-    pub use crate::x11_mod::*;
-}
+// mechatron-clipboard — non-Linux clipboard binary (macOS / Windows).
+//
+// On Linux, see mechatron-clipboard-x11 and mechatron-clipboard-portal
+// which are separate crates with their own NEEDED system libs.
 
 #[path = "../../src/clipboard.rs"]
 mod clipboard;

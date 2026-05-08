@@ -1,189 +1,31 @@
+// Non-Linux clipboard implementation.
+//
+// macOS uses NSPasteboard (objc2-app-kit) with NSImage round-trips for
+// the bitmap path.  Windows uses the Win32 clipboard API
+// (OpenClipboard / GetClipboardData / SetClipboardData) with CF_UNICODETEXT
+// for text and CF_DIB for images.  Both platforms expose a single OS-native
+// clipboard with no variant fan-out, so this file is the only clipboard
+// implementation on those platforms.
+//
+// On Linux, see ../src/clipboard_x11_main.rs (X11 ICCCM selections via
+// libX11) and ../src/clipboard_portal_main.rs (Wayland zwlr_data_control_v1
+// via libwayland-client) — the build system selects one of those crates
+// per backend variant rather than runtime-dispatching at the language
+// level.
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi::bindgen_prelude::*;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi::Either;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi_derive::napi;
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(object)]
 pub struct ClipboardImage {
     pub width: u32,
     pub height: u32,
     pub data: Uint32Array,
-}
-
-// =============================================================================
-// Linux — X11 (ICCCM selections) or Wayland (zwlr_data_control_v1)
-// =============================================================================
-
-#[cfg(target_os = "linux")]
-#[path = "clipboard_x11.rs"]
-mod clipboard_x11;
-
-#[cfg(target_os = "linux")]
-#[path = "clipboard_wl.rs"]
-mod clipboard_wl;
-
-#[cfg(target_os = "linux")]
-#[derive(Clone, Copy, PartialEq)]
-enum LinuxBackend { Wayland, X11, None }
-
-#[cfg(target_os = "linux")]
-fn detect_backend() -> LinuxBackend {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    static mut BACKEND: LinuxBackend = LinuxBackend::None;
-    unsafe {
-        INIT.call_once(|| {
-            if std::env::var_os("WAYLAND_DISPLAY").is_some() && clipboard_wl::is_available() {
-                BACKEND = LinuxBackend::Wayland;
-            } else if std::env::var_os("DISPLAY").is_some() {
-                BACKEND = LinuxBackend::X11;
-            }
-        });
-        BACKEND
-    }
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn argb_to_png(width: u32, height: u32, data: &[u32]) -> Option<Vec<u8>> {
-    let pixel_count = (width as usize) * (height as usize);
-    if data.len() < pixel_count { return None; }
-
-    let mut rgba = Vec::with_capacity(pixel_count * 4);
-    for &pixel in &data[..pixel_count] {
-        rgba.push(((pixel >> 16) & 0xFF) as u8);
-        rgba.push(((pixel >> 8) & 0xFF) as u8);
-        rgba.push((pixel & 0xFF) as u8);
-        rgba.push(((pixel >> 24) & 0xFF) as u8);
-    }
-
-    let mut buf = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut buf, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().ok()?;
-        writer.write_image_data(&rgba).ok()?;
-    }
-    Some(buf)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn png_to_argb(png_data: &[u8]) -> Option<(u32, u32, Vec<u32>)> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(png_data));
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).ok()?;
-    let buf = &buf[..info.buffer_size()];
-    let w = info.width;
-    let h = info.height;
-    let n = (w * h) as usize;
-    let mut argb = Vec::with_capacity(n);
-
-    match info.color_type {
-        png::ColorType::Rgba => {
-            for i in 0..n {
-                let r = buf[i * 4] as u32;
-                let g = buf[i * 4 + 1] as u32;
-                let b = buf[i * 4 + 2] as u32;
-                let a = buf[i * 4 + 3] as u32;
-                argb.push((a << 24) | (r << 16) | (g << 8) | b);
-            }
-        }
-        png::ColorType::Rgb => {
-            for i in 0..n {
-                let r = buf[i * 3] as u32;
-                let g = buf[i * 3 + 1] as u32;
-                let b = buf[i * 3 + 2] as u32;
-                argb.push(0xFF000000 | (r << 16) | (g << 8) | b);
-            }
-        }
-        png::ColorType::GrayscaleAlpha => {
-            for i in 0..n {
-                let v = buf[i * 2] as u32;
-                let a = buf[i * 2 + 1] as u32;
-                argb.push((a << 24) | (v << 16) | (v << 8) | v);
-            }
-        }
-        png::ColorType::Grayscale => {
-            for i in 0..n {
-                let v = buf[i] as u32;
-                argb.push(0xFF000000 | (v << 16) | (v << 8) | v);
-            }
-        }
-        _ => return None,
-    }
-    Some((w, h, argb))
-}
-
-#[cfg(target_os = "linux")]
-fn platform_clear() -> bool {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_clear(),
-        LinuxBackend::X11 => clipboard_x11::x11_clear(),
-        LinuxBackend::None => false,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_has_text() -> bool {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_has_text(),
-        LinuxBackend::X11 => clipboard_x11::x11_has_text(),
-        LinuxBackend::None => false,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_text() -> String {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_get_text(),
-        LinuxBackend::X11 => clipboard_x11::x11_get_text(),
-        LinuxBackend::None => String::new(),
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_set_text(text: &str) -> bool {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_set_text(text),
-        LinuxBackend::X11 => clipboard_x11::x11_set_text(text),
-        LinuxBackend::None => false,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_has_image() -> bool {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_has_image(),
-        LinuxBackend::X11 => clipboard_x11::x11_has_image(),
-        LinuxBackend::None => false,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_get_image(),
-        LinuxBackend::X11 => clipboard_x11::x11_get_image(),
-        LinuxBackend::None => None,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_set_image(width: u32, height: u32, data: &[u32]) -> bool {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_set_image(width, height, data),
-        LinuxBackend::X11 => clipboard_x11::x11_set_image(width, height, data),
-        LinuxBackend::None => false,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_sequence() -> f64 {
-    match detect_backend() {
-        LinuxBackend::Wayland => clipboard_wl::wl_get_sequence(),
-        LinuxBackend::X11 => clipboard_x11::x11_get_sequence(),
-        LinuxBackend::None => 0.0,
-    }
 }
 
 // =============================================================================
@@ -634,7 +476,9 @@ fn platform_get_sequence() -> f64 {
 // AsyncTask wrappers
 // =============================================================================
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct ClearTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for ClearTask {
     type Output = bool;
     type JsValue = bool;
@@ -642,7 +486,9 @@ impl Task for ClearTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct HasTextTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for HasTextTask {
     type Output = bool;
     type JsValue = bool;
@@ -650,7 +496,9 @@ impl Task for HasTextTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct GetTextTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for GetTextTask {
     type Output = String;
     type JsValue = String;
@@ -658,7 +506,9 @@ impl Task for GetTextTask {
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct SetTextTask { text: String }
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for SetTextTask {
     type Output = bool;
     type JsValue = bool;
@@ -666,7 +516,9 @@ impl Task for SetTextTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct HasImageTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for HasImageTask {
     type Output = bool;
     type JsValue = bool;
@@ -674,7 +526,9 @@ impl Task for HasImageTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct GetImageTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for GetImageTask {
     type Output = Option<(u32, u32, Vec<u32>)>;
     type JsValue = Either<ClipboardImage, ()>;
@@ -693,7 +547,9 @@ impl Task for GetImageTask {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct SetImageTask { width: u32, height: u32, data: Vec<u32> }
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for SetImageTask {
     type Output = bool;
     type JsValue = bool;
@@ -703,7 +559,9 @@ impl Task for SetImageTask {
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct GetSequenceTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for GetSequenceTask {
     type Output = f64;
     type JsValue = f64;
@@ -715,41 +573,49 @@ impl Task for GetSequenceTask {
 // NAPI exports — delegate to platform functions via AsyncTask
 // =============================================================================
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_clear")]
 pub fn clipboard_clear() -> AsyncTask<ClearTask> {
     AsyncTask::new(ClearTask)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_hasText")]
 pub fn clipboard_has_text() -> AsyncTask<HasTextTask> {
     AsyncTask::new(HasTextTask)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_getText")]
 pub fn clipboard_get_text() -> AsyncTask<GetTextTask> {
     AsyncTask::new(GetTextTask)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_setText")]
 pub fn clipboard_set_text(text: String) -> AsyncTask<SetTextTask> {
     AsyncTask::new(SetTextTask { text })
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_hasImage")]
 pub fn clipboard_has_image() -> AsyncTask<HasImageTask> {
     AsyncTask::new(HasImageTask)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_getImage")]
 pub fn clipboard_get_image() -> AsyncTask<GetImageTask> {
     AsyncTask::new(GetImageTask)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_setImage")]
 pub fn clipboard_set_image(width: u32, height: u32, data: Uint32Array) -> AsyncTask<SetImageTask> {
     AsyncTask::new(SetImageTask { width, height, data: data.to_vec() })
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "clipboard_getSequence")]
 pub fn clipboard_get_sequence() -> AsyncTask<GetSequenceTask> {
     AsyncTask::new(GetSequenceTask)
