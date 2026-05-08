@@ -157,7 +157,7 @@ describe(`mechatron [${backend}]`, () => {
       const exDir = path.join(outDir, "exercised");
       fs.mkdirSync(exDir, { recursive: true });
       const safeBackend = backend.replace(/[\[\]]/g, "_");
-      const fname = `${process.platform}-${process.arch}-${safeBackend}.json`;
+      const fname = `${process.platform}-${process.arch}-${safeBackend}-${process.pid}.json`;
       fs.writeFileSync(
         path.join(exDir, fname),
         JSON.stringify({ platform: process.platform, arch: process.arch,
