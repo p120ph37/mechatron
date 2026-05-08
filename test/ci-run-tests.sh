@@ -146,9 +146,17 @@ if [ "$RUNNER_OS" = "macOS" ] && [ "$MATRIX_ARCH" = "x64" ] && [ "$RUNNER_ARCH" 
   chmod +x "$X64_BUN"
   BUN="$X64_BUN"
   WRAP+=(arch -x86_64)
+fi
+
+# ── macOS: grant TCC permissions to bun so AX-based setTitle works ──
+# Without these, AXUIElementSetAttributeValue silently no-ops and the
+# valid window setTitle/getTitle round-trip never observes a change.
+# Previously this only ran on the x64-under-Rosetta cell, but the
+# native-arm64 cell needs the same grant for its own bun binary.
+if [ "$RUNNER_OS" = "macOS" ]; then
   TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
   for SVC in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
-    sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$X64_BUN',1,2,4,1,0);" 2>/dev/null || true
+    sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$SVC','$BUN',1,2,4,1,0);" 2>/dev/null || true
   done
   sudo launchctl stop com.apple.tccd 2>/dev/null || true
   sleep 1
