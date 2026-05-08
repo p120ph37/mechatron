@@ -38,6 +38,13 @@ const assert = (cond: unknown, msg?: string) => {
   if (!cond) throw new Error("Assertion Failed" + (msg ? ": " + msg : ""));
 };
 
+// ── Worker polyfill: subprocess-based workers for coverage instrumentation ───
+
+if (process.env.MECHATRON_WORKER_POLYFILL === "1" && _baseBackend === "ffi") {
+  const { InProcessWorker } = require("./worker-subprocess-polyfill");
+  require("../lib/ffi/_dispatch")._setWorkerCtor(InProcessWorker);
+}
+
 // ── Load mechatron + per-subsystem test modules ──────────────────────────────
 
 const mechatron: any = require("../lib");

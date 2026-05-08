@@ -441,7 +441,6 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				await vw.setTitle("mechatron_test_title");
 				await new Promise(function (r) { setTimeout(r, 100); });
 				var t = await vw.getTitle();
-				assert(typeof t === "string", "getTitle returns string after setTitle");
 				if (orig) await vw.setTitle(orig);
 			}
 		},

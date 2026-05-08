@@ -17,11 +17,16 @@
  * whose operations are one-shot synchronous FFI calls.
  */
 
-import { Worker } from "worker_threads";
+import { Worker as NodeWorker } from "worker_threads";
 
 export interface Dispatcher {
   call<T = any>(op: string, args?: unknown[]): Promise<T>;
 }
+
+let _WorkerCtor: any = NodeWorker;
+
+/** @internal Test-only: override Worker constructor for coverage polyfill. */
+export function _setWorkerCtor(ctor: any): void { _WorkerCtor = ctor; }
 
 interface PendingEntry {
   resolve: (value: any) => void;
@@ -29,13 +34,13 @@ interface PendingEntry {
 }
 
 export function createDispatcher(workerPath: string): Dispatcher {
-  let worker: Worker | null = null;
+  let worker: any = null;
   let nextId = 1;
   const pending = new Map<number, PendingEntry>();
 
-  function ensure(): Worker {
+  function ensure(): any {
     if (worker) return worker;
-    worker = new Worker(workerPath);
+    worker = new _WorkerCtor(workerPath);
     worker.on("message", (data: { id: number; result?: any; error?: string }) => {
       const entry = pending.get(data.id);
       if (!entry) return;

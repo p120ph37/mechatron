@@ -764,17 +764,18 @@ function testDbusWire() {
 		// Exercise ffi/uinput.ts lazy-open failure path (/dev/uinput absent)
 		var uinputMod = require("../lib/ffi/uinput");
 		var dev = uinputMod.getUinputDevice();
+		assert(uinputMod.uinputReady() === (dev !== null), "uinputReady matches device state");
 		if (dev) {
 			log("(uinput: available) ");
 			uinputMod.closeUinputDevice();
+			assert(uinputMod.uinputReady() === false, "uinputReady false after close");
 		} else {
 			var reason = uinputMod.uinputOpenReason();
 			assert(typeof reason === "string", "uinputOpenReason returns string on failure");
 			assert(reason.length > 0, "uinputOpenReason is non-empty");
 			log("(uinput: " + reason + ") ");
+			uinputMod.closeUinputDevice();
 		}
-		assert(uinputMod.uinputReady() === (dev !== null), "uinputReady matches device state");
-		uinputMod.closeUinputDevice();
 
 		// Exercise ffi/linux.ts — imported only by worker -impl files.
 		var linuxMod = require("../lib/ffi/linux");
