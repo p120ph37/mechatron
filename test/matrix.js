@@ -152,6 +152,18 @@ module.exports = {
 				return cells;
 			},
 
+			getTestedColumns: function () {
+				if (!matrix) return [];
+				var cols = [];
+				var subsystems = Object.keys(matrix);
+				for (var s = 0; s < subsystems.length; s++) {
+					var sub = subsystems[s];
+					var column = columnForSubsystem(mechatron, sub);
+					if (column && cols.indexOf(column) === -1) cols.push(column);
+				}
+				return cols;
+			},
+
 			getSkippedColumns: function () {
 				if (!matrix) return [];
 				var skipped = [];

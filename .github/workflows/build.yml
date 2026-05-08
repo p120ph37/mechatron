@@ -198,6 +198,10 @@ jobs:
             for (const ef of exFiles) {
               const col = ef.platform + "-" + ef.backend;
               testedCols.add(col);
+              // Also mark the actual per-subsystem columns as tested (e.g.
+              // "linux-ffi[x11]") so variant columns aren't falsely reported
+              // as untested when they're covered by this run.
+              for (const tc of ef.testedColumns || []) testedCols.add(tc);
               if (!allOk[col]) allOk[col] = new Set();
               if (!allEx[col]) allEx[col] = new Set();
               for (const fn of ef.okCells || []) allOk[col].add(fn);
