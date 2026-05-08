@@ -111,12 +111,7 @@ interface X11 {
   XDeleteProperty: (display: Pointer, w: bigint, property: bigint) => number;
   XConnectionNumber: (display: Pointer) => number;
   // Error handler suppression
-  // Pointer-typed args/returns are declared as i64 in the FFI binding — see
-  // the dlopen call below — so a libc function-pointer (bigint) can be
-  // installed as the silent X error handler from any thread without a
-  // JSCallback. The TypeScript type stays Pointer for ergonomics; the
-  // bigint cast happens in installSilentErrorHandler.
-  XSetErrorHandler: (handler: Pointer | bigint) => Pointer | bigint;
+  XSetErrorHandler: (handler: Pointer) => Pointer;
 }
 
 interface XTest {
@@ -177,13 +172,14 @@ let _errorHandlerCb: { ptr: Pointer; close(): void } | null = null;
 function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
   if (process.env.MECHATRON_NO_X_ERROR_HANDLER === "1") return;
   // Try the thread-safe libc-pointer path first. Use dlsym to look up a
-  // simple C function (`getuid`) and install its address as the X error
-  // handler. The function ignores any args passed in registers and returns
-  // a 32-bit value which Xlib discards — the only effect is that Xlib
-  // skips its print-and-exit and the calling wrapper sees the failure
-  // through its return value. Since this is a plain C function pointer,
-  // it has no JS context, so it's safe to install once and call from
-  // any thread (including across worker boundaries).
+  // tiny pure-userspace C function (`rand`) and install its address as the
+  // X error handler. `int rand(void)` matches the XErrorHandler signature
+  // exactly (returns int, args ignored): Xlib calls the function with
+  // (Display*, XErrorEvent*) in registers, rand reads no args, returns an
+  // int which Xlib discards — and crucially, it skips Xlib's built-in
+  // print-and-exit. The calling wrapper observes the failure through its
+  // own return value. Plain C function pointer → no JS context → safe to
+  // install once and call from any thread.
   try {
     const T = ffi.FFIType;
     const dl = ffi.dlopen<{
@@ -193,9 +189,12 @@ function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
     });
     // RTLD_DEFAULT is 0 — search all already-loaded libraries (libc).
     const RTLD_DEFAULT = 0n;
-    const fnAddr = dl.symbols.dlsym(RTLD_DEFAULT, Buffer.from("getuid\0"));
+    const fnAddr = dl.symbols.dlsym(RTLD_DEFAULT, Buffer.from("rand\0"));
     if (typeof fnAddr === "bigint" && fnAddr !== 0n) {
-      x.XSetErrorHandler(fnAddr as unknown as Pointer);
+      // T.ptr accepts JS number; user-space libc addresses on x86_64/arm64
+      // fit comfortably in 53 bits (typical 0x7f...), so Number(bigint) is
+      // lossless in practice.
+      x.XSetErrorHandler(Number(fnAddr) as Pointer);
       return;
     }
   } catch (_) {
@@ -211,8 +210,7 @@ function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
       () => 0,
       { args: [T.ptr, T.ptr], returns: T.i32 },
     );
-    // .ptr is a number; T.i64 args expect bigint, so coerce.
-    x.XSetErrorHandler(BigInt(_errorHandlerCb.ptr as unknown as number) as unknown as Pointer);
+    x.XSetErrorHandler(_errorHandlerCb.ptr);
   } catch (_) {
     _errorHandlerCb = null;
   }
@@ -297,10 +295,7 @@ function tryDlopen(): void {
       },
       XDestroyImage:          { args: [T.u64], returns: T.i32 },
       XGetPixel:              { args: [T.u64, T.i32, T.i32], returns: T.u64 },
-      // i64 instead of ptr — we may install a raw libc function pointer
-      // (passed as a bigint) rather than a JSCallback. ptr rejects bigint,
-      // i64 accepts it and is ABI-equivalent at the register level.
-      XSetErrorHandler:       { args: [T.i64], returns: T.i64 },
+      XSetErrorHandler:       { args: [T.ptr], returns: T.ptr },
       XCreateSimpleWindow:    {
         args: [T.ptr, T.u64, T.i32, T.i32, T.u32, T.u32, T.u32, T.u64, T.u64],
         returns: T.u64,
