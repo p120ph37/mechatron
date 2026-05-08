@@ -176,18 +176,25 @@ let _errorHandlerCb: { ptr: Pointer; close(): void } | null = null;
 
 function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
   if (process.env.MECHATRON_NO_X_ERROR_HANDLER === "1") return;
-  // Try the thread-safe libc-pointer path first.
+  // Try the thread-safe libc-pointer path first. Use dlsym to look up a
+  // simple C function (`getuid`) and install its address as the X error
+  // handler. The function ignores any args passed in registers and returns
+  // a 32-bit value which Xlib discards — the only effect is that Xlib
+  // skips its print-and-exit and the calling wrapper sees the failure
+  // through its return value. Since this is a plain C function pointer,
+  // it has no JS context, so it's safe to install once and call from
+  // any thread (including across worker boundaries).
   try {
     const T = ffi.FFIType;
-    const handle = ffi.dlopen<{ getuid: () => number }>("libc.so.6", {
-      getuid: { args: [], returns: T.u32 },
+    const dl = ffi.dlopen<{
+      dlsym: (handle: bigint, sym: Buffer) => bigint;
+    }>("libdl.so.2", {
+      dlsym: { args: [T.i64, T.cstring], returns: T.i64 },
     });
-    // bun:ffi exposes the raw symbol address via `.ptr`, but stored as a
-    // Float64 by bit-pattern. Reinterpret to a bigint and pass via T.i64
-    // (XSetErrorHandler is re-declared with i64 below to accept it).
-    const f64 = new Float64Array([(handle.symbols.getuid as any).ptr]);
-    const fnAddr = new BigUint64Array(f64.buffer)[0];
-    if (fnAddr !== 0n) {
+    // RTLD_DEFAULT is 0 — search all already-loaded libraries (libc).
+    const RTLD_DEFAULT = 0n;
+    const fnAddr = dl.symbols.dlsym(RTLD_DEFAULT, Buffer.from("getuid\0"));
+    if (typeof fnAddr === "bigint" && fnAddr !== 0n) {
       x.XSetErrorHandler(fnAddr as unknown as Pointer);
       return;
     }
@@ -204,7 +211,8 @@ function installSilentErrorHandler(ffi: BunFFI, x: X11): void {
       () => 0,
       { args: [T.ptr, T.ptr], returns: T.i32 },
     );
-    x.XSetErrorHandler(_errorHandlerCb.ptr);
+    // .ptr is a number; T.i64 args expect bigint, so coerce.
+    x.XSetErrorHandler(BigInt(_errorHandlerCb.ptr as unknown as number) as unknown as Pointer);
   } catch (_) {
     _errorHandlerCb = null;
   }
