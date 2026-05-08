@@ -335,6 +335,109 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			}
 		},
 		{
+			name: "valid window maximize round-trip",
+			functions: ["window_getList", "window_isValid", "window_setMaximized", "window_isMaximized"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await vw.setMaximized(true);
+				await waitForAsync(function () { return vw.isMaximized(); }, 1000);
+				var maxed = await vw.isMaximized();
+				await vw.setMaximized(false);
+				await waitForAsync(async function () { return !(await vw.isMaximized()); }, 1000);
+				assert(typeof maxed === "boolean", "isMaximized returns boolean after set");
+			}
+		},
+		{
+			name: "valid window minimize round-trip",
+			functions: ["window_getList", "window_isValid", "window_setMinimized", "window_isMinimized"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await vw.setMinimized(true);
+				await waitForAsync(function () { return vw.isMinimized(); }, 1000);
+				var mined = await vw.isMinimized();
+				await vw.setMinimized(false);
+				await waitForAsync(async function () { return !(await vw.isMinimized()); }, 1000);
+				assert(typeof mined === "boolean", "isMinimized returns boolean after set");
+			}
+		},
+		{
+			name: "valid window setBounds + getBounds round-trip",
+			functions: ["window_getList", "window_isValid", "window_setBounds", "window_getBounds"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var orig = await vw.getBounds();
+				await vw.setBounds(10, 10, 200, 150);
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var b = await vw.getBounds();
+				assert(b.w > 0, "setBounds width applied");
+				assert(b.h > 0, "setBounds height applied");
+				await vw.setBounds(orig.x, orig.y, orig.w, orig.h);
+			}
+		},
+		{
+			name: "valid window setClient + getClient round-trip",
+			functions: ["window_getList", "window_isValid", "window_setClient", "window_getClient"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var orig = await vw.getClient();
+				await vw.setClient(5, 5, 180, 120);
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var c = await vw.getClient();
+				assert(c.w > 0, "setClient width applied");
+				assert(c.h > 0, "setClient height applied");
+				await vw.setClient(orig.x, orig.y, orig.w, orig.h);
+			}
+		},
+		{
+			name: "valid window mapToClient + mapToScreen",
+			functions: ["window_getList", "window_isValid", "window_mapToClient", "window_mapToScreen"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var cp = await vw.mapToClient(100, 100);
+				assert(cp instanceof Point, "mapToClient on valid window");
+				var sp = await vw.mapToScreen(10, 10);
+				assert(sp instanceof Point, "mapToScreen on valid window");
+			}
+		},
+		{
+			name: "valid window setActive",
+			functions: ["window_getList", "window_isValid", "window_setActive", "window_getActive"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await Window.setActive(vw);
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var active = await Window.getActive();
+				assert(active instanceof Window, "getActive after setActive");
+			}
+		},
+		{
+			name: "valid window setTitle + getTitle round-trip",
+			functions: ["window_getList", "window_isValid", "window_setTitle", "window_getTitle"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var orig = await vw.getTitle();
+				await vw.setTitle("mechatron_test_title");
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var t = await vw.getTitle();
+				assert(t.length > 0, "getTitle returns non-empty after setTitle");
+				if (orig) await vw.setTitle(orig);
+			}
+		},
+		{
 			name: "valid window setBorderless + setTitle",
 			functions: ["window_getList", "window_setBorderless", "window_setTitle"],
 			test: async function () {

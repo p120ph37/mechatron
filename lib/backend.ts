@@ -56,7 +56,7 @@ export interface BackendEntry {
 const IS_BUN = typeof (globalThis as any).Bun !== "undefined";
 const IS_LINUX = process.platform === "linux";
 
-const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "vt", "sh"];
+const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "gext", "vt", "sh"];
 
 const NAPI_VARIANTS: readonly Variant[] = ["x11", "portal", "gext"];
 const FFI_VARIANTS: readonly Variant[] = ["x11", "portal", "gext"];
@@ -284,12 +284,15 @@ export { defaultOrder as _defaultOrderForTests };
 export function _resetBackend(subsystem: Subsystem): void {
   delete _cache[subsystem];
   delete _backend[subsystem];
+  const backends = ["napi", "ffi", "nolib"] as const;
   for (const v of VALID_VARIANTS) {
-    for (const b of ["napi", "ffi", "nolib"] as const) {
+    for (const b of backends) {
       delete _variantCache[cacheKey(b, subsystem, v)];
+      try { delete require.cache[require.resolve(`./${b}/${subsystem}-${v}`)]; } catch {}
     }
-    delete _variantCache[cacheKey("napi", subsystem)];
-    delete _variantCache[cacheKey("ffi", subsystem)];
-    delete _variantCache[cacheKey("nolib", subsystem)];
+  }
+  for (const b of backends) {
+    delete _variantCache[cacheKey(b, subsystem)];
+    try { delete require.cache[require.resolve(`./${b}/${subsystem}`)]; } catch {}
   }
 }

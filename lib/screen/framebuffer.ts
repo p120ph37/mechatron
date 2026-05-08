@@ -150,12 +150,3 @@ export function parseFbFixSmemLen(buf: Uint8Array): number {
   return new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(20, true);
 }
 
-/**
- * Stub for back-compat.  Real capture is in lib/nolib/screen-vt.ts
- * (ioctl bridge + readSync).
- */
-export function captureFramebuffer(
-  _x: number, _y: number, _w: number, _h: number,
-): Uint32Array | null {
-  return null;
-}

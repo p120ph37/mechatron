@@ -798,6 +798,20 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					var hasNolib = order.some(function(e) { return e.backend === "nolib"; });
 					assert(hasNolib, "defaultOrder includes nolib");
 				}
+
+				// _resetBackend: clears cached backend and reloads
+				var backend = require("../lib/backend");
+				var origBe = backend.getBackend("process");
+				backend._resetBackend("process");
+				var afterReset = backend.getBackend("process");
+				assert(afterReset === origBe, "resetBackend re-resolves same backend");
+
+				// getNative: returns module for available subsystem
+				var mod = backend.getNative("process");
+				assert(mod !== null && typeof mod === "object", "getNative returns module");
+
+				// isAvailable: true for a known-good subsystem
+				assert(backend.isAvailable("process") === true, "isAvailable process");
 			}
 		},
 		{

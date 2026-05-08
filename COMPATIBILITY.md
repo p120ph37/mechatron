@@ -130,9 +130,9 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | clipboard_hasText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_getText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | clipboard_setText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasImage | ok | ok | ok | ok | skip | ok | ok | ok | ok | skip |
-| clipboard_getImage | ok | ok | ok | ok | skip | ok | ok | ok | ok | skip |
-| clipboard_setImage | ok | ok | ok | ok | skip | ok | ok | ok | ok | skip |
+| clipboard_hasImage | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
+| clipboard_getImage | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
+| clipboard_setImage | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
 | clipboard_getSequence | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
 
 ## Memory

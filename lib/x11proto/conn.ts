@@ -38,21 +38,18 @@ import {
   type RRQueryVersionReply, type RRGetMonitorsReply, type MonitorInfo,
   XTEST_TYPE_KEY_PRESS, XTEST_TYPE_KEY_RELEASE,
   XTEST_TYPE_BUTTON_PRESS, XTEST_TYPE_BUTTON_RELEASE,
-  XTEST_TYPE_MOTION_NOTIFY,
   type QueryExtensionReply, type XError,
   // New opcodes
   encodeGetWindowAttributes, parseGetWindowAttributesReply, type GetWindowAttributesReply,
-  encodeDestroyWindow, encodeMapWindow, encodeUnmapWindow,
+  encodeDestroyWindow, encodeMapWindow,
   encodeConfigureWindow, type ConfigureWindowArgs,
   encodeGetGeometry, parseGetGeometryReply, type GetGeometryReply,
   encodeQueryTree, parseQueryTreeReply, type QueryTreeReply,
   encodeInternAtom, parseInternAtomReply,
-  encodeGetAtomName, parseGetAtomNameReply,
   encodeChangeProperty, type ChangePropertyArgs,
   encodeGetProperty, parseGetPropertyReply, type GetPropertyReply, type GetPropertyArgs,
   encodeSendEvent, type SendEventArgs,
   encodeQueryPointer, parseQueryPointerReply, type QueryPointerReply,
-  encodeTranslateCoordinates, parseTranslateCoordinatesReply, type TranslateCoordinatesReply,
   encodeQueryKeymap, parseQueryKeymapReply, type QueryKeymapReply,
   encodeCreateWindow,
   encodeDeleteProperty,
@@ -68,7 +65,7 @@ export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
   GetKeyboardMappingReply,
   RRQueryVersionReply, RRGetMonitorsReply, MonitorInfo,
   GetWindowAttributesReply, GetGeometryReply, QueryTreeReply,
-  GetPropertyReply, QueryPointerReply, TranslateCoordinatesReply,
+  GetPropertyReply, QueryPointerReply,
   QueryKeymapReply, ConfigureWindowArgs, ChangePropertyArgs,
   SendEventArgs, GetPropertyArgs,
   SelectionRequestEvent, SelectionNotifyEvent };
@@ -406,12 +403,6 @@ export class XConnection {
     return this.sendFakeInput(XTEST_TYPE_BUTTON_RELEASE, button, delayMs);
   }
 
-  /** Synthesise pointer motion (absolute by default; pass relative=true for delta). */
-  fakeMotion(x: number, y: number, opts: { relative?: boolean; root?: number; delayMs?: number } = {}): Promise<void> {
-    return this.sendFakeInput(XTEST_TYPE_MOTION_NOTIFY, opts.relative ? 1 : 0,
-                              opts.delayMs ?? 0, x, y, opts.root ?? 0);
-  }
-
   /**
    * Warp the pointer to absolute (x, y) on the given root window.
    * If `root` is omitted, uses the first screen's root window from the
@@ -522,10 +513,6 @@ export class XConnection {
     this.sendRequestNoReply(encodeMapWindow(window));
   }
 
-  unmapWindow(window: number): void {
-    this.sendRequestNoReply(encodeUnmapWindow(window));
-  }
-
   configureWindow(args: ConfigureWindowArgs): void {
     this.sendRequestNoReply(encodeConfigureWindow(args));
   }
@@ -555,11 +542,6 @@ export class XConnection {
     return p;
   }
 
-  async getAtomName(atom: number): Promise<string> {
-    const reply = await this.sendRequest(encodeGetAtomName(atom));
-    return parseGetAtomNameReply(reply).name;
-  }
-
   changeProperty(args: ChangePropertyArgs): void {
     this.sendRequestNoReply(encodeChangeProperty(args));
   }
@@ -577,14 +559,6 @@ export class XConnection {
     const win = window ?? this.info.screens[0]?.root ?? 0;
     const reply = await this.sendRequest(encodeQueryPointer(win));
     return parseQueryPointerReply(reply);
-  }
-
-  async translateCoordinates(
-    srcWindow: number, dstWindow: number, srcX: number, srcY: number,
-  ): Promise<TranslateCoordinatesReply> {
-    const reply = await this.sendRequest(
-      encodeTranslateCoordinates(srcWindow, dstWindow, srcX, srcY));
-    return parseTranslateCoordinatesReply(reply);
   }
 
   async queryKeymap(): Promise<QueryKeymapReply> {

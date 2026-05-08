@@ -389,9 +389,6 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				fb.rowToArgb(src8, 0, dstPix, 0, 2, geom);
 				assert(dstPix[0] === 0xFF000000, "rowToArgb 8bpp pixel 0 = black");
 				assert(dstPix[1] === 0xFF000000, "rowToArgb 8bpp pixel 1 = black");
-
-				// captureFramebuffer stub
-				assert(fb.captureFramebuffer(0, 0, 100, 100) === null, "pure stub returns null");
 			}
 		},
 

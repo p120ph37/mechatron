@@ -244,6 +244,14 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		assert(emittedEvents[0].code === ui.ABS_X, "abs motion X code");
 		assert(emittedEvents[1].code === ui.ABS_Y, "abs motion Y code");
 
+		// ── openUinputForProbe ──────────────────────────────────────────
+		var probe = ui.openUinputForProbe();
+		assert(typeof probe === "object" && typeof probe.ok === "boolean",
+			"openUinputForProbe returns { ok: boolean }");
+		if (!probe.ok) {
+			assert(typeof probe.reason === "string", "probe failure includes reason");
+		}
+
 		log("OK\n");
 		return true;
 	}
