@@ -144,15 +144,42 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		// exercise the discovery + catch paths.
 		var avail = await atspi.atspiAvailable();
 		assert(typeof avail === "boolean", "atspiAvailable returns boolean");
-		atspi.resetAtSpi();
 
-		// atspiListWindows on missing bus throws (caller catches in
-		// nolib/window-portal); we just verify it surfaces an error.
-		var threw = false;
-		try { await atspi.atspiListWindows(); } catch (_) { threw = true; }
-		// On systems with AT-SPI, this won't throw.  Just exercise the
-		// path either way.
-		assert(threw === true || threw === false, "atspiListWindows path exercised");
+		if (avail) {
+			// AT-SPI bus is reachable (CI ffi-atspi cell, or local desktop).
+			// Exercise the full listing path: enumerate top-level windows of
+			// every accessible app, parse role/name/bounds via D-Bus.
+			// Returns an array (possibly empty if no a11y-enabled apps are
+			// running) — never throws when the bus is up.
+			var windows = await atspi.atspiListWindows();
+			assert(Array.isArray(windows), "atspiListWindows returns array when bus available");
+			// Each entry is { hash, x, y, w, h, role, name, pid }.  Don't
+			// require any specific entries (depends on session contents),
+			// but verify shape if any are present.
+			for (var i = 0; i < windows.length; ++i) {
+				var w = windows[i];
+				assert(typeof w === "object" && w !== null,
+					"atspiListWindows entry " + i + " is object");
+				assert(typeof w.hash === "number" || typeof w.hash === "bigint",
+					"atspiListWindows entry " + i + " has hash");
+				assert(typeof w.x === "number" && typeof w.y === "number",
+					"atspiListWindows entry " + i + " has x/y");
+				assert(typeof w.w === "number" && typeof w.h === "number",
+					"atspiListWindows entry " + i + " has w/h");
+			}
+			atspi.resetAtSpi();
+			// After reset, calling again re-discovers the bus (covers the
+			// cache-warm-on-second-call path).
+			var avail2 = await atspi.atspiAvailable();
+			assert(avail2 === true, "atspiAvailable still true after reset");
+		} else {
+			// atspiListWindows on missing bus throws (caller catches in
+			// nolib/window-portal); verify it surfaces an error.
+			var threw = false;
+			try { await atspi.atspiListWindows(); } catch (_) { threw = true; }
+			assert(threw === true, "atspiListWindows throws when bus unavailable");
+		}
+
 		atspi.resetAtSpi();
 		log("OK\n");
 		return true;

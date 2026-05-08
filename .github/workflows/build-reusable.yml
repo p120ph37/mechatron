@@ -80,7 +80,12 @@ jobs:
         #   window_getList() has something to enumerate.
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxrandr-dev libxtst-dev libei-dev xvfb openbox x11-utils x11-apps
+          sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
+          # libei-dev is optional — only available on ubuntu-24.04+. On
+          # older runners (ubuntu-22.04 arm64) the keyboard-portal /
+          # mouse-portal crates are skipped from the build (see Build
+          # Rust napi modules step below).
+          sudo apt-get install -y libei-dev 2>/dev/null || true
           # Clipboard tools for nolib[sh] subprocess clipboard variant
           # (xclip for X11, wl-clipboard for Wayland).
           sudo apt-get install -y xclip wl-clipboard
@@ -154,7 +159,15 @@ jobs:
           # one npm package: $PKG below maps each crate back to the
           # subsystem's package directory (`keyboard-x11` → `keyboard`).
           if [ "${{ runner.os }}" = "Linux" ]; then
-            SUBS="keyboard-x11 keyboard-portal mouse-x11 mouse-portal clipboard-x11 clipboard-portal screen-x11 screen-portal window process memory"
+            # keyboard-portal and mouse-portal link libei (libei-dev only
+            # available on ubuntu-24.04+); skip them on older runners.
+            if pkg-config --exists libei 2>/dev/null || dpkg -l libei-dev 2>/dev/null | grep -q '^ii'; then
+              EI_SUBS="keyboard-portal mouse-portal"
+            else
+              EI_SUBS=""
+              echo ">>> libei-dev not installed — skipping keyboard-portal / mouse-portal crates"
+            fi
+            SUBS="keyboard-x11 $EI_SUBS mouse-x11 clipboard-x11 clipboard-portal screen-x11 screen-portal window process memory"
           else
             SUBS="keyboard mouse clipboard screen window process memory"
           fi

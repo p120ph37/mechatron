@@ -361,7 +361,9 @@ fi
 # Boot the AT-SPI2 registry so atspiAvailable() / atspiListWindows()
 # can complete without throwing. With the registry up, the unit-test
 # path in test/portal.js exercises the full bus-discovery + connection
-# path (lib/portal/atspi.ts coverage rises ~30%).
+# path (lib/portal/atspi.ts coverage rises ~30%). Unit tests must run
+# in this cell — that's the whole point — so MECHATRON_SKIP_UNIT is
+# left unset.
 if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-atspi.xml"
   BE_COV_DIR="$COV_DIR/ffi-atspi"
@@ -371,7 +373,6 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
   ATSPI_PID=$!
   sleep 1
   MECHATRON_BACKEND=ffi \
-  MECHATRON_SKIP_UNIT=1 \
     run_bun "ffi-atspi" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
