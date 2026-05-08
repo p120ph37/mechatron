@@ -87,7 +87,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | window_getActive | ok | ok | ok | skip | ok | ok | ok | ok | ok |
 | window_setActive | ok | ok | ok | skip | ok | ok | ok | ok | ok |
 | window_isAxEnabled | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| window_isValid_proc | skip | ok | skip | skip | skip | skip | skip | skip | skip |
+| window_isValid_proc | skip | ok | ok | skip | skip | skip | skip | skip | skip |
 
 ## Process
 

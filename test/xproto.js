@@ -931,7 +931,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 		{
 			name: "xconn lifecycle helpers",
 			functions: [], unit: true,
-			test: function () {
+			test: async function () {
 				var IS_BUN = typeof globalThis.Bun !== "undefined";
 				if (!IS_BUN) return true;
 				var xconn = require("../lib/x11proto/xconn");
@@ -944,6 +944,46 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				// _resetXConnForTests clears reason and connection
 				xconn._resetXConnForTests();
 				assert(xconn.xconnOpenReason() === null, "reason null after reset");
+
+				// Connect with bogus DISPLAY exercises the xconn catch path
+				var origDisplay = process.env.DISPLAY;
+				try {
+					process.env.DISPLAY = "localhost:99.0";
+					xconn._resetXConnForTests();
+					var conn = await xconn.getXConnection();
+					assert(conn === null, "bogus DISPLAY returns null");
+					assert(typeof xconn.xconnOpenReason() === "string", "openReason set after failure");
+				} finally {
+					if (origDisplay !== undefined) process.env.DISPLAY = origDisplay;
+					else delete process.env.DISPLAY;
+					xconn._resetXConnForTests();
+				}
+
+				// Mock X11 server: invalid handshake response (0x00 = failed)
+				var net = require("net");
+				var XConnection = require("../lib/x11proto/conn").XConnection;
+				await new Promise(function (resolve) {
+					var srv = net.createServer(function (sock) {
+						sock.write(Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
+						setTimeout(function () { sock.destroy(); }, 50);
+					});
+					srv.listen(0, "127.0.0.1", async function () {
+						var port = srv.address().port;
+						try {
+							await XConnection.connect({
+								display: "127.0.0.1:" + (port - 6000),
+								connectTimeoutMs: 1000,
+							});
+							assert(false, "should have thrown");
+						} catch (e) {
+							assert(e instanceof Error, "connect throws Error on bad handshake");
+						}
+						srv.close();
+						resolve();
+					});
+				});
+
+
 			}
 		},
 	];
