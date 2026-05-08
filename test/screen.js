@@ -90,6 +90,26 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				// getMain
 				var main = Screen.getMain();
 				assert(main === null || main instanceof Screen, "getMain type");
+
+				// unionBounds (exported for testing)
+				var IS_BUN = typeof globalThis.Bun !== "undefined";
+				if (IS_BUN) {
+					var unionBounds = require("../lib/screen/Screen")._unionBoundsForTests;
+					// Both zero → returns second
+					var r0 = unionBounds({x:0,y:0,w:0,h:0}, {x:10,y:20,w:30,h:40});
+					assert(r0.x === 10 && r0.y === 20 && r0.w === 30 && r0.h === 40, "union zero+rect = rect");
+					// First zero → returns second
+					var r1 = unionBounds({x:5,y:5,w:100,h:100}, {x:0,y:0,w:0,h:0});
+					assert(r1.x === 5 && r1.w === 100, "union rect+zero = rect");
+					// Both non-zero → bounding box
+					var r2 = unionBounds({x:0,y:0,w:100,h:100}, {x:50,y:50,w:200,h:200});
+					assert(r2.x === 0 && r2.y === 0, "union overlap origin");
+					assert(r2.w === 250 && r2.h === 250, "union overlap size");
+					// Non-overlapping rects
+					var r3 = unionBounds({x:0,y:0,w:10,h:10}, {x:100,y:100,w:20,h:20});
+					assert(r3.x === 0 && r3.y === 0, "union disjoint origin");
+					assert(r3.w === 120 && r3.h === 120, "union disjoint size");
+				}
 			}
 		},
 

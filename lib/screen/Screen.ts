@@ -25,6 +25,8 @@ function unionBounds(a: { x: number; y: number; w: number; h: number }, b: { x: 
   return { x: l, y: t, w: r - l, h: bot - t };
 }
 
+export { unionBounds as _unionBoundsForTests };
+
 export class Screen {
   private _bounds: Bounds;
   private _usable: Bounds;
