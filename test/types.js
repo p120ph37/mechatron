@@ -911,7 +911,9 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(saved === false, "save with no handle returns false");
 
 				// Set a handle, save, then load
-				var platformMod = require("../lib/platform");
+				var platformMod;
+				try { platformMod = require("../lib/platform"); }
+				catch (_) { platformMod = require("../dist/platform"); }
 				platformMod._setSavedScreenHandle({ token: "test123", stream: 42 });
 				saved = await Platform.saveScreenPermission(tmpFile);
 				assert(saved === true, "save with handle returns true");
