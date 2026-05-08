@@ -497,10 +497,47 @@ function testDbusWire() {
 		return true;
 	}
 
+	async function testRemoteDesktop() {
+		log("  remote-desktop... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+
+		var rd = require("../lib/portal/remote-desktop");
+
+		// remoteDesktopAvailable is a sync env-var probe (Wayland +
+		// session bus). On non-Linux this is always false. On Linux it
+		// depends on the test cell — true under the nolib[portal] cell,
+		// false elsewhere. Either way the result must be a boolean and
+		// must match a manual env check.
+		var avail = rd.remoteDesktopAvailable();
+		assert(typeof avail === "boolean", "remoteDesktopAvailable returns boolean");
+		if (process.platform !== "linux") {
+			assert(avail === false, "remoteDesktopAvailable false on non-Linux");
+		}
+
+		// resetSession is idempotent and has no return — exercise the
+		// "no session yet" branch.
+		assert(rd.resetSession() === undefined, "resetSession returns undefined");
+		assert(rd.resetSession() === undefined, "resetSession idempotent");
+
+		// On Linux without a portal session, getSession + notify* throw
+		// or fail to connect. We just exercise the rejection path so the
+		// promise chain is covered.
+		if (process.platform === "linux" && !avail) {
+			var threw = false;
+			try { await rd.notifyPointerMotion(0, 0); } catch (_) { threw = true; }
+			assert(threw === true, "notifyPointerMotion rejects when portal unavailable");
+		}
+
+		log("OK\n");
+		return true;
+	}
+
 	return [
 		{ name: "tokens", functions: [], unit: true, test: testTokens },
 		{ name: "gext token", functions: [], unit: true, test: testGextWindowAccessors },
 		{ name: "atspi avail", functions: [], unit: true, test: testAtSpiAvailability },
+		{ name: "remote-desktop", functions: [], unit: true, test: testRemoteDesktop },
 		{ name: "dbus wire", functions: [], unit: true, test: testDbusWire },
 		{ name: "platform api", functions: [], unit: true, test: testPlatformApi },
 	];
