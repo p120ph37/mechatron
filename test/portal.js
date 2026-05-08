@@ -590,11 +590,312 @@ function testDbusWire() {
 		assert(typeof inst.isExtensionInstalled() === "boolean", "isExtensionInstalled boolean");
 		assert(typeof inst.isExtensionEnabled() === "boolean", "isExtensionEnabled boolean");
 
+		// installExtension: exercises the full install path (copy, enable attempt, token)
+		var result = inst.installExtension({ provisionToken: true });
+		assert(typeof result === "object", "installExtension returns object");
+		assert(typeof result.installed === "boolean", "result.installed boolean");
+		assert(typeof result.enabled === "boolean", "result.enabled boolean");
+		assert(typeof result.needsRestart === "boolean", "result.needsRestart boolean");
+		if (result.installed && result.token) {
+			assert(/^[0-9a-f-]{36}$/.test(result.token), "installExtension token is UUID");
+		}
+
+		// installExtension without provisionToken
+		var result2 = inst.installExtension({ provisionToken: false });
+		assert(typeof result2 === "object", "installExtension(noToken) returns object");
+		assert(result2.token === undefined, "no token when provisionToken=false");
+
+		// Cleanup installed extension
+		var cp = require("child_process");
+		var extTarget = path.join(
+			process.env.HOME || "/tmp",
+			".local", "share", "gnome-shell", "extensions",
+			"mechatron@mechatronic.dev");
+		try { cp.execSync("rm -rf " + extTarget, { stdio: "ignore" }); } catch(_) {}
+
 		// Cleanup temp files but do NOT delete require.cache — leave the
 		// module in cache so bun's coverage tracker sees it at exit.
 		try { fs.unlinkSync(tokensFile); } catch(_) {}
 		try { fs.rmdirSync(tmpDir); } catch(_) {}
 		delete process.env.MECHATRON_TOKENS_FILE;
+
+		log("OK\n");
+		return true;
+	}
+
+	async function testDbusConnection() {
+		log("  dbus connection... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+		if (process.platform !== "linux") { log("(skip: non-linux)\n"); return true; }
+
+		var childProcess = require("child_process");
+		var DBusConnection = require("../lib/dbus/connection").DBusConnection;
+		var DBusError = require("../lib/dbus/connection").DBusError;
+
+		var sockPath = "/tmp/mechatron_test_dbus_" + process.pid;
+		var daemon = null;
+		try {
+			var result = childProcess.execSync(
+				"dbus-daemon --session --fork --address=unix:path=" + sockPath + " --print-pid",
+				{ encoding: "utf8", timeout: 5000 }
+			).trim();
+			daemon = parseInt(result, 10);
+		} catch (e) {
+			log("(skip: no dbus-daemon)\n");
+			return true;
+		}
+
+		try {
+			var conn = await DBusConnection.connect("unix:path=" + sockPath);
+			assert(typeof conn.getUniqueName() === "string", "uniqueName is string");
+			assert(conn.getUniqueName().startsWith(":"), "uniqueName starts with :");
+
+			var reply = await conn.call({
+				path: "/org/freedesktop/DBus",
+				interface: "org.freedesktop.DBus",
+				member: "ListNames",
+				destination: "org.freedesktop.DBus",
+			});
+			assert(Array.isArray(reply.body[0]), "ListNames returns array");
+			assert(reply.body[0].indexOf("org.freedesktop.DBus") !== -1,
+				"ListNames includes the bus itself");
+
+			var signalReceived = false;
+			var unsub = conn.onSignal(function (msg) {
+				if (msg.member === "NameAcquired" || msg.member === "NameOwnerChanged") {
+					signalReceived = true;
+				}
+			});
+			assert(typeof unsub === "function", "onSignal returns unsubscribe fn");
+
+			await conn.call({
+				path: "/org/freedesktop/DBus",
+				interface: "org.freedesktop.DBus",
+				member: "AddMatch",
+				destination: "org.freedesktop.DBus",
+				signature: "s",
+				body: ["type='signal'"],
+			});
+
+			var noReplyResult = await conn.call({
+				path: "/org/freedesktop/DBus",
+				interface: "org.freedesktop.DBus",
+				member: "GetId",
+				destination: "org.freedesktop.DBus",
+				noReply: true,
+			});
+			assert(noReplyResult.body.length === 0, "noReply returns empty body");
+
+			var threw = false;
+			try {
+				await conn.call({
+					path: "/org/freedesktop/DBus",
+					interface: "org.freedesktop.DBus",
+					member: "GetNameOwner",
+					destination: "org.freedesktop.DBus",
+					signature: "s",
+					body: ["com.does.not.exist.ever"],
+				});
+			} catch (e) {
+				threw = true;
+				assert(e instanceof DBusError, "error is DBusError");
+				assert(e.name.indexOf("NameHasNoOwner") !== -1 ||
+					e.name.indexOf("Error") !== -1,
+					"DBusError has appropriate name");
+			}
+			assert(threw, "GetNameOwner throws for unknown name");
+
+			unsub();
+			conn.close();
+
+			threw = false;
+			try {
+				await conn.call({
+					path: "/org/freedesktop/DBus",
+					interface: "org.freedesktop.DBus",
+					member: "ListNames",
+					destination: "org.freedesktop.DBus",
+				});
+			} catch (e) {
+				threw = true;
+				assert(/closed/i.test(e.message), "call after close mentions closed");
+			}
+			assert(threw, "call after close throws");
+
+		} finally {
+			if (daemon) {
+				try { process.kill(daemon, "SIGTERM"); } catch (_) {}
+			}
+			try { require("fs").unlinkSync(sockPath); } catch (_) {}
+		}
+
+		log("OK\n");
+		return true;
+	}
+
+	function testFfiLinuxLibc() {
+		log("  ffi linux/libc... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+		if (process.platform !== "linux") { log("(skip: non-linux)\n"); return true; }
+
+		// Exercise the libc lazy-open path in ffi/libc.ts.
+		// uinput.ts imports it but never calls libc() without /dev/uinput.
+		var libcMod = require("../lib/ffi/libc");
+		var lc = libcMod.libc();
+		assert(lc !== null, "libc() resolves on Linux/Bun");
+		assert(typeof lc.open === "function", "libc has open");
+		assert(typeof lc.close === "function", "libc has close");
+		assert(typeof lc.ioctl === "function", "libc has ioctl");
+		assert(typeof lc.mmap === "function", "libc has mmap");
+
+		var ffi = libcMod.libcFFI();
+		assert(ffi !== null, "libcFFI() resolves");
+
+		var reason = libcMod.libcOpenReason();
+		assert(reason === null, "libcOpenReason null on success");
+
+		// Constants exist
+		assert(libcMod.O_RDWR === 2, "O_RDWR");
+		assert(typeof libcMod.PROT_READ === "number", "PROT_READ");
+		assert(typeof libcMod.MAP_FAILED === "bigint", "MAP_FAILED");
+
+		// Exercise ffi/uinput.ts lazy-open failure path (/dev/uinput absent)
+		var uinputMod = require("../lib/ffi/uinput");
+		var dev = uinputMod.getUinputDevice();
+		if (dev) {
+			log("(uinput: available) ");
+			uinputMod.closeUinputDevice();
+		} else {
+			var reason = uinputMod.uinputOpenReason();
+			assert(typeof reason === "string", "uinputOpenReason returns string on failure");
+			assert(reason.length > 0, "uinputOpenReason is non-empty");
+			log("(uinput: " + reason + ") ");
+		}
+		assert(uinputMod.uinputReady() === (dev !== null), "uinputReady matches device state");
+		uinputMod.closeUinputDevice();
+
+		// Exercise ffi/linux.ts — imported only by worker -impl files.
+		var linuxMod = require("../lib/ffi/linux");
+		var lc2 = linuxMod.libc();
+		assert(lc2 !== null, "linux libc() resolves");
+		assert(typeof lc2.process_vm_readv === "function", "libc has process_vm_readv");
+		assert(typeof lc2.kill === "function", "libc has kill");
+		assert(typeof lc2.sysconf === "function", "libc has sysconf");
+		assert(typeof lc2.getpid === "function", "libc has getpid");
+
+		var pid = lc2.getpid();
+		assert(pid === process.pid, "getpid matches process.pid");
+
+		var ffi2 = linuxMod.libcFFI();
+		assert(ffi2 !== null, "linux libcFFI() resolves");
+
+		assert(linuxMod.SIGTERM === 15, "SIGTERM");
+		assert(linuxMod.SIGKILL === 9, "SIGKILL");
+		assert(linuxMod._SC_PAGESIZE === 30, "_SC_PAGESIZE");
+
+		// makeIovec / makeRemoteIovec
+		var testBuf = new Uint8Array(32);
+		var iov = linuxMod.makeIovec(ffi2, testBuf);
+		assert(iov.iov instanceof BigUint64Array, "makeIovec iov is BigUint64Array");
+		assert(iov.iov.length === 2, "makeIovec iov length 2");
+		assert(iov.iov[1] === 32n, "makeIovec len = 32");
+		assert(typeof iov.dataPtr === "bigint", "makeIovec dataPtr is bigint");
+
+		var riov = linuxMod.makeRemoteIovec(0x1000n, 64);
+		assert(riov instanceof BigUint64Array, "makeRemoteIovec returns BigUint64Array");
+		assert(riov[0] === 0x1000n, "makeRemoteIovec addr");
+		assert(riov[1] === 64n, "makeRemoteIovec len");
+
+		log("OK\n");
+		return true;
+	}
+
+	function testFfiX11Helpers() {
+		log("  ffi x11 helpers... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+		if (process.platform !== "linux" || !process.env.DISPLAY) {
+			log("(skip: no X11)\n"); return true;
+		}
+
+		var x11mod = require("../lib/ffi/x11");
+
+		// Getter functions — these are normally only called from worker threads
+		var display = x11mod.getDisplay();
+		assert(display !== null && display !== undefined, "getDisplay returns non-null");
+		var X = x11mod.x11();
+		assert(X !== null, "x11() returns non-null");
+		var F = x11mod.ffi();
+		assert(F !== null, "ffi() returns non-null");
+		assert(typeof x11mod.isXTestAvailable() === "boolean", "isXTestAvailable boolean");
+		assert(typeof x11mod.isXrandrAvailable() === "boolean", "isXrandrAvailable boolean");
+
+		var xt = x11mod.xtest();
+		log("(xtest=" + (xt !== null) + " xrandr=" + x11mod.isXrandrAvailable() + ") ");
+
+		var xr = x11mod.xrandr();
+
+		// atom() — intern a well-known atom
+		var wmName = x11mod.atom("WM_NAME", true);
+		assert(typeof wmName === "bigint", "atom WM_NAME is bigint");
+		assert(wmName > 0n, "atom WM_NAME > 0");
+
+		// atom with onlyIfExists=false
+		var customAtom = x11mod.atom("_MECHATRON_TEST_ATOM", false);
+		assert(typeof customAtom === "bigint", "custom atom is bigint");
+
+		// getWindowProperty on root window
+		var NET_CLIENT_LIST = x11mod.atom("_NET_CLIENT_LIST", true);
+		if (NET_CLIENT_LIST > 0n) {
+			var defaultScreen = X.XDefaultScreen(display);
+			var root = X.XRootWindow(display, defaultScreen);
+			var prop = x11mod.getWindowProperty(root, NET_CLIENT_LIST);
+			if (prop) {
+				assert(typeof prop.format === "number", "prop.format is number");
+				assert(typeof prop.nitems === "bigint", "prop.nitems is bigint");
+				X.XFree(prop.data);
+			}
+		}
+
+		// getWindowProperty with non-existent property → null
+		var bogus = x11mod.getWindowProperty(0n, 0n);
+		assert(bogus === null, "getWindowProperty(0, 0) returns null");
+
+		// getWindowAttributes on root window
+		var defaultScreen2 = X.XDefaultScreen(display);
+		var root2 = X.XRootWindow(display, defaultScreen2);
+		var attrs = x11mod.getWindowAttributes(root2);
+		assert(attrs !== null, "getWindowAttributes root non-null");
+		assert(attrs.width > 0, "root width > 0");
+		assert(attrs.height > 0, "root height > 0");
+		assert(typeof attrs.map_state === "number", "map_state is number");
+		assert(typeof attrs.screen === "bigint", "screen is bigint");
+
+		// sendClientMessage — send a harmless _NET_ACTIVE_WINDOW to root
+		var NET_ACTIVE = x11mod.atom("_NET_ACTIVE_WINDOW", true);
+		if (NET_ACTIVE > 0n) {
+			x11mod.sendClientMessage(defaultScreen2, root2, NET_ACTIVE, [1n, 0n, 0n, 0n, 0n]);
+			X.XSync(display, 0);
+		}
+
+		log("OK\n");
+		return true;
+	}
+
+	function testPortalUtil() {
+		log("  portal util... ");
+		var IS_BUN = typeof globalThis.Bun !== "undefined";
+		if (!IS_BUN) { log("(skip: node)\n"); return true; }
+
+		var util = require("../lib/portal/util");
+
+		// requestPath: pure string manipulation, no D-Bus needed
+		var mockConn = { getUniqueName: function () { return ":1.42"; } };
+		var rp = util.requestPath(mockConn, "test_token");
+		assert(rp === "/org/freedesktop/portal/desktop/request/1_42/test_token",
+			"requestPath builds correct path");
 
 		log("OK\n");
 		return true;
@@ -607,6 +908,10 @@ function testDbusWire() {
 		{ name: "atspi avail", functions: [], unit: true, test: testAtSpiAvailability },
 		{ name: "remote-desktop", functions: [], unit: true, test: testRemoteDesktop },
 		{ name: "dbus wire", functions: [], unit: true, test: testDbusWire },
+		{ name: "dbus connection", functions: [], unit: true, test: testDbusConnection },
+		{ name: "ffi linux/libc", functions: [], unit: true, test: testFfiLinuxLibc },
+		{ name: "ffi x11 helpers", functions: [], unit: true, test: testFfiX11Helpers },
+		{ name: "portal util", functions: [], unit: true, test: testPortalUtil },
 		{ name: "platform api", functions: [], unit: true, test: testPlatformApi },
 	];
 };

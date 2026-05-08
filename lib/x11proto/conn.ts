@@ -63,7 +63,7 @@ import {
 export type { ServerInfo, XError, QueryExtensionReply, GetImageReply,
   GetKeyboardMappingReply,
   RRQueryVersionReply, RRGetMonitorsReply, MonitorInfo,
-  GetWindowAttributesReply, GetGeometryReply, QueryTreeReply,
+  GetGeometryReply, QueryTreeReply,
   GetPropertyReply, QueryPointerReply,
   QueryKeymapReply, ConfigureWindowArgs, ChangePropertyArgs,
   SendEventArgs, GetPropertyArgs,

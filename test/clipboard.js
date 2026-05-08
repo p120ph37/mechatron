@@ -161,6 +161,96 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					var seq = await Clipboard.getSequence();
 					assert(typeof seq === "number", "linux getSequence returns number");
 				}
+			},
+			{
+				name: "linux clipboard cross-client image",
+				functions: ["clipboard_setImage", "clipboard_hasImage", "clipboard_getImage"],
+				test: async function () {
+					log("  cross-client image... ");
+					var cp = require("child_process");
+					var fs = require("fs");
+
+					try { cp.execSync("which xclip", { stdio: "ignore" }); }
+					catch (_) { log("(skip: no xclip)\n"); return; }
+
+					var backend = (process.env.MECHATRON_BACKEND || "").replace(/\[.*$/, "");
+					if (backend !== "nolib") { log("(skip: not nolib)\n"); return; }
+
+					// Build a tiny 2x2 PNG for cross-client testing
+					var src = new Image();
+					assert(src.create(2, 2), "cross-client: create src");
+					var srcData = src.getData();
+					for (var i = 0; i < srcData.length; i++) {
+						srcData[i] = (0xFF000000 | (i * 0x3F3F3F)) >>> 0;
+					}
+
+					// Phase 1: we own clipboard, xclip requests from us
+					// This exercises handleSelectionRequest (TARGETS, IMAGE_PNG)
+					var setOk = await Clipboard.setImage(src);
+					if (!setOk) { log("(skip: setImage failed)\n"); return; }
+
+					// Give event loop a tick for selection ownership to propagate
+					await new Promise(function (r) { setTimeout(r, 50); });
+
+					// xclip -o -t TARGETS requests our TARGETS
+					var targetsChild = cp.spawn("xclip",
+						["-selection", "clipboard", "-t", "TARGETS", "-o"],
+						{ env: { DISPLAY: process.env.DISPLAY }, stdio: ["ignore", "pipe", "ignore"] });
+					var targetsOut = "";
+					targetsChild.stdout.on("data", function (d) { targetsOut += d; });
+					await new Promise(function (r) { targetsChild.on("exit", r); });
+					log("(targets: " + targetsOut.trim().split("\n").length + " entries) ");
+
+					// xclip -o -t image/png requests our IMAGE_PNG
+					var pngChild = cp.spawn("xclip",
+						["-selection", "clipboard", "-t", "image/png", "-o"],
+						{ env: { DISPLAY: process.env.DISPLAY }, stdio: ["ignore", "pipe", "ignore"] });
+					var pngChunks = [];
+					pngChild.stdout.on("data", function (d) { pngChunks.push(d); });
+					await new Promise(function (r) { pngChild.on("exit", r); });
+					var pngData = Buffer.concat(pngChunks);
+					assert(pngData.length > 0, "cross-client: xclip got PNG from us");
+					assert(pngData[0] === 0x89 && pngData[1] === 0x50,
+						"cross-client: PNG header valid");
+
+					// xclip -o -t TIMESTAMP requests our TIMESTAMP
+					var tsChild = cp.spawn("xclip",
+						["-selection", "clipboard", "-t", "TIMESTAMP", "-o"],
+						{ env: { DISPLAY: process.env.DISPLAY }, stdio: ["ignore", "pipe", "ignore"] });
+					await new Promise(function (r) { tsChild.on("exit", r); });
+
+					// Phase 2: external client owns clipboard, we query cross-client
+					// Clear our ownership so hasImage/getImage take the cross-client path
+					await Clipboard.clear();
+					await new Promise(function (r) { setTimeout(r, 50); });
+
+					// Write the PNG to a temp file for xclip -i
+					var tmpPng = "/tmp/mechatron_xclient_" + process.pid + ".png";
+					fs.writeFileSync(tmpPng, pngData);
+
+					// xclip -i owns clipboard with the PNG
+					var xclipIn = cp.spawn("xclip",
+						["-selection", "clipboard", "-t", "image/png", "-i", tmpPng],
+						{ env: { DISPLAY: process.env.DISPLAY }, stdio: "ignore" });
+
+					await new Promise(function (r) { setTimeout(r, 200); });
+
+					var hasImg = await Clipboard.hasImage();
+					log("(hasImage: " + hasImg + ") ");
+
+					if (hasImg) {
+						var dst = new Image();
+						var gotImg = await Clipboard.getImage(dst);
+						log("(getImage: " + gotImg + ") ");
+					}
+
+					// Cleanup
+					try { xclipIn.kill("SIGTERM"); } catch (_) {}
+					try { fs.unlinkSync(tmpPng); } catch (_) {}
+					await Clipboard.clear();
+
+					log("OK\n");
+				}
 			}
 		];
 	}
