@@ -529,6 +529,17 @@ function testDbusWire() {
 			assert(threw === true, "notifyPointerMotion rejects when portal unavailable");
 		}
 
+		if (process.platform === "linux" && avail) {
+			rd.resetSession();
+			try {
+				await rd.notifyPointerMotionAbsolute(100, 200);
+				log("(absolute OK) ");
+			} catch (e) {
+				log("(absolute unavail: " + e.message + ") ");
+			}
+			rd.resetSession();
+		}
+
 		log("OK\n");
 		return true;
 	}

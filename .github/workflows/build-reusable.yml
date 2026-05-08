@@ -81,11 +81,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxrandr-dev libxtst-dev xvfb openbox x11-utils x11-apps
-          # libei-dev is optional — only available on ubuntu-24.04+. On
-          # older runners (ubuntu-22.04 arm64) the keyboard-portal /
-          # mouse-portal crates are skipped from the build (see Build
-          # Rust napi modules step below).
-          sudo apt-get install -y libei-dev 2>/dev/null || true
+          # libei-dev: available as a package on ubuntu-24.04+; on older
+          # runners (ubuntu-22.04 arm64) we build from source so the
+          # keyboard-portal / mouse-portal napi crates can link libei.
+          if ! sudo apt-get install -y libei-dev 2>/dev/null; then
+            echo ">>> libei-dev not in repos — building from source"
+            sudo apt-get install -y meson ninja-build libevdev-dev libsystemd-dev libxkbcommon-dev python3-jinja2
+            git clone --depth 1 --branch 1.3.0 https://gitlab.freedesktop.org/libinput/libei.git /tmp/libei
+            meson setup /tmp/libei/build /tmp/libei --prefix=/usr --buildtype=release \
+              -Dtests=disabled -Ddocumentation='[]'
+            ninja -C /tmp/libei/build
+            sudo ninja -C /tmp/libei/build install
+            sudo ldconfig
+          fi
           # Clipboard tools for nolib[sh] subprocess clipboard variant
           # (xclip for X11, wl-clipboard for Wayland).
           sudo apt-get install -y xclip wl-clipboard
@@ -159,15 +167,7 @@ jobs:
           # one npm package: $PKG below maps each crate back to the
           # subsystem's package directory (`keyboard-x11` → `keyboard`).
           if [ "${{ runner.os }}" = "Linux" ]; then
-            # keyboard-portal and mouse-portal link libei (libei-dev only
-            # available on ubuntu-24.04+); skip them on older runners.
-            if pkg-config --exists libei 2>/dev/null || dpkg -l libei-dev 2>/dev/null | grep -q '^ii'; then
-              EI_SUBS="keyboard-portal mouse-portal"
-            else
-              EI_SUBS=""
-              echo ">>> libei-dev not installed — skipping keyboard-portal / mouse-portal crates"
-            fi
-            SUBS="keyboard-x11 $EI_SUBS mouse-x11 clipboard-x11 clipboard-portal screen-x11 screen-portal window process memory"
+            SUBS="keyboard-x11 keyboard-portal mouse-x11 mouse-portal clipboard-x11 clipboard-portal screen-x11 screen-portal window process memory"
           else
             SUBS="keyboard mouse clipboard screen window process memory"
           fi

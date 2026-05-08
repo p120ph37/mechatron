@@ -487,6 +487,36 @@ const XML = `<node>
     </method>
     <property name="version" type="u" access="read"/>
   </interface>
+  <interface name="org.freedesktop.impl.portal.ScreenCast">
+    <method name="CreateSession">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="SelectSources">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="Start">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <property name="AvailableSourceTypes" type="u" access="read"/>
+    <property name="AvailableCursorModes" type="u" access="read"/>
+    <property name="version" type="u" access="read"/>
+  </interface>
   <interface name="org.freedesktop.impl.portal.Session">
     <method name="Close"><arg type="u" direction="out"/><arg type="a{sv}" direction="out"/></method>
     <signal name="Closed"/>
@@ -497,6 +527,7 @@ const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
 const loop = new GLib.MainLoop(null, false);
 let n = 0;
 let shotN = 0;
+const screenCastSessions = {};
 function takeScreenshot(inv) {
   const fname = "/tmp/ci-autoaccept-shot-" + (++shotN) + ".png";
   try {
@@ -520,15 +551,41 @@ function onCall(c, s, p, iface, method, params, inv) {
     takeScreenshot(inv);
     return;
   }
+  if (iface === "org.freedesktop.impl.portal.ScreenCast") {
+    if (method === "CreateSession") {
+      const sh = params.deep_unpack()[1];
+      try { c.register_object(sh, ni.interfaces[3], onCall, null, null); } catch(e) {}
+      inv.return_value(new GLib.Variant("(ua{sv})", [0, {"session_id": new GLib.Variant("s", "auto_sc_" + (++n))}]));
+    } else if (method === "SelectSources") {
+      const sh = params.deep_unpack()[1];
+      screenCastSessions[sh] = true;
+      print("[portal-autoaccept] ScreenCast.SelectSources approved for " + sh);
+      inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
+    } else if (method === "Start") {
+      inv.return_value(new GLib.Variant("(ua{sv})", [0, {
+        "streams": new GLib.Variant("a(ua{sv})", [[42, {}]])
+      }]));
+    } else {
+      inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
+    }
+    return;
+  }
   if (method === "CreateSession") {
     const sh = params.deep_unpack()[1];
-    try { c.register_object(sh, ni.interfaces[2], onCall, null, null); } catch(e) {}
+    try { c.register_object(sh, ni.interfaces[3], onCall, null, null); } catch(e) {}
     inv.return_value(new GLib.Variant("(ua{sv})", [0, {"session_id": new GLib.Variant("s", "auto_" + (++n))}]));
   } else if (method === "SelectDevices") {
     inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
   } else if (method === "Start") {
-    inv.return_value(new GLib.Variant("(ua{sv})", [0, {"devices": new GLib.Variant("u", 3)}]));
+    const sh = params.deep_unpack()[1];
+    const results = {"devices": new GLib.Variant("u", 3)};
+    if (screenCastSessions[sh]) {
+      results["streams"] = new GLib.Variant("a(ua{sv})", [[42, {}]]);
+    }
+    inv.return_value(new GLib.Variant("(ua{sv})", [0, results]));
   } else if (method === "Close") {
+    const sh = p;
+    delete screenCastSessions[sh];
     inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
   } else {
     inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
@@ -536,11 +593,14 @@ function onCall(c, s, p, iface, method, params, inv) {
 }
 function onProp(c, s, p, iface, prop) {
   if (prop === "AvailableDeviceTypes") return new GLib.Variant("u", 3);
-  if (prop === "version") return new GLib.Variant("u", 2);
+  if (prop === "AvailableSourceTypes") return new GLib.Variant("u", 1);
+  if (prop === "AvailableCursorModes") return new GLib.Variant("u", 0);
+  if (prop === "version") return new GLib.Variant("u", 4);
   return null;
 }
 bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[0], onCall, onProp, null);
 bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[1], onCall, onProp, null);
+bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[2], onCall, onProp, null);
 Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept] ready"), () => loop.quit());
 loop.run();
 AUTOACCEPT_HEREDOC
