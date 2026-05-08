@@ -1,19 +1,20 @@
 /**
- * ffi mouse backend — main-thread async proxy to mouse-worker.ts.
+ * ffi mouse backend — main-thread async proxy to mouse-worker.ts for
+ * non-Linux platforms (macOS, Windows).
  *
- * Each export posts an `{ op, args }` message to the dedicated worker
- * thread (see ./mouse-worker.ts) and resolves a Promise when the
- * worker posts back a result. This mirrors napi[*]'s libuv worker-pool
- * semantics; the synchronous FFI implementation lives in
- * ./mouse-impl.ts and runs inside the worker.
+ * On Linux this base file throws so the backend resolver picks up the
+ * variant-specific entry (ffi/mouse-x11 for X11/uinput, ffi/mouse-portal
+ * for libei).  Mirrors the napi mouse variant split.
  */
 
 import { createDispatcher } from "./_dispatch";
 
-// ffi/mouse requires libraries that only exist on linux/win32/darwin.
-// The worker performs the deeper availability check (libXtst / uinput on
-// Linux) and will throw on first call if those libs aren't loadable.
-if (!["linux", "win32", "darwin"].includes(process.platform)) {
+if (process.platform === "linux") {
+  throw new Error(
+    "ffi/mouse: use ffi/mouse-x11 (linux x11) or ffi/mouse-portal (linux libei) variant on linux",
+  );
+}
+if (!["win32", "darwin"].includes(process.platform)) {
   throw new Error("ffi/mouse: unsupported platform");
 }
 

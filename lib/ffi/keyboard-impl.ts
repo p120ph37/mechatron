@@ -1,50 +1,18 @@
-import { injectKeysym, uinputSelected } from "./uinput";
-import {
-  getDisplay, isXTestAvailable, x11, xtest,
-} from "./x11";
-import { getBunFFI, bp } from "./bun";
+/**
+ * ffi keyboard backend — synchronous worker-side implementation for
+ * non-Linux platforms (macOS, Windows).
+ *
+ * Linux x11 lives in keyboard-x11-impl.ts (variant split mirroring napi).
+ * The main-thread proxy in keyboard.ts throws on Linux so this module is
+ * never loaded there.
+ */
+
 import {
   user32, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC,
 } from "./win";
 import {
   cg, cf, kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
 } from "./mac";
-
-// ==================== Linux ====================
-
-function linux_keyboard_press(keycode: number): void {
-  if (uinputSelected()) {
-    if (injectKeysym(keycode, true)) return;
-  }
-  const X = x11(); const XT = xtest(); const d = getDisplay();
-  if (!X || !XT || !d) return;
-  const xkeycode = X.XKeysymToKeycode(d, BigInt(keycode));
-  if (xkeycode === 0) return;
-  XT.XTestFakeKeyEvent(d, xkeycode, 1, 0n);
-  X.XSync(d, 0);
-}
-
-function linux_keyboard_release(keycode: number): void {
-  if (uinputSelected()) {
-    if (injectKeysym(keycode, false)) return;
-  }
-  const X = x11(); const XT = xtest(); const d = getDisplay();
-  if (!X || !XT || !d) return;
-  const xkeycode = X.XKeysymToKeycode(d, BigInt(keycode));
-  if (xkeycode === 0) return;
-  XT.XTestFakeKeyEvent(d, xkeycode, 0, 0n);
-  X.XSync(d, 0);
-}
-
-function linux_keyboard_getKeyState(keycode: number): boolean {
-  const X = x11(); const F = getBunFFI(); const d = getDisplay();
-  if (!X || !F || !d) return false;
-  const xkeycode = X.XKeysymToKeycode(d, BigInt(keycode));
-  if (xkeycode === 0) return false;
-  const keys = new Uint8Array(32);
-  X.XQueryKeymap(d, F.ptr(keys));
-  return (keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
-}
 
 // ==================== Windows ====================
 
@@ -111,25 +79,16 @@ function mac_keyboard_getKeyState(keycode: number): boolean {
 const platform = process.platform;
 
 export const keyboard_press =
-  platform === "linux"  ? linux_keyboard_press :
   platform === "win32"  ? win_keyboard_press :
   platform === "darwin" ? mac_keyboard_press :
                           (_k: number) => {};
 
 export const keyboard_release =
-  platform === "linux"  ? linux_keyboard_release :
   platform === "win32"  ? win_keyboard_release :
   platform === "darwin" ? mac_keyboard_release :
                           (_k: number) => {};
 
 export const keyboard_getKeyState =
-  platform === "linux"  ? linux_keyboard_getKeyState :
   platform === "win32"  ? win_keyboard_getKeyState :
   platform === "darwin" ? mac_keyboard_getKeyState :
                           (_k: number) => false;
-
-// Signal unavailability to the backend resolver when the required native
-// libraries cannot be loaded on this platform.
-if (platform === "linux" && !isXTestAvailable() && !uinputSelected()) {
-  throw new Error("ffi/keyboard: requires libXtst or uinput on Linux");
-}

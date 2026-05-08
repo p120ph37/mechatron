@@ -1,21 +1,22 @@
 /**
- * ffi screen backend — main-thread async proxy to screen-worker.ts.
+ * ffi screen backend — main-thread async proxy to screen-worker.ts for
+ * non-Linux platforms (macOS, Windows).
  *
- * Each export posts an `{ op, args }` message to the dedicated worker
- * thread (see ./screen-worker.ts) and resolves a Promise when the
- * worker posts back a result. This mirrors napi[*]'s libuv worker-pool
- * semantics; the synchronous FFI implementation lives in
- * ./screen-impl.ts and runs inside the worker.
+ * On Linux this base file throws so the backend resolver picks up the
+ * variant-specific entry (ffi/screen-x11 for X11, ffi/screen-portal for
+ * PipeWire).  Mirrors the napi screen variant split.
  */
 
 import { createDispatcher } from "./_dispatch";
 import type { ScreenInfo } from "./screen-impl";
 export type { ScreenInfo } from "./screen-impl";
 
-// ffi/screen requires libraries that only exist on linux/win32/darwin.
-// The worker performs the deeper availability check (libX11 on Linux)
-// and will throw on first call if those libs aren't loadable.
-if (!["linux", "win32", "darwin"].includes(process.platform)) {
+if (process.platform === "linux") {
+  throw new Error(
+    "ffi/screen: use ffi/screen-x11 (linux x11) or ffi/screen-portal (linux pipewire) variant on linux",
+  );
+}
+if (!["win32", "darwin"].includes(process.platform)) {
   throw new Error("ffi/screen: unsupported platform");
 }
 

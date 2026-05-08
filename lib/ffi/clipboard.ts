@@ -1,13 +1,5 @@
 /**
- * Clipboard subsystem — pure FFI implementation.
- *
- * Linux: full ICCCM CLIPBOARD selection via a dedicated Bun Worker that
- * dlopens libX11 and runs an X event loop wired into libuv (see
- * ./clipboard-worker.ts). Mirrors napi[x11]'s background-thread
- * architecture: the worker owns the X display, answers SelectionRequest
- * events asynchronously, and serves clipboard ops over postMessage.
- * The main-thread API here is a thin async proxy. Wayland support is a
- * separate future ffi[portal] variant.
+ * Clipboard subsystem — pure FFI implementation (non-Linux base).
  *
  * Windows uses CF_UNICODETEXT (UTF-16LE NUL-terminated) and CF_DIB
  * (BITMAPINFOHEADER + pixel rows).  Memory is allocated with GMEM_MOVEABLE
@@ -17,7 +9,21 @@
  * `objc_msgSend`.  `msgSendTyped()` (from ./mac.ts) wraps the raw pointer
  * with per-signature CFunctions so we can call methods with whatever arg
  * layout they need without dlopening the symbol multiple times.
+ *
+ * On Linux this base file throws so the backend resolver picks up the
+ * variant-specific entry (ffi/clipboard-x11 for X11 ICCCM selections;
+ * ffi/clipboard-portal would be a future Wayland variant).  Mirrors the
+ * napi clipboard variant split.
  */
+
+if (process.platform === "linux") {
+  throw new Error(
+    "ffi/clipboard: use ffi/clipboard-x11 (linux x11) variant on linux",
+  );
+}
+if (!["win32", "darwin"].includes(process.platform)) {
+  throw new Error("ffi/clipboard: unsupported platform");
+}
 
 import { user32, kernel32, winFFI, w2js, js2w } from "./win";
 import {
@@ -27,7 +33,6 @@ import {
 } from "./mac";
 import { bp } from "./bun";
 
-const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 
@@ -38,75 +43,6 @@ const CF_DIB         = 8;
 const GMEM_MOVEABLE  = 0x0002;
 
 const BITMAPINFOHEADER_SIZE = 40;
-
-// ── Linux/X11 clipboard via background Worker (see clipboard-worker.ts) ──
-
-import { Worker } from "worker_threads";
-
-let _worker: Worker | null = null;
-let _nextReqId = 1;
-const _pending = new Map<number, (result: any) => void>();
-
-function ensureWorker(): Worker | null {
-  if (_worker) return _worker;
-  try {
-    // Bun resolves the .ts source directly; Node loads the compiled .js.
-    _worker = new Worker(require.resolve("./clipboard-worker"));
-  } catch {
-    return null;
-  }
-  _worker.on("message", (data: any) => {
-    const { id, result } = data;
-    const r = _pending.get(id);
-    if (r) {
-      _pending.delete(id);
-      r(result);
-      // Idle: don't keep the process alive solely for the worker.
-      if (_pending.size === 0) _worker?.unref();
-    }
-  });
-  _worker.on("error", () => { /* swallow — worker crashes drop pending ops */ });
-  // Start unref'd — only ref while a request is in flight.
-  _worker.unref();
-  return _worker;
-}
-
-function call<T>(op: string, args: Record<string, unknown> = {}): Promise<T | null> {
-  const w = ensureWorker();
-  if (!w) return Promise.resolve(null);
-  const id = _nextReqId++;
-  // Ref the worker so the main loop waits for the response.
-  if (_pending.size === 0) w.ref();
-  return new Promise<T | null>((resolve) => {
-    _pending.set(id, resolve as (r: any) => void);
-    w.postMessage({ id, op, args });
-  });
-}
-
-async function linuxClear(): Promise<boolean> {
-  return (await call<boolean>("clear")) === true;
-}
-async function linuxHasText(): Promise<boolean> {
-  return (await call<boolean>("hasText")) === true;
-}
-async function linuxGetText(): Promise<string> {
-  return (await call<string>("getText")) ?? "";
-}
-async function linuxSetText(text: string): Promise<boolean> {
-  return (await call<boolean>("setText", { text })) === true;
-}
-async function linuxHasImage(): Promise<boolean> {
-  return (await call<boolean>("hasImage")) === true;
-}
-async function linuxGetImage(): Promise<{ width: number; height: number; data: Uint32Array } | null> {
-  return await call<{ width: number; height: number; data: Uint32Array }>("getImage");
-}
-async function linuxSetImage(w: number, h: number, d: Uint32Array): Promise<boolean> {
-  return (await call<boolean>("setImage", { width: w, height: h, data: d })) === true;
-}
-async function linuxSequence(): Promise<number> {
-  return (await call<number>("sequence")) ?? 0;
-}
 
 // ── Windows helpers ───────────────────────────────────────────────────
 
@@ -563,56 +499,48 @@ function macSequence(): number {
 // ── NAPI-compatible exports (all Promise-returning) ───────────────────
 
 export async function clipboard_clear(): Promise<boolean> {
-  if (IS_LINUX) return linuxClear();
   if (IS_WIN) return winClear();
   if (IS_MAC) return macClear();
   return false;
 }
 
 export async function clipboard_hasText(): Promise<boolean> {
-  if (IS_LINUX) return linuxHasText();
   if (IS_WIN) return winHasText();
   if (IS_MAC) return macHasText();
   return false;
 }
 
 export async function clipboard_getText(): Promise<string> {
-  if (IS_LINUX) return linuxGetText();
   if (IS_WIN) return winGetText();
   if (IS_MAC) return macGetText();
   return "";
 }
 
 export async function clipboard_setText(text: string): Promise<boolean> {
-  if (IS_LINUX) return linuxSetText(text);
   if (IS_WIN) return winSetText(text);
   if (IS_MAC) return macSetText(text);
   return false;
 }
 
 export async function clipboard_hasImage(): Promise<boolean> {
-  if (IS_LINUX) return linuxHasImage();
   if (IS_WIN) return winHasImage();
   if (IS_MAC) return macHasImage();
   return false;
 }
 
 export async function clipboard_getImage(): Promise<{ width: number; height: number; data: Uint32Array } | null> {
-  if (IS_LINUX) return linuxGetImage();
   if (IS_WIN) return winGetImage();
   if (IS_MAC) return macGetImage();
   return null;
 }
 
 export async function clipboard_setImage(width: number, height: number, data: Uint32Array): Promise<boolean> {
-  if (IS_LINUX) return linuxSetImage(width, height, data);
   if (IS_WIN) return winSetImage(width, height, data);
   if (IS_MAC) return macSetImage(width, height, data);
   return false;
 }
 
 export async function clipboard_getSequence(): Promise<number> {
-  if (IS_LINUX) return linuxSequence();
   if (IS_WIN) return winSequence();
   if (IS_MAC) return macSequence();
   return 0;
