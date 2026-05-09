@@ -12,5 +12,6 @@ fn main() {
         // failure path on systems without libei: the binary fails to load
         // and the resolver moves on to the next backend variant.
         println!("cargo:rustc-link-lib=ei");
+        println!("cargo:rustc-link-lib=dbus-1");
     }
 }

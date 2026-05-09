@@ -11,6 +11,10 @@ fn main() {
         // entry — this gives the napi resolver in lib/backend.ts a clean
         // failure path on systems without libei: the binary fails to load
         // and the resolver moves on to the next backend variant.
+        // libei provides the EI (Emulated Input) protocol used over the
+        // EIS fd from xdg-desktop-portal.  libdbus-1 is NOT linked here —
+        // dbus_portal.rs dlopen's it at runtime so the binary loads cleanly
+        // on systems without libdbus installed.
         println!("cargo:rustc-link-lib=ei");
     }
 }
