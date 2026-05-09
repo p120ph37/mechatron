@@ -87,9 +87,36 @@ const CAP_KEYBOARD = 4;
 const CAP_SCROLL = 16;
 const CAP_BUTTON = 32;
 
-let ei: ReturnType<typeof F.dlopen>["symbols"];
+interface EiSymbols {
+  ei_new_sender: (flags: bigint) => bigint;
+  ei_unref: (ei: bigint) => bigint;
+  ei_configure_name: (ei: bigint, name: bigint) => void;
+  ei_setup_backend_fd: (ei: bigint, fd: number) => number;
+  ei_get_fd: (ei: bigint) => number;
+  ei_dispatch: (ei: bigint) => void;
+  ei_get_event: (ei: bigint) => bigint;
+  ei_event_get_type: (ev: bigint) => number;
+  ei_event_unref: (ev: bigint) => bigint;
+  ei_event_get_seat: (ev: bigint) => bigint;
+  ei_event_get_device: (ev: bigint) => bigint;
+  ei_seat_bind_capabilities: (seat: bigint, c1: number, c2: number, c3: number, c4: number, c5: number, null_: bigint) => void;
+  ei_device_ref: (dev: bigint) => bigint;
+  ei_device_start_emulating: (dev: bigint, seq: number) => void;
+  ei_device_frame: (dev: bigint, serial: bigint) => void;
+  ei_now: (ei: bigint) => bigint;
+  ei_device_keyboard_key: (dev: bigint, key: number, state: number) => void;
+  ei_device_pointer_motion_absolute: (dev: bigint, x: number, y: number) => void;
+  ei_device_button_button: (dev: bigint, button: number, state: number) => void;
+  ei_device_scroll_discrete: (dev: bigint, x: number, y: number) => void;
+}
+
+interface PollLibc {
+  poll: (fds: bigint, nfds: number, timeout: number) => number;
+}
+
+let ei: EiSymbols;
 try {
-  ei = F.dlopen("libei.so.1", {
+  ei = F.dlopen<EiSymbols>("libei.so.1", {
     ei_new_sender:              { args: [T.i64], returns: T.i64 },
     ei_unref:                   { args: [T.i64], returns: T.i64 },
     ei_configure_name:          { args: [T.i64, T.i64], returns: T.void },
@@ -115,7 +142,7 @@ try {
   process.exit(1);
 }
 
-const poll_lc = F.dlopen("libc.so.6", {
+const poll_lc = F.dlopen<PollLibc>("libc.so.6", {
   poll: { args: [T.i64, T.u32, T.i32], returns: T.i32 },
 }).symbols;
 

@@ -21,7 +21,18 @@ import { existsSync } from "fs";
 const F = getBunFFI()!;
 const T = F.FFIType;
 
-const lc = F.dlopen("libc.so.6", {
+interface PortalLibc {
+  socket:  (domain: number, type: number, proto: number) => number;
+  connect: (fd: number, addr: bigint, len: number) => number;
+  write:   (fd: number, buf: bigint, len: bigint) => bigint;
+  read:    (fd: number, buf: bigint, len: bigint) => bigint;
+  close:   (fd: number) => number;
+  recvmsg: (fd: number, msg: bigint, flags: number) => bigint;
+  getuid:  () => number;
+  getpid:  () => number;
+}
+
+const lc = F.dlopen<PortalLibc>("libc.so.6", {
   socket:  { args: [T.i32, T.i32, T.i32], returns: T.i32 },
   connect: { args: [T.i32, T.i64, T.u32], returns: T.i32 },
   write:   { args: [T.i32, T.i64, T.u64], returns: T.i64 },

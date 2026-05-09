@@ -115,7 +115,12 @@ function loadPw(): PwSymbols | null {
 
 // ── libc extras ─────────────────────────────────────────────────────
 
-const lc2 = F.dlopen("libc.so.6", {
+interface Lc2 {
+  dup: (fd: number) => number;
+  close: (fd: number) => number;
+}
+
+const lc2 = F.dlopen<Lc2>("libc.so.6", {
   dup:   { args: [T.i32], returns: T.i32 },
   close: { args: [T.i32], returns: T.i32 },
 }).symbols;
