@@ -94,7 +94,11 @@ pub fn get_monitors() -> Option<Vec<(i32, i32, u32, u32)>> {
 
 pub fn get_token() -> Option<String> {
     with_state(|state| {
-        state.session.as_ref()?.restore_token.clone()
+        if let Some(ref s) = state.session {
+            s.restore_token.clone()
+        } else {
+            state.pending_token.clone()
+        }
     })
 }
 
