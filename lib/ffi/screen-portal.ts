@@ -1,61 +1,58 @@
 /**
- * ffi[portal] screen backend — Screenshot + DisplayConfig D-Bus.
+ * ffi[portal] screen backend — PipeWire capture via bun:ffi.
  *
- * Mirrors the linux-napi[portal] surface (which uses a Rust binary
- * with libpipewire) by routing capture through the same
- * xdg-desktop-portal Screenshot interface that
- * lib/nolib/screen-portal.ts uses.  Monitor enumeration goes through
- * Mutter's org.gnome.Mutter.DisplayConfig.GetCurrentState.
+ * Mirrors napi[portal]: dlopens libpipewire-0.3.so.0 and captures
+ * frames through the ScreenCast portal.  The actual PipeWire calls
+ * run in a dedicated worker (screen-portal-worker.ts).
  */
 
-import { remoteDesktopAvailable } from "../portal/remote-desktop";
-import { portalScreenshot, portalGetMonitors } from "../portal/screenshot";
+import { getBunFFI } from "./bun";
+import { createDispatcher } from "./_dispatch";
 
-if (!remoteDesktopAvailable()) {
-  throw new Error("ffi/screen[portal]: requires Wayland session + D-Bus session bus");
+if (process.platform !== "linux") {
+  throw new Error("ffi/screen[portal]: linux-only");
 }
+
+const isWayland = !!process.env.WAYLAND_DISPLAY
+  || (process.env.XDG_SESSION_TYPE || "").toLowerCase() === "wayland";
+if (!isWayland) {
+  throw new Error("ffi/screen[portal]: requires Wayland session");
+}
+
+const F = getBunFFI();
+if (!F) throw new Error("ffi/screen[portal]: bun:ffi not available");
+let hasPw = false;
+try {
+  const h = F.dlopen("libpipewire-0.3.so.0", {
+    pw_init: { args: [F.FFIType.i64, F.FFIType.i64], returns: F.FFIType.void },
+  });
+  h.close();
+  hasPw = true;
+} catch {
+  try {
+    const h = F.dlopen("libpipewire-0.3.so", {
+      pw_init: { args: [F.FFIType.i64, F.FFIType.i64], returns: F.FFIType.void },
+    });
+    h.close();
+    hasPw = true;
+  } catch { /* neither available */ }
+}
+if (!hasPw) {
+  throw new Error("ffi/screen[portal]: requires libpipewire-0.3.so.0");
+}
+
+const d = createDispatcher(require.resolve("./screen-portal-worker"));
 
 interface RawRect { x: number; y: number; w: number; h: number; }
 interface ScreenInfo { bounds: RawRect; usable: RawRect; }
 
-let _portalToken: string | null = null;
-
-export function screen_getPortalToken(): string | null {
-  return _portalToken;
-}
-
-export function screen_setPortalToken(token: string | null): void {
-  _portalToken = token;
-}
-
-export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
-  const monitors = await portalGetMonitors();
-  if (!monitors) return null;
-  return monitors.map(m => ({ bounds: m.bounds, usable: m.usable }));
-}
-
-export async function screen_grabScreen(
-  x: number, y: number, w: number, h: number, _windowHandle?: number,
-): Promise<Uint32Array | null> {
-  const shot = await portalScreenshot();
-  if (!shot) return null;
-
-  const srcW = shot.width;
-  const srcH = shot.height;
-  const clampX = Math.max(0, Math.min(x, srcW));
-  const clampY = Math.max(0, Math.min(y, srcH));
-  const clampW = Math.min(w, srcW - clampX);
-  const clampH = Math.min(h, srcH - clampY);
-  if (clampW <= 0 || clampH <= 0) return null;
-
-  if (clampX === 0 && clampY === 0 && clampW === srcW && clampH === srcH) {
-    return shot;
-  }
-
-  const cropped = new Uint32Array(clampW * clampH);
-  for (let row = 0; row < clampH; row++) {
-    const srcOff = (clampY + row) * srcW + clampX;
-    cropped.set(shot.subarray(srcOff, srcOff + clampW), row * clampW);
-  }
-  return cropped;
-}
+export const screen_synchronize = (): Promise<ScreenInfo[] | null> =>
+  d.call("screen_synchronize", []);
+export const screen_grabScreen = (
+  x: number, y: number, w: number, h: number,
+): Promise<Uint32Array | null> =>
+  d.call("screen_grabScreen", [x, y, w, h]);
+export const screen_getPortalToken = (): Promise<string | null> =>
+  d.call("screen_getPortalToken", []);
+export const screen_setPortalToken = (token: string | null): Promise<void> =>
+  d.call("screen_setPortalToken", [token]);

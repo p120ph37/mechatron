@@ -1,32 +1,41 @@
 /**
- * ffi[portal] keyboard backend — RemoteDesktop D-Bus.
+ * ffi[portal] keyboard backend — libei via bun:ffi.
  *
- * Mirrors the linux-napi[portal] surface (which uses a Rust binary
- * with libei) by routing key press/release through the same
- * xdg-desktop-portal RemoteDesktop NotifyKeyboardKeysym method that
- * lib/nolib/keyboard-portal.ts uses.  Sharing the wire-protocol
- * implementation in lib/portal/remote-desktop.ts keeps the ffi[portal]
- * variant available wherever a Wayland session + D-Bus is reachable
- * without pulling in a libei FFI surface.
+ * Mirrors napi[portal]: dlopens libei.so.1 and uses the Emulated Input
+ * protocol over an EIS fd obtained from the RemoteDesktop portal.
+ * The actual libei calls run in a shared worker (ei-worker.ts).
  */
 
-import {
-  remoteDesktopAvailable, notifyKeyboardKeysym,
-} from "../portal/remote-desktop";
+import { getBunFFI } from "./bun";
 
-if (!remoteDesktopAvailable()) {
-  throw new Error("ffi/keyboard[portal]: requires Wayland session + D-Bus session bus");
+if (process.platform !== "linux") {
+  throw new Error("ffi/keyboard[portal]: linux-only");
 }
 
-export async function keyboard_press(keycode: number): Promise<void> {
-  return notifyKeyboardKeysym(keycode, true);
+const isWayland = !!process.env.WAYLAND_DISPLAY
+  || (process.env.XDG_SESSION_TYPE || "").toLowerCase() === "wayland";
+if (!isWayland) {
+  throw new Error("ffi/keyboard[portal]: requires Wayland session");
 }
 
-export async function keyboard_release(keycode: number): Promise<void> {
-  return notifyKeyboardKeysym(keycode, false);
+const F = getBunFFI();
+if (!F) throw new Error("ffi/keyboard[portal]: bun:ffi not available");
+try {
+  const h = F.dlopen("libei.so.1", {
+    ei_new_sender: { args: [F.FFIType.i64], returns: F.FFIType.i64 },
+  });
+  h.close();
+} catch {
+  throw new Error("ffi/keyboard[portal]: requires libei.so.1");
 }
 
-export async function keyboard_getKeyState(_keycode: number): Promise<boolean> {
-  // RemoteDesktop is write-only; no way to query current key state.
-  return false;
-}
+import { getEiDispatcher } from "./ei-shared";
+
+const d = getEiDispatcher();
+
+export const keyboard_press = (keycode: number): Promise<void> =>
+  d.call("keyboard_press", [keycode]);
+export const keyboard_release = (keycode: number): Promise<void> =>
+  d.call("keyboard_release", [keycode]);
+export const keyboard_getKeyState = (keycode: number): Promise<boolean> =>
+  d.call("keyboard_getKeyState", [keycode]);

@@ -1,54 +1,49 @@
 /**
- * ffi[portal] mouse backend — RemoteDesktop D-Bus.
+ * ffi[portal] mouse backend — libei via bun:ffi.
  *
- * Mirrors the linux-napi[portal] surface (which uses a Rust binary
- * with libei) by routing pointer ops through the same
- * xdg-desktop-portal RemoteDesktop methods that
- * lib/nolib/mouse-portal.ts uses.  getPos / getButtonState are
- * unavailable through the portal (write-only API); setPos uses
- * absolute notify.
+ * Mirrors napi[portal]: dlopens libei.so.1 and uses the Emulated Input
+ * protocol over an EIS fd obtained from the RemoteDesktop portal.
+ * The actual libei calls run in a shared worker (ei-worker.ts).
  */
 
-import { evdevButton } from "../mouse/constants";
-import {
-  remoteDesktopAvailable,
-  notifyPointerButton, notifyPointerAxisDiscrete,
-  notifyPointerMotionAbsolute,
-} from "../portal/remote-desktop";
+import { getBunFFI } from "./bun";
 
-if (!remoteDesktopAvailable()) {
-  throw new Error("ffi/mouse[portal]: requires Wayland session + D-Bus session bus");
+if (process.platform !== "linux") {
+  throw new Error("ffi/mouse[portal]: linux-only");
 }
 
-const AXIS_VERTICAL = 0;
-const AXIS_HORIZONTAL = 1;
-
-export async function mouse_press(button: number): Promise<void> {
-  const code = evdevButton(button);
-  if (code !== null) await notifyPointerButton(code, true);
+const isWayland = !!process.env.WAYLAND_DISPLAY
+  || (process.env.XDG_SESSION_TYPE || "").toLowerCase() === "wayland";
+if (!isWayland) {
+  throw new Error("ffi/mouse[portal]: requires Wayland session");
 }
 
-export async function mouse_release(button: number): Promise<void> {
-  const code = evdevButton(button);
-  if (code !== null) await notifyPointerButton(code, false);
+const F = getBunFFI();
+if (!F) throw new Error("ffi/mouse[portal]: bun:ffi not available");
+try {
+  const h = F.dlopen("libei.so.1", {
+    ei_new_sender: { args: [F.FFIType.i64], returns: F.FFIType.i64 },
+  });
+  h.close();
+} catch {
+  throw new Error("ffi/mouse[portal]: requires libei.so.1");
 }
 
-export async function mouse_scrollH(amount: number): Promise<void> {
-  return notifyPointerAxisDiscrete(AXIS_HORIZONTAL, amount);
-}
+import { getEiDispatcher } from "./ei-shared";
 
-export async function mouse_scrollV(amount: number): Promise<void> {
-  return notifyPointerAxisDiscrete(AXIS_VERTICAL, amount);
-}
+const d = getEiDispatcher();
 
-export async function mouse_getPos(): Promise<{ x: number; y: number }> {
-  return { x: 0, y: 0 };
-}
-
-export async function mouse_setPos(x: number, y: number): Promise<void> {
-  await notifyPointerMotionAbsolute(x, y);
-}
-
-export async function mouse_getButtonState(_button: number): Promise<boolean> {
-  return false;
-}
+export const mouse_press = (button: number): Promise<void> =>
+  d.call("mouse_press", [button]);
+export const mouse_release = (button: number): Promise<void> =>
+  d.call("mouse_release", [button]);
+export const mouse_scrollH = (amount: number): Promise<void> =>
+  d.call("mouse_scrollH", [amount]);
+export const mouse_scrollV = (amount: number): Promise<void> =>
+  d.call("mouse_scrollV", [amount]);
+export const mouse_getPos = (): Promise<{ x: number; y: number }> =>
+  d.call("mouse_getPos", []);
+export const mouse_setPos = (x: number, y: number): Promise<void> =>
+  d.call("mouse_setPos", [x, y]);
+export const mouse_getButtonState = (button: number): Promise<boolean> =>
+  d.call("mouse_getButtonState", [button]);
