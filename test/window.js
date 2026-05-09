@@ -436,26 +436,34 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				var list = await Window.getList("MechatronTestWindow");
 				if (list.length === 0) list = await Window.getList();
 				if (list.length === 0) return;
-				var vw = list[0];
-				var orig = await vw.getTitle();
+				// Pick the first window whose title is actually observable.
+				// On macOS, CGWindowListCopyWindowInfo can return system
+				// windows without a kCGWindowName entry (e.g. background
+				// surfaces, the Rosetta translator's own windows); calling
+				// getTitle on those returns "" regardless of what setTitle
+				// does, which makes the round-trip unobservable. The same
+				// guard is harmless on Linux/Windows where every visible
+				// top-level has a title.
+				var vw = null, orig = "";
+				for (var idx = 0; idx < list.length; idx++) {
+					var t = await list[idx].getTitle();
+					if (t) { vw = list[idx]; orig = t; break; }
+				}
+				if (!vw) return;
 				var newTitle = "mechatron_test_title";
-				// Title set is asynchronous on Windows (DWM redraw queue),
-				// may race with intervening WM events on Linux (some
-				// compositors keep their own copy of _NET_WM_NAME and
-				// repaint it back over our XChangeProperty), and on
-				// macOS-x64-under-Rosetta the AX call sometimes silently
-				// no-ops on the first attempt. Re-issue setTitle on each
-				// retry and poll getTitle for up to ~2s.
+				await vw.setTitle(newTitle);
+				// Title propagation is asynchronous on Windows (DWM redraw
+				// queue) and Linux (some compositors keep their own copy
+				// of _NET_WM_NAME and repaint it back over our XChangeProperty);
+				// poll for up to ~2s.
 				var observed = "";
 				for (var i = 0; i < 40; i++) {
-					await vw.setTitle(newTitle);
 					await new Promise(function (r) { setTimeout(r, 50); });
 					observed = await vw.getTitle();
 					if (observed === newTitle) break;
 				}
 				assert(observed === newTitle,
-					"getTitle returns set title (got: " + JSON.stringify(observed) +
-					", typeof: " + typeof observed + ")");
+					"getTitle returns set title (got: " + JSON.stringify(observed) + ")");
 				if (orig) await vw.setTitle(orig);
 			}
 		},
