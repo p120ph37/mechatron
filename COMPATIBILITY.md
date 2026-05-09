@@ -21,6 +21,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | linux-napi[x11] | Pre-built Rust .node binary | Linux (X11) | Gold-standard reference |
 | linux-napi[portal] | Pre-built Rust .node binary | Linux/Wayland | libei + RemoteDesktop portal |
 | linux-ffi[x11] | bun:ffi | Linux (X11/EWMH) | Requires libX11; XTest for input |
+| linux-ffi[portal] | bun:ffi (D-Bus shared) | Linux/Wayland | RemoteDesktop + Screenshot portals (shares lib/portal/* with nolib[portal]) |
 | linux-nolib[x11] | Pure TS (xproto wire) | Any OS with $DISPLAY | No native libraries at all |
 | linux-nolib[portal] | Pure TS (D-Bus) | Linux/Wayland | RemoteDesktop + Screenshot portals; AT-SPI2 (read-only) for windows |
 | linux-nolib[gext] | Pure TS (D-Bus) | Linux/GNOME | Mechatron GNOME Shell extension; full window mgmt without portal popups |
@@ -36,25 +37,25 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Keyboard
 
-| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[gext] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|------|------|
-| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| keyboard_getKeyState | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-ffi[portal] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[gext] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|------|------|
+| keyboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| keyboard_getKeyState | ok | skip | ok | skip | ok | skip | ok | skip | ok | ok | ok | ok |
 
 ## Mouse
 
-| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[gext] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|------|------|
-| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_getPos | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
-| mouse_setPos | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| mouse_getButtonState | ok | skip | ok | ok | skip | ok | skip | ok | ok | ok | ok |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-ffi[portal] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[gext] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|------|------|
+| mouse_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_press | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_release | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollH | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_scrollV | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_getPos | ok | skip | ok | skip | ok | skip | ok | skip | ok | ok | ok | ok |
+| mouse_setPos | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| mouse_getButtonState | ok | skip | ok | skip | ok | skip | ok | skip | ok | ok | ok | ok |
 
 ## Window
 
@@ -113,13 +114,13 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 
 ## Screen
 
-| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|------|
-| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_getPortalToken | skip | ok | skip | skip | ok | skip | skip | skip | skip | skip |
-| screen_setPortalToken | skip | ok | skip | skip | ok | skip | skip | skip | skip | skip |
+| Function | linux-napi[x11] | linux-napi[portal] | linux-ffi[x11] | linux-ffi[portal] | linux-nolib[x11] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|------|
+| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_getPortalToken | skip | ok | skip | ok | skip | ok | skip | skip | skip | skip | skip |
+| screen_setPortalToken | skip | ok | skip | ok | skip | ok | skip | skip | skip | skip | skip |
 
 ## Clipboard
 

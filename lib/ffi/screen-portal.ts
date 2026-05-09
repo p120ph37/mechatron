@@ -1,9 +1,61 @@
 /**
- * ffi screen backend — portal/PipeWire variant (stub).
+ * ffi[portal] screen backend — Screenshot + DisplayConfig D-Bus.
  *
- * Will use org.freedesktop.portal.ScreenCast + PipeWire via dlopen
- * (libpipewire-0.3) for Wayland screen capture.  Falls back cleanly
- * to the next backend entry.
+ * Mirrors the linux-napi[portal] surface (which uses a Rust binary
+ * with libpipewire) by routing capture through the same
+ * xdg-desktop-portal Screenshot interface that
+ * lib/nolib/screen-portal.ts uses.  Monitor enumeration goes through
+ * Mutter's org.gnome.Mutter.DisplayConfig.GetCurrentState.
  */
 
-throw new Error("ffi/screen-portal: PipeWire screen capture backend not yet implemented");
+import { remoteDesktopAvailable } from "../portal/remote-desktop";
+import { portalScreenshot, portalGetMonitors } from "../portal/screenshot";
+
+if (!remoteDesktopAvailable()) {
+  throw new Error("ffi/screen[portal]: requires Wayland session + D-Bus session bus");
+}
+
+interface RawRect { x: number; y: number; w: number; h: number; }
+interface ScreenInfo { bounds: RawRect; usable: RawRect; }
+
+let _portalToken: string | null = null;
+
+export function screen_getPortalToken(): string | null {
+  return _portalToken;
+}
+
+export function screen_setPortalToken(token: string | null): void {
+  _portalToken = token;
+}
+
+export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
+  const monitors = await portalGetMonitors();
+  if (!monitors) return null;
+  return monitors.map(m => ({ bounds: m.bounds, usable: m.usable }));
+}
+
+export async function screen_grabScreen(
+  x: number, y: number, w: number, h: number, _windowHandle?: number,
+): Promise<Uint32Array | null> {
+  const shot = await portalScreenshot();
+  if (!shot) return null;
+
+  const srcW = shot.width;
+  const srcH = shot.height;
+  const clampX = Math.max(0, Math.min(x, srcW));
+  const clampY = Math.max(0, Math.min(y, srcH));
+  const clampW = Math.min(w, srcW - clampX);
+  const clampH = Math.min(h, srcH - clampY);
+  if (clampW <= 0 || clampH <= 0) return null;
+
+  if (clampX === 0 && clampY === 0 && clampW === srcW && clampH === srcH) {
+    return shot;
+  }
+
+  const cropped = new Uint32Array(clampW * clampH);
+  for (let row = 0; row < clampH; row++) {
+    const srcOff = (clampY + row) * srcW + clampX;
+    cropped.set(shot.subarray(srcOff, srcOff + clampW), row * clampW);
+  }
+  return cropped;
+}

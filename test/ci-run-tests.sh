@@ -449,10 +449,20 @@ fi
 # sessions without showing a dialog (headless Mutter's virtual input
 # can't reach Wayland clients). The mechatron extension is still loaded
 # for the gext test cell that follows.
+#
+# Inside this single Wayland session we exercise all three [portal]
+# variants — nolib[portal], ffi[portal], and napi (which the resolver
+# falls through to napi[portal] under Wayland-only since napi[x11]
+# can't open a display) — so the autoaccept shim, gnome-shell, and
+# pipewire startup costs are amortised across them.
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"
   BE_COV_DIR="$COV_DIR/nolib-portal"
-  mkdir -p "$BE_COV_DIR"
+  FFI_PORTAL_JUNIT="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-portal.xml"
+  FFI_PORTAL_COV_DIR="$COV_DIR/ffi-portal"
+  NAPI_PORTAL_JUNIT="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-napi-portal.xml"
+  NAPI_PORTAL_COV_DIR="$COV_DIR/napi-portal"
+  mkdir -p "$BE_COV_DIR" "$FFI_PORTAL_COV_DIR" "$NAPI_PORTAL_COV_DIR"
   BE_RC=0
 
   TOKENS_FILE="${RUNNER_TEMP:-/tmp}/mechatron-portal-tokens"
@@ -656,7 +666,9 @@ Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept
 loop.run();
 AUTOACCEPT_HEREDOC
 
-  export BUN JUNIT_FILE BE_COV_DIR TOKENS_FILE EXT_UUID GNOME_SHELL_VER PORTAL_AUTOACCEPT
+  export BUN JUNIT_FILE BE_COV_DIR FFI_PORTAL_JUNIT FFI_PORTAL_COV_DIR \
+         NAPI_PORTAL_JUNIT NAPI_PORTAL_COV_DIR \
+         TOKENS_FILE EXT_UUID GNOME_SHELL_VER PORTAL_AUTOACCEPT
   dbus-run-session -- bash -c '
     set -x
     export XDG_SESSION_TYPE=wayland
@@ -813,11 +825,38 @@ AUTOACCEPT_HEREDOC
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
+    # ffi[portal] in the same Wayland session — same autoaccept shim,
+    # exercises lib/ffi/{keyboard,mouse,screen}-portal.ts which delegate
+    # to the shared lib/portal/* wire code.
+    MECHATRON_BACKEND="ffi[portal]" \
+    MECHATRON_SKIP_UNIT=1 \
+      "$BUN" test test/bun.test.ts \
+        --coverage --coverage-reporter=lcov --coverage-dir="$FFI_PORTAL_COV_DIR" \
+        --reporter=junit --reporter-outfile="$FFI_PORTAL_JUNIT"
+    FFI_RC=$?
+    [ "$FFI_RC" = 0 ] || RC=$FFI_RC
+
+    # napi[portal] explicitly: the napi[x11] .node binary would also
+    # load on this Ubuntu system (libX11 is present even without
+    # $DISPLAY), so we need an explicit variant pin to exercise the
+    # libei-linked napi[portal] .node binary.
+    MECHATRON_BACKEND="napi[portal]" \
+    MECHATRON_SKIP_UNIT=1 \
+      "$BUN" test test/bun.test.ts \
+        --coverage --coverage-reporter=lcov --coverage-dir="$NAPI_PORTAL_COV_DIR" \
+        --reporter=junit --reporter-outfile="$NAPI_PORTAL_JUNIT"
+    NAPI_RC=$?
+    [ "$NAPI_RC" = 0 ] || RC=$NAPI_RC
+
     kill $PINGER_PID ${AUTOACCEPT_PID:+"$AUTOACCEPT_PID"} "$SHELL_PID" ${WP_PID:+"$WP_PID"} "$PW_PID" 2>/dev/null || true
     exit $RC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
     "nolib-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
+  guard_junit "$BE_RC" "$FFI_PORTAL_JUNIT" "ffi-portal" \
+    "ffi-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
+  guard_junit "$BE_RC" "$NAPI_PORTAL_JUNIT" "napi-portal" \
+    "napi-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
