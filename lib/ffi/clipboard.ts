@@ -535,7 +535,18 @@ export async function clipboard_getImage(): Promise<{ width: number; height: num
 }
 
 export async function clipboard_setImage(width: number, height: number, data: Uint32Array): Promise<boolean> {
-  if (IS_WIN) return winSetImage(width, height, data);
+  if (IS_WIN) {
+    // OpenClipboard can transiently fail when another process holds the
+    // clipboard lock (a common Windows race; the rapid setText/getText/
+    // clear sequence in the test suite leaves the clipboard "warm" with
+    // contention from cliphost or remote-desktop services). Retry a few
+    // times with backoff before giving up.
+    for (let i = 0; i < 8; i++) {
+      if (winSetImage(width, height, data)) return true;
+      await new Promise(r => setTimeout(r, 25 * (i + 1)));
+    }
+    return false;
+  }
   if (IS_MAC) return macSetImage(width, height, data);
   return false;
 }

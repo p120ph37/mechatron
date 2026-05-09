@@ -439,15 +439,16 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				var vw = list[0];
 				var orig = await vw.getTitle();
 				var newTitle = "mechatron_test_title";
-				await vw.setTitle(newTitle);
-				// Title set is asynchronous on Windows (DWM redraw queue) and
-				// may race with intervening window manager events on Linux —
-				// some compositors keep their own copy of _NET_WM_NAME and
-				// repaint it back over our XChangeProperty. Poll for up to
-				// ~2s; report observed and continue (the call path is
-				// exercised for coverage either way).
+				// Title set is asynchronous on Windows (DWM redraw queue),
+				// may race with intervening WM events on Linux (some
+				// compositors keep their own copy of _NET_WM_NAME and
+				// repaint it back over our XChangeProperty), and on
+				// macOS-x64-under-Rosetta the AX call sometimes silently
+				// no-ops on the first attempt. Re-issue setTitle on each
+				// retry and poll getTitle for up to ~2s.
 				var observed = "";
 				for (var i = 0; i < 40; i++) {
+					await vw.setTitle(newTitle);
 					await new Promise(function (r) { setTimeout(r, 50); });
 					observed = await vw.getTitle();
 					if (observed === newTitle) break;
