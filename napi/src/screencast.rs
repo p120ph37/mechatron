@@ -104,6 +104,9 @@ pub fn get_token() -> Option<String> {
 
 pub fn set_token(token: String) {
     with_state(|state| {
+        if let Some(ref mut s) = state.session {
+            s.restore_token = Some(token.clone());
+        }
         state.pending_token = Some(token);
     });
 }
