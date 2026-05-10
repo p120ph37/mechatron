@@ -103,31 +103,108 @@ static WL_SEAT_INTERFACE: WlInterface = WlInterface {
 };
 
 // -- wl_compositor --
+static WL_COMPOSITOR_CREATE_SURFACE_TYPES: WlTypes<1> = WlTypes([
+    &WL_SURFACE_INTERFACE as *const WlInterface,
+]);
+
+static WL_COMPOSITOR_METHODS: [WlMessage; 2] = [
+    WlMessage {
+        name: b"create_surface\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: WL_COMPOSITOR_CREATE_SURFACE_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"create_region\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
 static WL_COMPOSITOR_INTERFACE: WlInterface = WlInterface {
     name: b"wl_compositor\0".as_ptr() as *const c_char,
     version: 4,
-    method_count: 0,
-    methods: std::ptr::null(),
+    method_count: 2,
+    methods: WL_COMPOSITOR_METHODS.as_ptr(),
     event_count: 0,
     events: std::ptr::null(),
 };
 
-// -- wl_surface (stub for wl_compositor.create_surface) --
+// -- wl_surface --
+static WL_SURFACE_METHODS: [WlMessage; 7] = [
+    WlMessage {
+        name: b"destroy\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"attach\0".as_ptr() as *const c_char,
+        signature: b"?oii\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"damage\0".as_ptr() as *const c_char,
+        signature: b"iiii\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"frame\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"set_opaque_region\0".as_ptr() as *const c_char,
+        signature: b"?o\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"set_input_region\0".as_ptr() as *const c_char,
+        signature: b"?o\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"commit\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
 static WL_SURFACE_INTERFACE: WlInterface = WlInterface {
     name: b"wl_surface\0".as_ptr() as *const c_char,
     version: 4,
-    method_count: 0,
-    methods: std::ptr::null(),
+    method_count: 7,
+    methods: WL_SURFACE_METHODS.as_ptr(),
     event_count: 0,
     events: std::ptr::null(),
 };
 
 // -- wl_data_device_manager --
+static WL_DDM_CREATE_SOURCE_TYPES: WlTypes<1> = WlTypes([
+    &WL_DATA_SOURCE_INTERFACE as *const WlInterface,
+]);
+
+static WL_DDM_GET_DEVICE_TYPES: WlTypes<2> = WlTypes([
+    &WL_DATA_DEVICE_INTERFACE as *const WlInterface,
+    &WL_SEAT_INTERFACE as *const WlInterface,
+]);
+
+static WL_DATA_DEVICE_MANAGER_METHODS: [WlMessage; 2] = [
+    WlMessage {
+        name: b"create_data_source\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: WL_DDM_CREATE_SOURCE_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"get_data_device\0".as_ptr() as *const c_char,
+        signature: b"no\0".as_ptr() as *const c_char,
+        types: WL_DDM_GET_DEVICE_TYPES.0.as_ptr(),
+    },
+];
+
 static WL_DATA_DEVICE_MANAGER_INTERFACE: WlInterface = WlInterface {
     name: b"wl_data_device_manager\0".as_ptr() as *const c_char,
     version: 3,
-    method_count: 0,
-    methods: std::ptr::null(),
+    method_count: 2,
+    methods: WL_DATA_DEVICE_MANAGER_METHODS.as_ptr(),
     event_count: 0,
     events: std::ptr::null(),
 };
@@ -182,7 +259,7 @@ static WL_DATA_OFFER_EVENTS: [WlMessage; 1] = [
     },
 ];
 
-static WL_DATA_OFFER_METHODS: [WlMessage; 2] = [
+static WL_DATA_OFFER_METHODS: [WlMessage; 3] = [
     WlMessage {
         name: b"accept\0".as_ptr() as *const c_char,
         signature: b"u?s\0".as_ptr() as *const c_char,
@@ -193,12 +270,17 @@ static WL_DATA_OFFER_METHODS: [WlMessage; 2] = [
         signature: b"sh\0".as_ptr() as *const c_char,
         types: NULL_TYPES.0.as_ptr(),
     },
+    WlMessage {
+        name: b"destroy\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
 ];
 
 static WL_DATA_OFFER_INTERFACE: WlInterface = WlInterface {
     name: b"wl_data_offer\0".as_ptr() as *const c_char,
     version: 3,
-    method_count: 2,
+    method_count: 3,
     methods: WL_DATA_OFFER_METHODS.as_ptr(),
     event_count: 1,
     events: WL_DATA_OFFER_EVENTS.as_ptr(),
@@ -209,7 +291,21 @@ static WL_DATA_DEVICE_OFFER_TYPES: WlTypes<1> = WlTypes([
     &WL_DATA_OFFER_INTERFACE as *const WlInterface,
 ]);
 
-static WL_DATA_DEVICE_EVENTS: [WlMessage; 3] = [
+// enter event: types for the surface (arg index 2) and offer (arg index 4)
+// signature "uoff?o" → args: uint, object(surface), fixed, fixed, object?(offer)
+static WL_DATA_DEVICE_ENTER_TYPES: WlTypes<5> = WlTypes([
+    std::ptr::null(),                                  // serial (u)
+    &WL_SURFACE_INTERFACE as *const WlInterface,       // surface (o)
+    std::ptr::null(),                                  // x (f)
+    std::ptr::null(),                                  // y (f)
+    &WL_DATA_OFFER_INTERFACE as *const WlInterface,    // offer (?o)
+]);
+
+static WL_DATA_DEVICE_SELECTION_TYPES: WlTypes<1> = WlTypes([
+    &WL_DATA_OFFER_INTERFACE as *const WlInterface,
+]);
+
+static WL_DATA_DEVICE_EVENTS: [WlMessage; 6] = [
     WlMessage {
         name: b"data_offer\0".as_ptr() as *const c_char,
         signature: b"n\0".as_ptr() as *const c_char,
@@ -217,34 +313,67 @@ static WL_DATA_DEVICE_EVENTS: [WlMessage; 3] = [
     },
     WlMessage {
         name: b"enter\0".as_ptr() as *const c_char,
-        signature: b"uoff?oiff\0".as_ptr() as *const c_char,
+        signature: b"uoff?o\0".as_ptr() as *const c_char,
+        types: WL_DATA_DEVICE_ENTER_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"leave\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"motion\0".as_ptr() as *const c_char,
+        signature: b"uff\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"drop\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
         types: NULL_TYPES.0.as_ptr(),
     },
     WlMessage {
         name: b"selection\0".as_ptr() as *const c_char,
         signature: b"?o\0".as_ptr() as *const c_char,
-        types: WL_DATA_DEVICE_OFFER_TYPES.0.as_ptr(),
+        types: WL_DATA_DEVICE_SELECTION_TYPES.0.as_ptr(),
     },
 ];
 
-static WL_DATA_DEVICE_SET_SELECTION_TYPES: WlTypes<1> = WlTypes([
-    &WL_DATA_SOURCE_INTERFACE as *const WlInterface,
+static WL_DATA_DEVICE_START_DRAG_TYPES: WlTypes<4> = WlTypes([
+    &WL_DATA_SOURCE_INTERFACE as *const WlInterface,   // source (?o)
+    &WL_SURFACE_INTERFACE as *const WlInterface,       // origin (o)
+    &WL_SURFACE_INTERFACE as *const WlInterface,       // icon (?o)
+    std::ptr::null(),                                  // serial (u)
 ]);
 
-static WL_DATA_DEVICE_METHODS: [WlMessage; 1] = [
+static WL_DATA_DEVICE_SET_SELECTION_TYPES: WlTypes<2> = WlTypes([
+    &WL_DATA_SOURCE_INTERFACE as *const WlInterface,   // source (?o)
+    std::ptr::null(),                                  // serial (u)
+]);
+
+static WL_DATA_DEVICE_METHODS: [WlMessage; 3] = [
+    WlMessage {
+        name: b"start_drag\0".as_ptr() as *const c_char,
+        signature: b"?oo?ou\0".as_ptr() as *const c_char,
+        types: WL_DATA_DEVICE_START_DRAG_TYPES.0.as_ptr(),
+    },
     WlMessage {
         name: b"set_selection\0".as_ptr() as *const c_char,
         signature: b"?ou\0".as_ptr() as *const c_char,
         types: WL_DATA_DEVICE_SET_SELECTION_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"release\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
     },
 ];
 
 static WL_DATA_DEVICE_INTERFACE: WlInterface = WlInterface {
     name: b"wl_data_device\0".as_ptr() as *const c_char,
     version: 3,
-    method_count: 1,
+    method_count: 3,
     methods: WL_DATA_DEVICE_METHODS.as_ptr(),
-    event_count: 3,
+    event_count: 6,
     events: WL_DATA_DEVICE_EVENTS.as_ptr(),
 };
 
@@ -420,11 +549,39 @@ static XDG_WM_BASE_EVENTS: [WlMessage; 1] = [WlMessage {
     types: NULL_TYPES.0.as_ptr(),
 }];
 
+static XDG_WM_BASE_GET_XDG_SURFACE_TYPES: WlTypes<2> = WlTypes([
+    &XDG_SURFACE_INTERFACE as *const WlInterface,
+    &WL_SURFACE_INTERFACE as *const WlInterface,
+]);
+
+static XDG_WM_BASE_METHODS: [WlMessage; 4] = [
+    WlMessage {
+        name: b"destroy\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"create_positioner\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"get_xdg_surface\0".as_ptr() as *const c_char,
+        signature: b"no\0".as_ptr() as *const c_char,
+        types: XDG_WM_BASE_GET_XDG_SURFACE_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"pong\0".as_ptr() as *const c_char,
+        signature: b"u\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
 static XDG_WM_BASE_INTERFACE: WlInterface = WlInterface {
     name: b"xdg_wm_base\0".as_ptr() as *const c_char,
     version: 2,
-    method_count: 0,
-    methods: std::ptr::null(),
+    method_count: 4,
+    methods: XDG_WM_BASE_METHODS.as_ptr(),
     event_count: 1,
     events: XDG_WM_BASE_EVENTS.as_ptr(),
 };
@@ -436,11 +593,43 @@ static XDG_SURFACE_EVENTS: [WlMessage; 1] = [WlMessage {
     types: NULL_TYPES.0.as_ptr(),
 }];
 
+static XDG_SURFACE_GET_TOPLEVEL_TYPES: WlTypes<1> = WlTypes([
+    &XDG_TOPLEVEL_INTERFACE as *const WlInterface,
+]);
+
+static XDG_SURFACE_METHODS: [WlMessage; 5] = [
+    WlMessage {
+        name: b"destroy\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"get_toplevel\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: XDG_SURFACE_GET_TOPLEVEL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"get_popup\0".as_ptr() as *const c_char,
+        signature: b"noo\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"set_window_geometry\0".as_ptr() as *const c_char,
+        signature: b"iiii\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"ack_configure\0".as_ptr() as *const c_char,
+        signature: b"u\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
 static XDG_SURFACE_INTERFACE: WlInterface = WlInterface {
     name: b"xdg_surface\0".as_ptr() as *const c_char,
     version: 2,
-    method_count: 0,
-    methods: std::ptr::null(),
+    method_count: 5,
+    methods: XDG_SURFACE_METHODS.as_ptr(),
     event_count: 1,
     events: XDG_SURFACE_EVENTS.as_ptr(),
 };
@@ -508,17 +697,23 @@ struct WlDataSourceListener {
     cancelled: SourceCancelledFn,
 }
 
-// core wl_data_device listener (events: data_offer, enter, selection)
+// core wl_data_device listener (events: data_offer, enter, leave, motion, drop, selection)
 type WlDataDeviceDataOfferFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
 type WlDataDeviceEnterFn = unsafe extern "C" fn(
     *mut c_void, *mut WlProxy, u32, *mut WlProxy, i32, i32, *mut WlProxy,
 );
+type WlDataDeviceLeaveFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy);
+type WlDataDeviceMotionFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, u32, i32, i32);
+type WlDataDeviceDropFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy);
 type WlDataDeviceSelectionFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
 
 #[repr(C)]
 struct WlDataDeviceListener {
     data_offer: WlDataDeviceDataOfferFn,
     enter: WlDataDeviceEnterFn,
+    leave: WlDataDeviceLeaveFn,
+    motion: WlDataDeviceMotionFn,
+    drop_: WlDataDeviceDropFn,
     selection: WlDataDeviceSelectionFn,
 }
 
@@ -690,6 +885,18 @@ unsafe extern "C" fn core_device_enter(
     _surface: *mut WlProxy, _x: i32, _y: i32, _offer: *mut WlProxy,
 ) {}
 
+unsafe extern "C" fn core_device_leave(
+    _data: *mut c_void, _device: *mut WlProxy,
+) {}
+
+unsafe extern "C" fn core_device_motion(
+    _data: *mut c_void, _device: *mut WlProxy, _time: u32, _x: i32, _y: i32,
+) {}
+
+unsafe extern "C" fn core_device_drop(
+    _data: *mut c_void, _device: *mut WlProxy,
+) {}
+
 unsafe extern "C" fn core_device_selection(
     data: *mut c_void, _device: *mut WlProxy, offer: *mut WlProxy,
 ) {
@@ -757,9 +964,9 @@ unsafe extern "C" fn source_target(
 unsafe extern "C" fn xdg_wm_base_ping(
     _data: *mut c_void, wm_base: *mut WlProxy, serial: u32,
 ) {
-    // pong opcode = 1 on xdg_wm_base
+    // pong opcode = 3 on xdg_wm_base
     wl_proxy_marshal_flags(
-        wm_base, 1,
+        wm_base, 3,
         std::ptr::null(), wl_proxy_get_version(wm_base), 0,
         serial,
     );
@@ -768,9 +975,9 @@ unsafe extern "C" fn xdg_wm_base_ping(
 unsafe extern "C" fn xdg_surface_configure(
     _data: *mut c_void, xdg_surface: *mut WlProxy, serial: u32,
 ) {
-    // ack_configure opcode = 1 on xdg_surface
+    // ack_configure opcode = 4 on xdg_surface
     wl_proxy_marshal_flags(
-        xdg_surface, 1,
+        xdg_surface, 4,
         std::ptr::null(), wl_proxy_get_version(xdg_surface), 0,
         serial,
     );
@@ -1052,6 +1259,9 @@ unsafe fn init_core_backend(state: &mut WlState, display: *mut WlDisplay) -> boo
     static DEV_LISTENER: WlDataDeviceListener = WlDataDeviceListener {
         data_offer: core_device_data_offer,
         enter: core_device_enter,
+        leave: core_device_leave,
+        motion: core_device_motion,
+        drop_: core_device_drop,
         selection: core_device_selection,
     };
     wl_proxy_add_listener(
@@ -1072,9 +1282,9 @@ unsafe fn init_core_backend(state: &mut WlState, display: *mut WlDisplay) -> boo
     }
     state.surface = surface;
 
-    // xdg_wm_base.get_xdg_surface(surface) — opcode 0
+    // xdg_wm_base.get_xdg_surface(surface) — opcode 2
     let xdg_surface = wl_proxy_marshal_flags(
-        state.xdg_wm_base, 0,
+        state.xdg_wm_base, 2,
         &XDG_SURFACE_INTERFACE,
         wl_proxy_get_version(state.xdg_wm_base), 0,
         std::ptr::null::<c_void>(),
@@ -1094,9 +1304,9 @@ unsafe fn init_core_backend(state: &mut WlState, display: *mut WlDisplay) -> boo
         state as *mut _ as *mut c_void,
     );
 
-    // xdg_surface.get_toplevel() — opcode 0 on xdg_surface
+    // xdg_surface.get_toplevel() — opcode 1 on xdg_surface
     let toplevel = wl_proxy_marshal_flags(
-        xdg_surface, 0,
+        xdg_surface, 1,
         &XDG_TOPLEVEL_INTERFACE,
         wl_proxy_get_version(xdg_surface), 0,
         std::ptr::null::<c_void>(),
@@ -1249,9 +1459,9 @@ unsafe fn set_selection_null(s: &mut WlState) {
             );
         }
         BackendKind::Core => {
-            // wl_data_device.set_selection(null, serial) — opcode 0
+            // wl_data_device.set_selection(null, serial) — opcode 1
             wl_proxy_marshal_flags(
-                s.core_data_device, 0,
+                s.core_data_device, 1,
                 std::ptr::null(), wl_proxy_get_version(s.core_data_device), 0,
                 std::ptr::null::<c_void>(),
                 0u32,
@@ -1362,9 +1572,9 @@ unsafe fn create_and_set_source_core(
 
     s.source = source;
 
-    // wl_data_device.set_selection(source, serial) — opcode 0
+    // wl_data_device.set_selection(source, serial) — opcode 1
     wl_proxy_marshal_flags(
-        s.core_data_device, 0,
+        s.core_data_device, 1,
         std::ptr::null(), wl_proxy_get_version(s.core_data_device), 0,
         source,
         0u32,
