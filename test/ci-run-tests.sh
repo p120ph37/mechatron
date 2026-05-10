@@ -612,6 +612,7 @@ const loop = new GLib.MainLoop(null, false);
 let n = 0;
 let shotN = 0;
 const screenCastSessions = {};
+const clipboardSessions = {};
 function takeScreenshot(inv) {
   const fname = "/tmp/ci-autoaccept-shot-" + (++shotN) + ".png";
   try {
@@ -636,7 +637,11 @@ function onCall(c, s, p, iface, method, params, inv) {
     return;
   }
   if (iface === "org.freedesktop.impl.portal.Clipboard") {
-    if (method === "RequestClipboard" || method === "SetSelection") {
+    if (method === "RequestClipboard") {
+      const sh = params.deep_unpack()[0];
+      clipboardSessions[sh] = true;
+      inv.return_value(null);
+    } else if (method === "SetSelection") {
       inv.return_value(null);
     } else {
       inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
@@ -674,12 +679,16 @@ function onCall(c, s, p, iface, method, params, inv) {
     if (screenCastSessions[sh]) {
       results["streams"] = new GLib.Variant("a(ua{sv})", [[42, {}]]);
     }
+    if (clipboardSessions[sh]) {
+      results["clipboard_enabled"] = new GLib.Variant("b", true);
+    }
     inv.return_value(new GLib.Variant("(ua{sv})", [0, results]));
   } else if (method === "EnableClipboard" || method === "DisableClipboard" || method === "SetSelection") {
     inv.return_value(null);
   } else if (method === "Close") {
     const sh = p;
     delete screenCastSessions[sh];
+    delete clipboardSessions[sh];
     inv.return_value(new GLib.Variant("(ua{sv})", [0, {}]));
   } else {
     inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
