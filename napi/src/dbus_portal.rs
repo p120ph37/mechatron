@@ -769,6 +769,15 @@ where
     dbus_message_unref(msg);
 
     if reply.is_null() || dbus_error_is_set(&err) != 0 {
+        if dbus_error_is_set(&err) != 0 {
+            let name = if err.name.is_null() { "<null>" } else {
+                CStr::from_ptr(err.name).to_str().unwrap_or("<bad utf8>")
+            };
+            let emsg = if err.message.is_null() { "<null>" } else {
+                CStr::from_ptr(err.message).to_str().unwrap_or("<bad utf8>")
+            };
+            eprintln!("dbus_portal: {}.{} failed: {} — {}", iface, method, name, emsg);
+        }
         dbus_error_free(&mut err);
         return None;
     }
