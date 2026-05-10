@@ -345,11 +345,10 @@ function isGnome(): boolean {
 function probeWlClipboard(): MechanismInfo {
   const hasCopy = IS_LINUX && canExec("wl-copy");
   const hasPaste = IS_LINUX && canExec("wl-paste");
-  const gnome = isGnome();
-  const available = hasCopy && hasPaste && hasWayland() && !gnome;
+  const available = hasCopy && hasPaste && hasWayland();
   return {
     name: "wl-clipboard",
-    description: "wl-clipboard (wl-copy/wl-paste) — Wayland clipboard bridge via wlr-data-control",
+    description: "wl-clipboard (wl-copy/wl-paste) — Wayland clipboard bridge (wlr-data-control or core wl_data_device fallback)",
     available,
     requiresElevatedPrivileges: false,
     requiresUserApproval: false,
@@ -357,7 +356,6 @@ function probeWlClipboard(): MechanismInfo {
     reason: !IS_LINUX ? "not Linux"
       : !hasCopy || !hasPaste ? "wl-copy / wl-paste not installed"
       : !hasWayland() ? "not a Wayland session"
-      : gnome ? "GNOME/Mutter doesn't implement wlr-data-control (use xclip/xsel via XWayland)"
       : undefined,
   };
 }

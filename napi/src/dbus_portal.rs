@@ -31,7 +31,7 @@ const DBUS_STRUCT_BEGIN_CHAR: c_int = '(' as c_int;
 
 const DBUS_MESSAGE_TYPE_METHOD_RETURN: c_int = 2;
 const DBUS_MESSAGE_TYPE_ERROR: c_int = 3;
-const DBUS_MESSAGE_TYPE_SIGNAL: c_int = 4;
+pub(crate) const DBUS_MESSAGE_TYPE_SIGNAL: c_int = 4;
 
 // ── DBusError struct (must match libdbus ABI) ────────────────────────
 
@@ -113,6 +113,7 @@ struct Dbus {
     dbus_message_get_type: unsafe extern "C" fn(*mut c_void) -> c_int,
     dbus_message_get_path: unsafe extern "C" fn(*mut c_void) -> *const c_char,
     dbus_message_get_member: unsafe extern "C" fn(*mut c_void) -> *const c_char,
+    dbus_message_get_interface: unsafe extern "C" fn(*mut c_void) -> *const c_char,
     dbus_message_unref: unsafe extern "C" fn(*mut c_void),
 }
 
@@ -166,9 +167,12 @@ unsafe fn try_load_lib() -> Option<Dbus> {
         dbus_message_get_type: sym!(b"dbus_message_get_type\0"),
         dbus_message_get_path: sym!(b"dbus_message_get_path\0"),
         dbus_message_get_member: sym!(b"dbus_message_get_member\0"),
+        dbus_message_get_interface: sym!(b"dbus_message_get_interface\0"),
         dbus_message_unref: sym!(b"dbus_message_unref\0"),
     })
 }
+
+pub(crate) fn is_loaded() -> bool { lib().is_some() }
 
 fn lib() -> Option<&'static Dbus> {
     static TRIED: std::sync::Once = std::sync::Once::new();
@@ -242,6 +246,8 @@ unsafe fn dbus_message_get_path(m: *mut c_void) -> *const c_char { (dl!().dbus_m
 #[inline(always)]
 unsafe fn dbus_message_get_member(m: *mut c_void) -> *const c_char { (dl!().dbus_message_get_member)(m) }
 #[inline(always)]
+unsafe fn dbus_message_get_interface(m: *mut c_void) -> *const c_char { (dl!().dbus_message_get_interface)(m) }
+#[inline(always)]
 unsafe fn dbus_message_unref(m: *mut c_void) { (dl!().dbus_message_unref)(m) }
 
 // ── DBusConn ─────────────────────────────────────────────────────────
@@ -306,14 +312,14 @@ pub(crate) unsafe fn add_match(conn: &mut DBusConn, rule: &str) {
 // ── Iterator-based message building helpers ──────────────────────────
 
 /// Append a string argument to an iterator.
-pub(super) unsafe fn iter_append_string(iter: &mut DBusMessageIter, s: &str) {
+pub(crate) unsafe fn iter_append_string(iter: &mut DBusMessageIter, s: &str) {
     let cs = CString::new(s).unwrap_or_else(|_| CString::new("").unwrap());
     let ptr = cs.as_ptr();
     dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &ptr as *const _ as *const c_void);
 }
 
 /// Append an object path argument to an iterator.
-pub(super) unsafe fn iter_append_object_path(iter: &mut DBusMessageIter, s: &str) {
+pub(crate) unsafe fn iter_append_object_path(iter: &mut DBusMessageIter, s: &str) {
     let cs = CString::new(s).unwrap_or_else(|_| CString::new("").unwrap());
     let ptr = cs.as_ptr();
     dbus_message_iter_append_basic(
@@ -324,7 +330,7 @@ pub(super) unsafe fn iter_append_object_path(iter: &mut DBusMessageIter, s: &str
 }
 
 /// Append a u32 argument to an iterator.
-unsafe fn iter_append_u32(iter: &mut DBusMessageIter, v: u32) {
+pub(crate) unsafe fn iter_append_u32(iter: &mut DBusMessageIter, v: u32) {
     dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT32, &v as *const _ as *const c_void);
 }
 
@@ -382,14 +388,46 @@ unsafe fn asv_append_u32(
     dbus_message_iter_close_container(arr_iter, &mut entry);
 }
 
+/// Append a boolean argument to an iterator.
+pub(crate) unsafe fn iter_append_bool(iter: &mut DBusMessageIter, v: bool) {
+    let val: u32 = if v { 1 } else { 0 };
+    dbus_message_iter_append_basic(iter, DBUS_TYPE_BOOLEAN, &val as *const _ as *const c_void);
+}
+
+/// Append a variant containing an array of strings (`as`).
+unsafe fn iter_append_variant_string_array(iter: &mut DBusMessageIter, vals: &[&str]) {
+    let sig = CString::new("as").unwrap();
+    let mut variant = DBusMessageIter::new();
+    dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, sig.as_ptr(), &mut variant);
+    let arr_sig = CString::new("s").unwrap();
+    let mut arr = DBusMessageIter::new();
+    dbus_message_iter_open_container(&mut variant, DBUS_TYPE_ARRAY, arr_sig.as_ptr(), &mut arr);
+    for s in vals {
+        iter_append_string(&mut arr, s);
+    }
+    dbus_message_iter_close_container(&mut variant, &mut arr);
+    dbus_message_iter_close_container(iter, &mut variant);
+}
+
+/// Append a variant containing a boolean.
+unsafe fn iter_append_variant_bool(iter: &mut DBusMessageIter, v: bool) {
+    let sig = CString::new("b").unwrap();
+    let mut sub = DBusMessageIter::new();
+    dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, sig.as_ptr(), &mut sub);
+    iter_append_bool(&mut sub, v);
+    dbus_message_iter_close_container(iter, &mut sub);
+}
+
 /// Descriptor for entries in an a{sv} dict.
 pub(crate) enum AsvEntry<'a> {
     Str(&'a str, &'a str),  // key, string value
     U32(&'a str, u32),      // key, u32 value
+    StrArray(&'a str, &'a [&'a str]),  // key, array of strings
+    Bool(&'a str, bool),    // key, boolean value
 }
 
 /// Open an a{sv} array, append entries, close it.
-pub(super) unsafe fn iter_append_asv(iter: &mut DBusMessageIter, entries: &[AsvEntry]) {
+pub(crate) unsafe fn iter_append_asv(iter: &mut DBusMessageIter, entries: &[AsvEntry]) {
     let sig = CString::new("{sv}").unwrap();
     let mut arr = DBusMessageIter::new();
     dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY, sig.as_ptr(), &mut arr);
@@ -397,6 +435,24 @@ pub(super) unsafe fn iter_append_asv(iter: &mut DBusMessageIter, entries: &[AsvE
         match entry {
             AsvEntry::Str(k, v) => asv_append_string(&mut arr, k, v),
             AsvEntry::U32(k, v) => asv_append_u32(&mut arr, k, *v),
+            AsvEntry::StrArray(k, vals) => {
+                let mut de = DBusMessageIter::new();
+                dbus_message_iter_open_container(
+                    &mut arr, DBUS_TYPE_DICT_ENTRY, std::ptr::null(), &mut de,
+                );
+                iter_append_string(&mut de, k);
+                iter_append_variant_string_array(&mut de, vals);
+                dbus_message_iter_close_container(&mut arr, &mut de);
+            }
+            AsvEntry::Bool(k, v) => {
+                let mut de = DBusMessageIter::new();
+                dbus_message_iter_open_container(
+                    &mut arr, DBUS_TYPE_DICT_ENTRY, std::ptr::null(), &mut de,
+                );
+                iter_append_string(&mut de, k);
+                iter_append_variant_bool(&mut de, *v);
+                dbus_message_iter_close_container(&mut arr, &mut de);
+            }
         }
     }
     dbus_message_iter_close_container(iter, &mut arr);
@@ -733,6 +789,35 @@ pub(crate) unsafe fn msg_unref(msg: *mut c_void) {
     {
         dbus_message_unref(msg);
     }
+}
+
+/// Get the interface name from a D-Bus message.
+pub(crate) unsafe fn msg_get_interface(msg: *mut c_void) -> Option<String> {
+    let ptr = dbus_message_get_interface(msg);
+    if ptr.is_null() { return None; }
+    Some(CStr::from_ptr(ptr).to_string_lossy().into_owned())
+}
+
+/// Get the member name from a D-Bus message.
+pub(crate) unsafe fn msg_get_member(msg: *mut c_void) -> Option<String> {
+    let ptr = dbus_message_get_member(msg);
+    if ptr.is_null() { return None; }
+    Some(CStr::from_ptr(ptr).to_string_lossy().into_owned())
+}
+
+/// Get the message type.
+pub(crate) unsafe fn msg_get_type(msg: *mut c_void) -> c_int {
+    dbus_message_get_type(msg)
+}
+
+/// Pop the next message from a connection. Returns null if no message is pending.
+pub(crate) unsafe fn conn_pop_message(conn: &mut DBusConn) -> *mut c_void {
+    dbus_connection_pop_message(conn.conn)
+}
+
+/// Read/write on a connection with a timeout. Returns false if disconnected.
+pub(crate) unsafe fn conn_read_write(conn: &mut DBusConn, timeout_ms: i32) -> bool {
+    dbus_connection_read_write(conn.conn, timeout_ms) != 0
 }
 
 // ── portal_get_eis_fd ────────────────────────────────────────────────

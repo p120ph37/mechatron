@@ -170,9 +170,7 @@ async function xselSetText(text: string): Promise<boolean> {
 // Linux dispatcher: try the user's preferred clipboard mechanism, fall
 // through to the next available one only if the primary call *threw* —
 // an empty string / false return is a legitimate answer and must not
-// trigger cascade. GNOME-Wayland's wl-copy silently succeeds but never
-// actually reaches the clipboard; auto-detection at probe time already
-// prefers xclip there, so we don't land on wl-clipboard to begin with.
+// trigger cascade.
 
 interface LinuxImpl {
   clear: () => Promise<boolean>;

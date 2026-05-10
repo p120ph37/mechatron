@@ -1,21 +1,19 @@
 // Linux portal clipboard implementation entry point.
 //
-// Loaded by the `mechatron-clipboard-portal` crate.  Hosts the
-// `clipboard_wl` helper module (Wayland zwlr_data_control_v1 selection
-// implementation against a libwayland-client connection) plus the
-// napi-derive #[napi] exports that call into it.
-//
-// PNG helpers (argb_to_png / png_to_argb) live here because clipboard_wl
-// uses them as `super::png_to_argb(..)` / `super::argb_to_png(..)`
-// — making this file the parent module of clipboard_wl places them at
-// the right resolution path.  The x11 variant has its own
-// identical-but-separate copy in clipboard_x11_main.rs (the helpers are
-// a few dozen lines and duplicating beats threading another shared
-// crate just for them).
+// Tries the xdg-desktop-portal Clipboard interface (RemoteDesktop session)
+// first, falling back to zwlr_data_control_v1 via libwayland-client.
+// The portal path works on GNOME/Mutter; the wlr path works on wlroots
+// compositors (Sway, Hyprland, etc).
 
 use napi::bindgen_prelude::*;
 use napi::Either;
 use napi_derive::napi;
+
+#[path = "dbus_portal.rs"]
+mod dbus_portal;
+
+#[path = "clipboard_portal_dbus.rs"]
+mod clipboard_portal_dbus;
 
 #[path = "clipboard_wl.rs"]
 mod clipboard_wl;
@@ -99,13 +97,59 @@ pub(crate) fn png_to_argb(png_data: &[u8]) -> Option<(u32, u32, Vec<u32>)> {
     Some((w, h, argb))
 }
 
+// ── Backend dispatch: portal (RemoteDesktop clipboard) → wlr fallback ──
+
+fn use_portal() -> bool {
+    clipboard_portal_dbus::is_available()
+}
+
+fn do_clear() -> bool {
+    if use_portal() { clipboard_portal_dbus::portal_clear() }
+    else { clipboard_wl::wl_clear() }
+}
+
+fn do_has_text() -> bool {
+    if use_portal() { clipboard_portal_dbus::portal_has_text() }
+    else { clipboard_wl::wl_has_text() }
+}
+
+fn do_get_text() -> String {
+    if use_portal() { clipboard_portal_dbus::portal_get_text() }
+    else { clipboard_wl::wl_get_text() }
+}
+
+fn do_set_text(text: &str) -> bool {
+    if use_portal() { clipboard_portal_dbus::portal_set_text(text) }
+    else { clipboard_wl::wl_set_text(text) }
+}
+
+fn do_has_image() -> bool {
+    if use_portal() { clipboard_portal_dbus::portal_has_image() }
+    else { clipboard_wl::wl_has_image() }
+}
+
+fn do_get_image() -> Option<(u32, u32, Vec<u32>)> {
+    if use_portal() { clipboard_portal_dbus::portal_get_image() }
+    else { clipboard_wl::wl_get_image() }
+}
+
+fn do_set_image(w: u32, h: u32, data: &[u32]) -> bool {
+    if use_portal() { clipboard_portal_dbus::portal_set_image(w, h, data) }
+    else { clipboard_wl::wl_set_image(w, h, data) }
+}
+
+fn do_get_sequence() -> f64 {
+    if use_portal() { clipboard_portal_dbus::portal_get_sequence() }
+    else { clipboard_wl::wl_get_sequence() }
+}
+
 // ── AsyncTask wrappers ────────────────────────────────────────────────
 
 pub struct ClearTask;
 impl Task for ClearTask {
     type Output = bool;
     type JsValue = bool;
-    fn compute(&mut self) -> Result<bool> { Ok(clipboard_wl::wl_clear()) }
+    fn compute(&mut self) -> Result<bool> { Ok(do_clear()) }
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
@@ -113,7 +157,7 @@ pub struct HasTextTask;
 impl Task for HasTextTask {
     type Output = bool;
     type JsValue = bool;
-    fn compute(&mut self) -> Result<bool> { Ok(clipboard_wl::wl_has_text()) }
+    fn compute(&mut self) -> Result<bool> { Ok(do_has_text()) }
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
@@ -121,7 +165,7 @@ pub struct GetTextTask;
 impl Task for GetTextTask {
     type Output = String;
     type JsValue = String;
-    fn compute(&mut self) -> Result<String> { Ok(clipboard_wl::wl_get_text()) }
+    fn compute(&mut self) -> Result<String> { Ok(do_get_text()) }
     fn resolve(&mut self, _env: Env, out: String) -> Result<String> { Ok(out) }
 }
 
@@ -129,7 +173,7 @@ pub struct SetTextTask { text: String }
 impl Task for SetTextTask {
     type Output = bool;
     type JsValue = bool;
-    fn compute(&mut self) -> Result<bool> { Ok(clipboard_wl::wl_set_text(&self.text)) }
+    fn compute(&mut self) -> Result<bool> { Ok(do_set_text(&self.text)) }
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
@@ -137,7 +181,7 @@ pub struct HasImageTask;
 impl Task for HasImageTask {
     type Output = bool;
     type JsValue = bool;
-    fn compute(&mut self) -> Result<bool> { Ok(clipboard_wl::wl_has_image()) }
+    fn compute(&mut self) -> Result<bool> { Ok(do_has_image()) }
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
 
@@ -146,7 +190,7 @@ impl Task for GetImageTask {
     type Output = Option<(u32, u32, Vec<u32>)>;
     type JsValue = Either<ClipboardImage, ()>;
     fn compute(&mut self) -> Result<Option<(u32, u32, Vec<u32>)>> {
-        Ok(clipboard_wl::wl_get_image())
+        Ok(do_get_image())
     }
     fn resolve(&mut self, _env: Env, out: Option<(u32, u32, Vec<u32>)>) -> Result<Either<ClipboardImage, ()>> {
         match out {
@@ -165,7 +209,7 @@ impl Task for SetImageTask {
     type Output = bool;
     type JsValue = bool;
     fn compute(&mut self) -> Result<bool> {
-        Ok(clipboard_wl::wl_set_image(self.width, self.height, &self.data))
+        Ok(do_set_image(self.width, self.height, &self.data))
     }
     fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
 }
@@ -174,7 +218,7 @@ pub struct GetSequenceTask;
 impl Task for GetSequenceTask {
     type Output = f64;
     type JsValue = f64;
-    fn compute(&mut self) -> Result<f64> { Ok(clipboard_wl::wl_get_sequence()) }
+    fn compute(&mut self) -> Result<f64> { Ok(do_get_sequence()) }
     fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
 }
 
