@@ -108,12 +108,15 @@ impl Task for GrabScreenTask {
 pub struct GetPortalTokenTask;
 impl Task for GetPortalTokenTask {
     type Output = Option<String>;
-    type JsValue = Option<String>;
+    type JsValue = Either<String, napi::JsNull>;
     fn compute(&mut self) -> Result<Self::Output> {
         Ok(platform_get_portal_token())
     }
-    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Self::JsValue> {
-        Ok(out)
+    fn resolve(&mut self, env: Env, out: Self::Output) -> Result<Self::JsValue> {
+        match out {
+            Some(s) => Ok(Either::A(s)),
+            None => Ok(Either::B(env.get_null()?)),
+        }
     }
 }
 
