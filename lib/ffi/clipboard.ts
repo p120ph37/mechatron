@@ -529,7 +529,14 @@ export async function clipboard_hasImage(): Promise<boolean> {
 }
 
 export async function clipboard_getImage(): Promise<{ width: number; height: number; data: Uint32Array } | null> {
-  if (IS_WIN) return winGetImage();
+  if (IS_WIN) {
+    for (let i = 0; i < 8; i++) {
+      const r = winGetImage();
+      if (r) return r;
+      await new Promise(resolve => setTimeout(resolve, 25 * (i + 1)));
+    }
+    return null;
+  }
   if (IS_MAC) return macGetImage();
   return null;
 }
