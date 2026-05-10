@@ -561,10 +561,6 @@ unsafe fn read_selection(state: &ClipState, conn: &mut DBusConn, mime: &str) -> 
 
 // ── Public API ──────────────────────────────────────────────────────
 
-pub fn is_available() -> bool {
-    get_handle().is_some()
-}
-
 pub fn portal_clear() -> bool {
     get_handle()
         .and_then(|h| h.request(|resp| Cmd::Clear { resp }))

@@ -1,9 +1,8 @@
 // Linux portal clipboard implementation entry point.
 //
-// Tries the xdg-desktop-portal Clipboard interface (RemoteDesktop session)
-// first, falling back to zwlr_data_control_v1 via libwayland-client.
-// The portal path works on GNOME/Mutter; the wlr path works on wlroots
-// compositors (Sway, Hyprland, etc).
+// Uses the xdg-desktop-portal Clipboard interface (RemoteDesktop session).
+// This is a pure backend — no internal fallback. If the portal is
+// unavailable, operations return clean defaults (false / empty string).
 
 use napi::bindgen_prelude::*;
 use napi::Either;
@@ -15,9 +14,6 @@ mod dbus_portal;
 #[path = "clipboard_portal_dbus.rs"]
 mod clipboard_portal_dbus;
 
-#[path = "clipboard_wl.rs"]
-mod clipboard_wl;
-
 #[napi(object)]
 pub struct ClipboardImage {
     pub width: u32,
@@ -25,7 +21,7 @@ pub struct ClipboardImage {
     pub data: Uint32Array,
 }
 
-// ── PNG conversion helpers (used by clipboard_wl via super::) ─────────
+// ── PNG conversion helpers ────────────────────────────────────────────
 
 pub(crate) fn argb_to_png(width: u32, height: u32, data: &[u32]) -> Option<Vec<u8>> {
     let pixel_count = (width as usize) * (height as usize);
@@ -97,50 +93,38 @@ pub(crate) fn png_to_argb(png_data: &[u8]) -> Option<(u32, u32, Vec<u32>)> {
     Some((w, h, argb))
 }
 
-// ── Backend dispatch: portal (RemoteDesktop clipboard) → wlr fallback ──
-
-fn use_portal() -> bool {
-    clipboard_portal_dbus::is_available()
-}
+// ── Backend dispatch: pure portal (RemoteDesktop clipboard) ──────────
 
 fn do_clear() -> bool {
-    if use_portal() { clipboard_portal_dbus::portal_clear() }
-    else { clipboard_wl::wl_clear() }
+    clipboard_portal_dbus::portal_clear()
 }
 
 fn do_has_text() -> bool {
-    if use_portal() { clipboard_portal_dbus::portal_has_text() }
-    else { clipboard_wl::wl_has_text() }
+    clipboard_portal_dbus::portal_has_text()
 }
 
 fn do_get_text() -> String {
-    if use_portal() { clipboard_portal_dbus::portal_get_text() }
-    else { clipboard_wl::wl_get_text() }
+    clipboard_portal_dbus::portal_get_text()
 }
 
 fn do_set_text(text: &str) -> bool {
-    if use_portal() { clipboard_portal_dbus::portal_set_text(text) }
-    else { clipboard_wl::wl_set_text(text) }
+    clipboard_portal_dbus::portal_set_text(text)
 }
 
 fn do_has_image() -> bool {
-    if use_portal() { clipboard_portal_dbus::portal_has_image() }
-    else { clipboard_wl::wl_has_image() }
+    clipboard_portal_dbus::portal_has_image()
 }
 
 fn do_get_image() -> Option<(u32, u32, Vec<u32>)> {
-    if use_portal() { clipboard_portal_dbus::portal_get_image() }
-    else { clipboard_wl::wl_get_image() }
+    clipboard_portal_dbus::portal_get_image()
 }
 
 fn do_set_image(w: u32, h: u32, data: &[u32]) -> bool {
-    if use_portal() { clipboard_portal_dbus::portal_set_image(w, h, data) }
-    else { clipboard_wl::wl_set_image(w, h, data) }
+    clipboard_portal_dbus::portal_set_image(w, h, data)
 }
 
 fn do_get_sequence() -> f64 {
-    if use_portal() { clipboard_portal_dbus::portal_get_sequence() }
-    else { clipboard_wl::wl_get_sequence() }
+    clipboard_portal_dbus::portal_get_sequence()
 }
 
 // ── AsyncTask wrappers ────────────────────────────────────────────────
