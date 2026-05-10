@@ -94,16 +94,21 @@ pub fn get_monitors() -> Option<Vec<(i32, i32, u32, u32)>> {
 
 pub fn get_token() -> Option<String> {
     with_state(|state| {
-        if let Some(ref s) = state.session {
+        let has_session = state.session.is_some();
+        let result = if let Some(ref s) = state.session {
             s.restore_token.clone()
         } else {
             state.pending_token.clone()
-        }
+        };
+        eprintln!("[screencast] get_token: has_session={has_session} result={result:?}");
+        result
     })
 }
 
 pub fn set_token(token: String) {
     with_state(|state| {
+        let has_session = state.session.is_some();
+        eprintln!("[screencast] set_token: has_session={has_session} token={token:?}");
         if let Some(ref mut s) = state.session {
             s.restore_token = Some(token.clone());
         }
