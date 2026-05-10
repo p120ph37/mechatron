@@ -39,6 +39,29 @@ use variants (like process and memory).
 | `test/` | Test suite; `test/matrix.js` reads `COMPATIBILITY.md` tables |
 | `packages/mechatron-robot-js/` | robot-js 2.2.0 backward-compat shim |
 
+## napi linking conventions
+
+These rules apply to **all** Rust napi crates in this project.
+
+1. **No dlopen/dlsym in napi modules.** Declare all library dependencies via
+   explicit link directives (`println!("cargo:rustc-link-lib=foo")` in
+   `build.rs`) and use `extern "C"` blocks for function declarations. The
+   resulting `.node` binary will have the library as a NEEDED entry — if the
+   library is absent, the binary fails to load, giving the TS resolver a
+   clean failure path.
+
+2. **Multiple .node binaries only when linkage differs.** If two code paths
+   require different libraries (e.g. libei vs libevdev), produce separate
+   binaries in the same npm package and select via the TS entrypoint. If
+   both paths link the same library (e.g. zwlr_data_control_v1 vs core
+   wl_data_device — both use libwayland-client), keep them in one binary
+   and detect the protocol flavor at init time.
+
+3. **Backend purity.** Each napi variant backend (e.g. `napi[portal]`,
+   `napi[x11]`) is responsible for exactly one mechanism class. The `sh`
+   backend provides runtime fallback at the dispatcher level; individual
+   backends do not internally fall back to a different mechanism class.
+
 ## bun:ffi pointer-handling conventions
 
 These rules apply to **all** bun:ffi work in this project, on every platform.

@@ -207,92 +207,32 @@ pub fn build_video_format_pod() -> Vec<u8> {
     pod
 }
 
-// ── Dynamically loaded function pointers ──────────────────────────────
+// ── Linked libpipewire-0.3 functions ─────────────────────────────────
 
-pub struct PwFns {
-    pub pw_init: unsafe extern "C" fn(*mut c_int, *mut *mut *mut c_char),
-    pub pw_main_loop_new: unsafe extern "C" fn(*const c_void) -> *mut c_void,
-    pub pw_main_loop_destroy: unsafe extern "C" fn(*mut c_void),
-    pub pw_main_loop_get_loop: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    pub pw_main_loop_run: unsafe extern "C" fn(*mut c_void) -> c_int,
-    pub pw_main_loop_quit: unsafe extern "C" fn(*mut c_void) -> c_int,
-    pub pw_context_new: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> *mut c_void,
-    pub pw_context_destroy: unsafe extern "C" fn(*mut c_void),
-    pub pw_context_connect_fd: unsafe extern "C" fn(*mut c_void, c_int, *const c_void, usize) -> *mut c_void,
-    pub pw_core_disconnect: unsafe extern "C" fn(*mut c_void),
-    pub pw_stream_new: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_void) -> *mut c_void,
-    pub pw_stream_destroy: unsafe extern "C" fn(*mut c_void),
-    pub pw_stream_connect: unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const *const c_void, u32) -> c_int,
-    pub pw_stream_add_listener: unsafe extern "C" fn(*mut c_void, *mut SpaHook, *const PwStreamEvents, *mut c_void),
-    pub pw_stream_dequeue_buffer: unsafe extern "C" fn(*mut c_void) -> *mut PwBuffer,
-    pub pw_stream_queue_buffer: unsafe extern "C" fn(*mut c_void, *mut PwBuffer) -> c_int,
-    pub pw_properties_new: *mut c_void, // variadic — called via transmute
+extern "C" {
+    pub fn pw_init(argc: *mut c_int, argv: *mut *mut *mut c_char);
+    pub fn pw_main_loop_new(props: *const c_void) -> *mut c_void;
+    pub fn pw_main_loop_destroy(loop_: *mut c_void);
+    pub fn pw_main_loop_get_loop(loop_: *mut c_void) -> *mut c_void;
+    pub fn pw_main_loop_run(loop_: *mut c_void) -> c_int;
+    pub fn pw_main_loop_quit(loop_: *mut c_void) -> c_int;
+    pub fn pw_context_new(loop_: *mut c_void, props: *const c_void, user_data_size: usize) -> *mut c_void;
+    pub fn pw_context_destroy(context: *mut c_void);
+    pub fn pw_context_connect_fd(context: *mut c_void, fd: c_int, props: *const c_void, user_data_size: usize) -> *mut c_void;
+    pub fn pw_core_disconnect(core: *mut c_void);
+    pub fn pw_stream_new(core: *mut c_void, name: *const c_char, props: *const c_void) -> *mut c_void;
+    pub fn pw_stream_destroy(stream: *mut c_void);
+    pub fn pw_stream_connect(stream: *mut c_void, direction: u32, target_id: u32, flags: u32, params: *const *const c_void, n_params: u32) -> c_int;
+    pub fn pw_stream_add_listener(stream: *mut c_void, listener: *mut SpaHook, events: *const PwStreamEvents, data: *mut c_void);
+    pub fn pw_stream_dequeue_buffer(stream: *mut c_void) -> *mut PwBuffer;
+    pub fn pw_stream_queue_buffer(stream: *mut c_void, buffer: *mut PwBuffer) -> c_int;
+    pub fn pw_properties_new(key: *const c_char, ...) -> *mut c_void;
 }
 
-unsafe impl Sync for PwFns {}
-unsafe impl Send for PwFns {}
-
 static PW_INIT: Once = Once::new();
-static mut PW_PTR: *const PwFns = std::ptr::null();
 
-pub unsafe fn load_pw() -> Option<&'static PwFns> {
+pub unsafe fn ensure_pw_init() {
     PW_INIT.call_once(|| {
-        let lib = libc::dlopen(
-            b"libpipewire-0.3.so.0\0".as_ptr() as *const c_char,
-            libc::RTLD_NOW | libc::RTLD_LOCAL,
-        );
-        let lib = if lib.is_null() {
-            let l = libc::dlopen(
-                b"libpipewire-0.3.so\0".as_ptr() as *const c_char,
-                libc::RTLD_NOW | libc::RTLD_LOCAL,
-            );
-            if l.is_null() { return; }
-            l
-        } else {
-            lib
-        };
-
-        macro_rules! sym {
-            ($name:expr) => {{
-                let s = libc::dlsym(lib, $name.as_ptr() as *const c_char);
-                if s.is_null() { return; }
-                std::mem::transmute(s)
-            }};
-        }
-
-        macro_rules! sym_raw {
-            ($name:expr) => {{
-                let s = libc::dlsym(lib, $name.as_ptr() as *const c_char);
-                if s.is_null() { return; }
-                s
-            }};
-        }
-
-        let pw_init_ptr = libc::dlsym(lib, b"pw_init\0".as_ptr() as *const c_char);
-        if pw_init_ptr.is_null() { return; }
-        let pw_init_fn: unsafe extern "C" fn(*mut c_int, *mut *mut *mut c_char) =
-            std::mem::transmute(pw_init_ptr);
-        pw_init_fn(std::ptr::null_mut(), std::ptr::null_mut());
-
-        PW_PTR = Box::into_raw(Box::new(PwFns {
-            pw_init: sym!(b"pw_init\0"),
-            pw_main_loop_new: sym!(b"pw_main_loop_new\0"),
-            pw_main_loop_destroy: sym!(b"pw_main_loop_destroy\0"),
-            pw_main_loop_get_loop: sym!(b"pw_main_loop_get_loop\0"),
-            pw_main_loop_run: sym!(b"pw_main_loop_run\0"),
-            pw_main_loop_quit: sym!(b"pw_main_loop_quit\0"),
-            pw_context_new: sym!(b"pw_context_new\0"),
-            pw_context_destroy: sym!(b"pw_context_destroy\0"),
-            pw_context_connect_fd: sym!(b"pw_context_connect_fd\0"),
-            pw_core_disconnect: sym!(b"pw_core_disconnect\0"),
-            pw_stream_new: sym!(b"pw_stream_new\0"),
-            pw_stream_destroy: sym!(b"pw_stream_destroy\0"),
-            pw_stream_connect: sym!(b"pw_stream_connect\0"),
-            pw_stream_add_listener: sym!(b"pw_stream_add_listener\0"),
-            pw_stream_dequeue_buffer: sym!(b"pw_stream_dequeue_buffer\0"),
-            pw_stream_queue_buffer: sym!(b"pw_stream_queue_buffer\0"),
-            pw_properties_new: sym_raw!(b"pw_properties_new\0"),
-        }));
+        pw_init(std::ptr::null_mut(), std::ptr::null_mut());
     });
-    PW_PTR.as_ref()
 }

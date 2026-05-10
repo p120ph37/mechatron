@@ -1,12 +1,10 @@
 // Linux portal screen implementation.
 //
 // Acquires a ScreenCast session via the xdg-desktop-portal ScreenCast
-// interface and pulls frames from the resulting PipeWire stream.  The
-// portal handshake is done over a raw D-Bus socket (dbus_portal.rs) and
-// PipeWire is dlopen'd lazily by pw.rs / pw_capture.rs, so this crate
-// has no NEEDED libs other than libc — it loads cleanly on x11-only
-// systems where the napi resolver then falls through to the next
-// variant.
+// interface and pulls frames from the resulting PipeWire stream.
+// Links libdbus-1 (portal handshake) and libpipewire-0.3 (frame capture)
+// explicitly — if either is absent the binary fails to load and the
+// napi resolver falls through to the next variant.
 //
 // Loaded by the `mechatron-screen-portal` crate, which exposes the
 // resulting #[napi] functions through the @mechatronic/napi-screen npm

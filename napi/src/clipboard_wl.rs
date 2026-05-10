@@ -35,65 +35,26 @@ unsafe impl<const N: usize> Sync for WlTypes<N> {}
 
 const WL_MARSHAL_FLAG_DESTROY: u32 = 1;
 
-// ── Dynamically loaded function pointers ────────────────────────────────
+// ── Linked libwayland-client functions ──────────────────────────────────
 
-struct WlFns {
-    display_connect: unsafe extern "C" fn(*const c_char) -> *mut WlDisplay,
-    display_disconnect: unsafe extern "C" fn(*mut WlDisplay),
-    display_roundtrip: unsafe extern "C" fn(*mut WlDisplay) -> c_int,
-    display_get_fd: unsafe extern "C" fn(*mut WlDisplay) -> c_int,
-    display_dispatch: unsafe extern "C" fn(*mut WlDisplay) -> c_int,
-    proxy_marshal_flags: unsafe extern "C" fn(
-        *mut WlProxy, u32, *const WlInterface, u32, u32, ...
-    ) -> *mut WlProxy,
-    proxy_add_listener: unsafe extern "C" fn(
-        *mut WlProxy, *const c_void, *mut c_void,
-    ) -> c_int,
-    proxy_destroy: unsafe extern "C" fn(*mut WlProxy),
-    proxy_get_version: unsafe extern "C" fn(*mut WlProxy) -> u32,
-}
-
-static WL_INIT: Once = Once::new();
-static mut WL_PTR: *const WlFns = std::ptr::null();
-
-unsafe fn load_wayland() -> Option<&'static WlFns> {
-    WL_INIT.call_once(|| {
-        let lib = libc::dlopen(
-            b"libwayland-client.so.0\0".as_ptr() as *const c_char,
-            libc::RTLD_NOW | libc::RTLD_LOCAL,
-        );
-        if lib.is_null() {
-            return;
-        }
-
-        macro_rules! sym {
-            ($name:expr) => {{
-                let s = libc::dlsym(lib, $name.as_ptr() as *const c_char);
-                if s.is_null() { return; }
-                std::mem::transmute(s)
-            }};
-        }
-
-        WL_PTR = Box::into_raw(Box::new(WlFns {
-            display_connect: sym!(b"wl_display_connect\0"),
-            display_disconnect: sym!(b"wl_display_disconnect\0"),
-            display_roundtrip: sym!(b"wl_display_roundtrip\0"),
-            display_get_fd: sym!(b"wl_display_get_fd\0"),
-            display_dispatch: sym!(b"wl_display_dispatch\0"),
-            proxy_marshal_flags: sym!(b"wl_proxy_marshal_flags\0"),
-            proxy_add_listener: sym!(b"wl_proxy_add_listener\0"),
-            proxy_destroy: sym!(b"wl_proxy_destroy\0"),
-            proxy_get_version: sym!(b"wl_proxy_get_version\0"),
-        }));
-    });
-    WL_PTR.as_ref()
+extern "C" {
+    fn wl_display_connect(name: *const c_char) -> *mut WlDisplay;
+    fn wl_display_disconnect(display: *mut WlDisplay);
+    fn wl_display_roundtrip(display: *mut WlDisplay) -> c_int;
+    fn wl_display_get_fd(display: *mut WlDisplay) -> c_int;
+    fn wl_display_dispatch(display: *mut WlDisplay) -> c_int;
+    fn wl_proxy_marshal_flags(
+        proxy: *mut WlProxy, opcode: u32, interface: *const WlInterface,
+        version: u32, flags: u32, ...
+    ) -> *mut WlProxy;
+    fn wl_proxy_add_listener(
+        proxy: *mut WlProxy, implementation: *const c_void, data: *mut c_void,
+    ) -> c_int;
+    fn wl_proxy_destroy(proxy: *mut WlProxy);
+    fn wl_proxy_get_version(proxy: *mut WlProxy) -> u32;
 }
 
 // ── Protocol interface definitions ──────────────────────────────────────
-//
-// Minimal stubs for the interfaces needed by zwlr_data_control_v1.
-// Only name+version are strictly required for wl_registry_bind; the
-// method/event arrays are needed for correct marshal/dispatch.
 
 static NULL_TYPES: WlTypes<4> = WlTypes([
     std::ptr::null(),
@@ -141,14 +102,160 @@ static WL_SEAT_INTERFACE: WlInterface = WlInterface {
     events: std::ptr::null(),
 };
 
+// -- wl_compositor --
+static WL_COMPOSITOR_INTERFACE: WlInterface = WlInterface {
+    name: b"wl_compositor\0".as_ptr() as *const c_char,
+    version: 4,
+    method_count: 0,
+    methods: std::ptr::null(),
+    event_count: 0,
+    events: std::ptr::null(),
+};
+
+// -- wl_surface (stub for wl_compositor.create_surface) --
+static WL_SURFACE_INTERFACE: WlInterface = WlInterface {
+    name: b"wl_surface\0".as_ptr() as *const c_char,
+    version: 4,
+    method_count: 0,
+    methods: std::ptr::null(),
+    event_count: 0,
+    events: std::ptr::null(),
+};
+
+// -- wl_data_device_manager --
+static WL_DATA_DEVICE_MANAGER_INTERFACE: WlInterface = WlInterface {
+    name: b"wl_data_device_manager\0".as_ptr() as *const c_char,
+    version: 3,
+    method_count: 0,
+    methods: std::ptr::null(),
+    event_count: 0,
+    events: std::ptr::null(),
+};
+
+// -- wl_data_source --
+static WL_DATA_SOURCE_EVENTS: [WlMessage; 3] = [
+    WlMessage {
+        name: b"target\0".as_ptr() as *const c_char,
+        signature: b"?s\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"send\0".as_ptr() as *const c_char,
+        signature: b"sh\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"cancelled\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
+static WL_DATA_SOURCE_METHODS: [WlMessage; 2] = [
+    WlMessage {
+        name: b"offer\0".as_ptr() as *const c_char,
+        signature: b"s\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"destroy\0".as_ptr() as *const c_char,
+        signature: b"\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
+static WL_DATA_SOURCE_INTERFACE: WlInterface = WlInterface {
+    name: b"wl_data_source\0".as_ptr() as *const c_char,
+    version: 3,
+    method_count: 2,
+    methods: WL_DATA_SOURCE_METHODS.as_ptr(),
+    event_count: 3,
+    events: WL_DATA_SOURCE_EVENTS.as_ptr(),
+};
+
+// -- wl_data_offer --
+static WL_DATA_OFFER_EVENTS: [WlMessage; 1] = [
+    WlMessage {
+        name: b"offer\0".as_ptr() as *const c_char,
+        signature: b"s\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
+static WL_DATA_OFFER_METHODS: [WlMessage; 2] = [
+    WlMessage {
+        name: b"accept\0".as_ptr() as *const c_char,
+        signature: b"u?s\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"receive\0".as_ptr() as *const c_char,
+        signature: b"sh\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
+static WL_DATA_OFFER_INTERFACE: WlInterface = WlInterface {
+    name: b"wl_data_offer\0".as_ptr() as *const c_char,
+    version: 3,
+    method_count: 2,
+    methods: WL_DATA_OFFER_METHODS.as_ptr(),
+    event_count: 1,
+    events: WL_DATA_OFFER_EVENTS.as_ptr(),
+};
+
+// -- wl_data_device --
+static WL_DATA_DEVICE_OFFER_TYPES: WlTypes<1> = WlTypes([
+    &WL_DATA_OFFER_INTERFACE as *const WlInterface,
+]);
+
+static WL_DATA_DEVICE_EVENTS: [WlMessage; 3] = [
+    WlMessage {
+        name: b"data_offer\0".as_ptr() as *const c_char,
+        signature: b"n\0".as_ptr() as *const c_char,
+        types: WL_DATA_DEVICE_OFFER_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"enter\0".as_ptr() as *const c_char,
+        signature: b"uoff?oiff\0".as_ptr() as *const c_char,
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    WlMessage {
+        name: b"selection\0".as_ptr() as *const c_char,
+        signature: b"?o\0".as_ptr() as *const c_char,
+        types: WL_DATA_DEVICE_OFFER_TYPES.0.as_ptr(),
+    },
+];
+
+static WL_DATA_DEVICE_SET_SELECTION_TYPES: WlTypes<1> = WlTypes([
+    &WL_DATA_SOURCE_INTERFACE as *const WlInterface,
+]);
+
+static WL_DATA_DEVICE_METHODS: [WlMessage; 1] = [
+    WlMessage {
+        name: b"set_selection\0".as_ptr() as *const c_char,
+        signature: b"?ou\0".as_ptr() as *const c_char,
+        types: WL_DATA_DEVICE_SET_SELECTION_TYPES.0.as_ptr(),
+    },
+];
+
+static WL_DATA_DEVICE_INTERFACE: WlInterface = WlInterface {
+    name: b"wl_data_device\0".as_ptr() as *const c_char,
+    version: 3,
+    method_count: 1,
+    methods: WL_DATA_DEVICE_METHODS.as_ptr(),
+    event_count: 3,
+    events: WL_DATA_DEVICE_EVENTS.as_ptr(),
+};
+
 // -- zwlr_data_control_offer_v1 --
-static OFFER_EVENTS: [WlMessage; 1] = [WlMessage {
+static ZWLR_OFFER_EVENTS: [WlMessage; 1] = [WlMessage {
     name: b"offer\0".as_ptr() as *const c_char,
     signature: b"s\0".as_ptr() as *const c_char,
     types: NULL_TYPES.0.as_ptr(),
 }];
 
-static OFFER_METHODS: [WlMessage; 2] = [
+static ZWLR_OFFER_METHODS: [WlMessage; 2] = [
     WlMessage {
         name: b"receive\0".as_ptr() as *const c_char,
         signature: b"sh\0".as_ptr() as *const c_char,
@@ -165,13 +272,13 @@ static ZWLR_DATA_CONTROL_OFFER_V1_INTERFACE: WlInterface = WlInterface {
     name: b"zwlr_data_control_offer_v1\0".as_ptr() as *const c_char,
     version: 1,
     method_count: 2,
-    methods: OFFER_METHODS.as_ptr(),
+    methods: ZWLR_OFFER_METHODS.as_ptr(),
     event_count: 1,
-    events: OFFER_EVENTS.as_ptr(),
+    events: ZWLR_OFFER_EVENTS.as_ptr(),
 };
 
 // -- zwlr_data_control_source_v1 --
-static SOURCE_EVENTS: [WlMessage; 2] = [
+static ZWLR_SOURCE_EVENTS: [WlMessage; 2] = [
     WlMessage {
         name: b"send\0".as_ptr() as *const c_char,
         signature: b"sh\0".as_ptr() as *const c_char,
@@ -184,7 +291,7 @@ static SOURCE_EVENTS: [WlMessage; 2] = [
     },
 ];
 
-static SOURCE_METHODS: [WlMessage; 2] = [
+static ZWLR_SOURCE_METHODS: [WlMessage; 2] = [
     WlMessage {
         name: b"offer\0".as_ptr() as *const c_char,
         signature: b"s\0".as_ptr() as *const c_char,
@@ -201,35 +308,34 @@ static ZWLR_DATA_CONTROL_SOURCE_V1_INTERFACE: WlInterface = WlInterface {
     name: b"zwlr_data_control_source_v1\0".as_ptr() as *const c_char,
     version: 1,
     method_count: 2,
-    methods: SOURCE_METHODS.as_ptr(),
+    methods: ZWLR_SOURCE_METHODS.as_ptr(),
     event_count: 2,
-    events: SOURCE_EVENTS.as_ptr(),
+    events: ZWLR_SOURCE_EVENTS.as_ptr(),
 };
 
 // -- zwlr_data_control_device_v1 --
-// Event types array: data_offer creates a new offer object
-static DEVICE_DATA_OFFER_TYPES: WlTypes<1> = WlTypes([
+static ZWLR_DEVICE_DATA_OFFER_TYPES: WlTypes<1> = WlTypes([
     &ZWLR_DATA_CONTROL_OFFER_V1_INTERFACE as *const WlInterface,
 ]);
 
-static DEVICE_SELECTION_TYPES: WlTypes<1> = WlTypes([
+static ZWLR_DEVICE_SELECTION_TYPES: WlTypes<1> = WlTypes([
     &ZWLR_DATA_CONTROL_OFFER_V1_INTERFACE as *const WlInterface,
 ]);
 
-static DEVICE_SET_SELECTION_TYPES: WlTypes<1> = WlTypes([
+static ZWLR_DEVICE_SET_SELECTION_TYPES: WlTypes<1> = WlTypes([
     &ZWLR_DATA_CONTROL_SOURCE_V1_INTERFACE as *const WlInterface,
 ]);
 
-static DEVICE_EVENTS: [WlMessage; 4] = [
+static ZWLR_DEVICE_EVENTS: [WlMessage; 4] = [
     WlMessage {
         name: b"data_offer\0".as_ptr() as *const c_char,
         signature: b"n\0".as_ptr() as *const c_char,
-        types: DEVICE_DATA_OFFER_TYPES.0.as_ptr(),
+        types: ZWLR_DEVICE_DATA_OFFER_TYPES.0.as_ptr(),
     },
     WlMessage {
         name: b"selection\0".as_ptr() as *const c_char,
         signature: b"?o\0".as_ptr() as *const c_char,
-        types: DEVICE_SELECTION_TYPES.0.as_ptr(),
+        types: ZWLR_DEVICE_SELECTION_TYPES.0.as_ptr(),
     },
     WlMessage {
         name: b"finished\0".as_ptr() as *const c_char,
@@ -239,15 +345,15 @@ static DEVICE_EVENTS: [WlMessage; 4] = [
     WlMessage {
         name: b"primary_selection\0".as_ptr() as *const c_char,
         signature: b"?o\0".as_ptr() as *const c_char,
-        types: DEVICE_SELECTION_TYPES.0.as_ptr(),
+        types: ZWLR_DEVICE_SELECTION_TYPES.0.as_ptr(),
     },
 ];
 
-static DEVICE_METHODS: [WlMessage; 3] = [
+static ZWLR_DEVICE_METHODS: [WlMessage; 3] = [
     WlMessage {
         name: b"set_selection\0".as_ptr() as *const c_char,
         signature: b"?o\0".as_ptr() as *const c_char,
-        types: DEVICE_SET_SELECTION_TYPES.0.as_ptr(),
+        types: ZWLR_DEVICE_SET_SELECTION_TYPES.0.as_ptr(),
     },
     WlMessage {
         name: b"destroy\0".as_ptr() as *const c_char,
@@ -257,7 +363,7 @@ static DEVICE_METHODS: [WlMessage; 3] = [
     WlMessage {
         name: b"set_primary_selection\0".as_ptr() as *const c_char,
         signature: b"?o\0".as_ptr() as *const c_char,
-        types: DEVICE_SET_SELECTION_TYPES.0.as_ptr(),
+        types: ZWLR_DEVICE_SET_SELECTION_TYPES.0.as_ptr(),
     },
 ];
 
@@ -265,31 +371,31 @@ static ZWLR_DATA_CONTROL_DEVICE_V1_INTERFACE: WlInterface = WlInterface {
     name: b"zwlr_data_control_device_v1\0".as_ptr() as *const c_char,
     version: 2,
     method_count: 3,
-    methods: DEVICE_METHODS.as_ptr(),
+    methods: ZWLR_DEVICE_METHODS.as_ptr(),
     event_count: 4,
-    events: DEVICE_EVENTS.as_ptr(),
+    events: ZWLR_DEVICE_EVENTS.as_ptr(),
 };
 
 // -- zwlr_data_control_manager_v1 --
-static MANAGER_CREATE_SOURCE_TYPES: WlTypes<1> = WlTypes([
+static ZWLR_MANAGER_CREATE_SOURCE_TYPES: WlTypes<1> = WlTypes([
     &ZWLR_DATA_CONTROL_SOURCE_V1_INTERFACE as *const WlInterface,
 ]);
 
-static MANAGER_GET_DEVICE_TYPES: WlTypes<2> = WlTypes([
+static ZWLR_MANAGER_GET_DEVICE_TYPES: WlTypes<2> = WlTypes([
     &ZWLR_DATA_CONTROL_DEVICE_V1_INTERFACE as *const WlInterface,
     &WL_SEAT_INTERFACE as *const WlInterface,
 ]);
 
-static MANAGER_METHODS: [WlMessage; 3] = [
+static ZWLR_MANAGER_METHODS: [WlMessage; 3] = [
     WlMessage {
         name: b"create_data_source\0".as_ptr() as *const c_char,
         signature: b"n\0".as_ptr() as *const c_char,
-        types: MANAGER_CREATE_SOURCE_TYPES.0.as_ptr(),
+        types: ZWLR_MANAGER_CREATE_SOURCE_TYPES.0.as_ptr(),
     },
     WlMessage {
         name: b"get_data_device\0".as_ptr() as *const c_char,
         signature: b"no\0".as_ptr() as *const c_char,
-        types: MANAGER_GET_DEVICE_TYPES.0.as_ptr(),
+        types: ZWLR_MANAGER_GET_DEVICE_TYPES.0.as_ptr(),
     },
     WlMessage {
         name: b"destroy\0".as_ptr() as *const c_char,
@@ -302,7 +408,49 @@ static ZWLR_DATA_CONTROL_MANAGER_V1_INTERFACE: WlInterface = WlInterface {
     name: b"zwlr_data_control_manager_v1\0".as_ptr() as *const c_char,
     version: 2,
     method_count: 3,
-    methods: MANAGER_METHODS.as_ptr(),
+    methods: ZWLR_MANAGER_METHODS.as_ptr(),
+    event_count: 0,
+    events: std::ptr::null(),
+};
+
+// -- xdg_wm_base --
+static XDG_WM_BASE_EVENTS: [WlMessage; 1] = [WlMessage {
+    name: b"ping\0".as_ptr() as *const c_char,
+    signature: b"u\0".as_ptr() as *const c_char,
+    types: NULL_TYPES.0.as_ptr(),
+}];
+
+static XDG_WM_BASE_INTERFACE: WlInterface = WlInterface {
+    name: b"xdg_wm_base\0".as_ptr() as *const c_char,
+    version: 2,
+    method_count: 0,
+    methods: std::ptr::null(),
+    event_count: 1,
+    events: XDG_WM_BASE_EVENTS.as_ptr(),
+};
+
+// -- xdg_surface --
+static XDG_SURFACE_EVENTS: [WlMessage; 1] = [WlMessage {
+    name: b"configure\0".as_ptr() as *const c_char,
+    signature: b"u\0".as_ptr() as *const c_char,
+    types: NULL_TYPES.0.as_ptr(),
+}];
+
+static XDG_SURFACE_INTERFACE: WlInterface = WlInterface {
+    name: b"xdg_surface\0".as_ptr() as *const c_char,
+    version: 2,
+    method_count: 0,
+    methods: std::ptr::null(),
+    event_count: 1,
+    events: XDG_SURFACE_EVENTS.as_ptr(),
+};
+
+// -- xdg_toplevel --
+static XDG_TOPLEVEL_INTERFACE: WlInterface = WlInterface {
+    name: b"xdg_toplevel\0".as_ptr() as *const c_char,
+    version: 2,
+    method_count: 0,
+    methods: std::ptr::null(),
     event_count: 0,
     events: std::ptr::null(),
 };
@@ -320,17 +468,18 @@ struct RegistryListener {
     global_remove: RegistryGlobalRemoveFn,
 }
 
-type DeviceDataOfferFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
-type DeviceSelectionFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
-type DeviceFinishedFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy);
-type DevicePrimarySelFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
+// zwlr listener types
+type ZwlrDeviceDataOfferFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
+type ZwlrDeviceSelectionFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
+type ZwlrDeviceFinishedFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy);
+type ZwlrDevicePrimarySelFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
 
 #[repr(C)]
-struct DeviceListener {
-    data_offer: DeviceDataOfferFn,
-    selection: DeviceSelectionFn,
-    finished: DeviceFinishedFn,
-    primary_selection: DevicePrimarySelFn,
+struct ZwlrDeviceListener {
+    data_offer: ZwlrDeviceDataOfferFn,
+    selection: ZwlrDeviceSelectionFn,
+    finished: ZwlrDeviceFinishedFn,
+    primary_selection: ZwlrDevicePrimarySelFn,
 }
 
 type OfferOfferFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *const c_char);
@@ -344,18 +493,74 @@ type SourceSendFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *const c_cha
 type SourceCancelledFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy);
 
 #[repr(C)]
-struct SourceListener {
+struct ZwlrSourceListener {
     send: SourceSendFn,
     cancelled: SourceCancelledFn,
 }
 
+// core wl_data_source listener (events: target, send, cancelled)
+type DataSourceTargetFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *const c_char);
+
+#[repr(C)]
+struct WlDataSourceListener {
+    target: DataSourceTargetFn,
+    send: SourceSendFn,
+    cancelled: SourceCancelledFn,
+}
+
+// core wl_data_device listener (events: data_offer, enter, selection)
+type WlDataDeviceDataOfferFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
+type WlDataDeviceEnterFn = unsafe extern "C" fn(
+    *mut c_void, *mut WlProxy, u32, *mut WlProxy, i32, i32, *mut WlProxy,
+);
+type WlDataDeviceSelectionFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, *mut WlProxy);
+
+#[repr(C)]
+struct WlDataDeviceListener {
+    data_offer: WlDataDeviceDataOfferFn,
+    enter: WlDataDeviceEnterFn,
+    selection: WlDataDeviceSelectionFn,
+}
+
+// xdg_wm_base listener
+type XdgWmBasePingFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, u32);
+
+#[repr(C)]
+struct XdgWmBaseListener {
+    ping: XdgWmBasePingFn,
+}
+
+// xdg_surface listener
+type XdgSurfaceConfigureFn = unsafe extern "C" fn(*mut c_void, *mut WlProxy, u32);
+
+#[repr(C)]
+struct XdgSurfaceListener {
+    configure: XdgSurfaceConfigureFn,
+}
+
 // ── Shared state for callbacks ──────────────────────────────────────────
 
+enum BackendKind {
+    Zwlr,
+    Core,
+}
+
 struct WlState {
-    wl: &'static WlFns,
-    manager: *mut WlProxy,
+    // Registry globals
     seat: *mut WlProxy,
-    device: *mut WlProxy,
+    zwlr_manager: *mut WlProxy,
+    compositor: *mut WlProxy,
+    data_device_manager: *mut WlProxy,
+    xdg_wm_base: *mut WlProxy,
+    // Active backend
+    kind: BackendKind,
+    // zwlr-specific
+    zwlr_device: *mut WlProxy,
+    // core-specific
+    core_data_device: *mut WlProxy,
+    surface: *mut WlProxy,
+    xdg_surface: *mut WlProxy,
+    xdg_toplevel: *mut WlProxy,
     // Current selection offer
     cur_offer: *mut WlProxy,
     cur_offer_mimes: Vec<String>,
@@ -376,24 +581,58 @@ unsafe extern "C" fn registry_global(
     let state = &mut *(data as *mut WlState);
     let iface = CStr::from_ptr(interface);
 
-    if iface.to_bytes() == b"wl_seat" && state.seat.is_null() {
-        state.seat = (state.wl.proxy_marshal_flags)(
-            registry, 0,
-            &WL_SEAT_INTERFACE, version.min(7), 0,
-            name,
-            iface.as_ptr(),
-            version.min(7),
-            std::ptr::null::<c_void>(),
-        );
-    } else if iface.to_bytes() == b"zwlr_data_control_manager_v1" && state.manager.is_null() {
-        state.manager = (state.wl.proxy_marshal_flags)(
-            registry, 0,
-            &ZWLR_DATA_CONTROL_MANAGER_V1_INTERFACE, version.min(2), 0,
-            name,
-            iface.as_ptr(),
-            version.min(2),
-            std::ptr::null::<c_void>(),
-        );
+    match iface.to_bytes() {
+        b"wl_seat" if state.seat.is_null() => {
+            state.seat = wl_proxy_marshal_flags(
+                registry, 0,
+                &WL_SEAT_INTERFACE, version.min(7), 0,
+                name,
+                iface.as_ptr(),
+                version.min(7),
+                std::ptr::null::<c_void>(),
+            );
+        }
+        b"zwlr_data_control_manager_v1" if state.zwlr_manager.is_null() => {
+            state.zwlr_manager = wl_proxy_marshal_flags(
+                registry, 0,
+                &ZWLR_DATA_CONTROL_MANAGER_V1_INTERFACE, version.min(2), 0,
+                name,
+                iface.as_ptr(),
+                version.min(2),
+                std::ptr::null::<c_void>(),
+            );
+        }
+        b"wl_compositor" if state.compositor.is_null() => {
+            state.compositor = wl_proxy_marshal_flags(
+                registry, 0,
+                &WL_COMPOSITOR_INTERFACE, version.min(4), 0,
+                name,
+                iface.as_ptr(),
+                version.min(4),
+                std::ptr::null::<c_void>(),
+            );
+        }
+        b"wl_data_device_manager" if state.data_device_manager.is_null() => {
+            state.data_device_manager = wl_proxy_marshal_flags(
+                registry, 0,
+                &WL_DATA_DEVICE_MANAGER_INTERFACE, version.min(3), 0,
+                name,
+                iface.as_ptr(),
+                version.min(3),
+                std::ptr::null::<c_void>(),
+            );
+        }
+        b"xdg_wm_base" if state.xdg_wm_base.is_null() => {
+            state.xdg_wm_base = wl_proxy_marshal_flags(
+                registry, 0,
+                &XDG_WM_BASE_INTERFACE, version.min(2), 0,
+                name,
+                iface.as_ptr(),
+                version.min(2),
+                std::ptr::null::<c_void>(),
+            );
+        }
+        _ => {}
     }
 }
 
@@ -401,43 +640,66 @@ unsafe extern "C" fn registry_global_remove(
     _data: *mut c_void, _registry: *mut WlProxy, _name: u32,
 ) {}
 
-unsafe extern "C" fn device_data_offer(
+// -- zwlr device callbacks --
+
+unsafe extern "C" fn zwlr_device_data_offer(
     data: *mut c_void, _device: *mut WlProxy, offer: *mut WlProxy,
 ) {
     let state = &mut *(data as *mut WlState);
-    // Attach offer listener
     static LISTENER: OfferListener = OfferListener { offer: offer_offer };
-    (state.wl.proxy_add_listener)(
+    wl_proxy_add_listener(
+        offer,
+        &LISTENER as *const _ as *const c_void,
+        data,
+    );
+    let _ = state;
+}
+
+unsafe extern "C" fn zwlr_device_selection(
+    data: *mut c_void, _device: *mut WlProxy, offer: *mut WlProxy,
+) {
+    let state = &mut *(data as *mut WlState);
+    destroy_cur_offer(state);
+    state.cur_offer_mimes.clear();
+    state.cur_offer = offer;
+}
+
+unsafe extern "C" fn zwlr_device_finished(
+    _data: *mut c_void, _device: *mut WlProxy,
+) {}
+
+unsafe extern "C" fn zwlr_device_primary_selection(
+    _data: *mut c_void, _device: *mut WlProxy, _offer: *mut WlProxy,
+) {}
+
+// -- core wl_data_device callbacks --
+
+unsafe extern "C" fn core_device_data_offer(
+    data: *mut c_void, _device: *mut WlProxy, offer: *mut WlProxy,
+) {
+    static LISTENER: OfferListener = OfferListener { offer: offer_offer };
+    wl_proxy_add_listener(
         offer,
         &LISTENER as *const _ as *const c_void,
         data,
     );
 }
 
-unsafe extern "C" fn device_selection(
+unsafe extern "C" fn core_device_enter(
+    _data: *mut c_void, _device: *mut WlProxy, _serial: u32,
+    _surface: *mut WlProxy, _x: i32, _y: i32, _offer: *mut WlProxy,
+) {}
+
+unsafe extern "C" fn core_device_selection(
     data: *mut c_void, _device: *mut WlProxy, offer: *mut WlProxy,
 ) {
     let state = &mut *(data as *mut WlState);
-    // Destroy old offer if any
-    if !state.cur_offer.is_null() {
-        // opcode 1 = destroy
-        (state.wl.proxy_marshal_flags)(
-            state.cur_offer, 1,
-            std::ptr::null(), 0, WL_MARSHAL_FLAG_DESTROY,
-        );
-        state.cur_offer = std::ptr::null_mut();
-    }
+    destroy_cur_offer(state);
     state.cur_offer_mimes.clear();
     state.cur_offer = offer;
 }
 
-unsafe extern "C" fn device_finished(
-    _data: *mut c_void, _device: *mut WlProxy,
-) {}
-
-unsafe extern "C" fn device_primary_selection(
-    _data: *mut c_void, _device: *mut WlProxy, _offer: *mut WlProxy,
-) {}
+// -- shared offer callback --
 
 unsafe extern "C" fn offer_offer(
     data: *mut c_void, _offer: *mut WlProxy, mime: *const c_char,
@@ -447,6 +709,8 @@ unsafe extern "C" fn offer_offer(
         state.cur_offer_mimes.push(s.to_string());
     }
 }
+
+// -- source callbacks (shared between zwlr and core) --
 
 unsafe extern "C" fn source_send(
     data: *mut c_void, _source: *mut WlProxy, mime_type: *const c_char, fd: i32,
@@ -458,31 +722,12 @@ unsafe extern "C" fn source_send(
         match m {
             "text/plain" | "text/plain;charset=utf-8" | "UTF8_STRING" | "STRING" => {
                 if let Some(ref text) = state.text {
-                    let bytes = text.as_bytes();
-                    let mut written = 0;
-                    while written < bytes.len() {
-                        let n = libc::write(
-                            fd,
-                            bytes[written..].as_ptr() as *const c_void,
-                            bytes.len() - written,
-                        );
-                        if n <= 0 { break; }
-                        written += n as usize;
-                    }
+                    write_all_fd(fd, text.as_bytes());
                 }
             }
             "image/png" => {
                 if let Some(ref png) = state.png {
-                    let mut written = 0;
-                    while written < png.len() {
-                        let n = libc::write(
-                            fd,
-                            png[written..].as_ptr() as *const c_void,
-                            png.len() - written,
-                        );
-                        if n <= 0 { break; }
-                        written += n as usize;
-                    }
+                    write_all_fd(fd, png);
                 }
             }
             _ => {}
@@ -498,12 +743,68 @@ unsafe extern "C" fn source_cancelled(
     let state = &mut *(data as *mut WlState);
     state.owns = false;
     if !state.source.is_null() {
-        // opcode 1 = destroy
-        (state.wl.proxy_marshal_flags)(
-            state.source, 1,
-            std::ptr::null(), 0, WL_MARSHAL_FLAG_DESTROY,
-        );
+        destroy_proxy_opcode(state.source, 1);
         state.source = std::ptr::null_mut();
+    }
+}
+
+unsafe extern "C" fn source_target(
+    _data: *mut c_void, _source: *mut WlProxy, _mime: *const c_char,
+) {}
+
+// -- xdg callbacks --
+
+unsafe extern "C" fn xdg_wm_base_ping(
+    _data: *mut c_void, wm_base: *mut WlProxy, serial: u32,
+) {
+    // pong opcode = 1 on xdg_wm_base
+    wl_proxy_marshal_flags(
+        wm_base, 1,
+        std::ptr::null(), wl_proxy_get_version(wm_base), 0,
+        serial,
+    );
+}
+
+unsafe extern "C" fn xdg_surface_configure(
+    _data: *mut c_void, xdg_surface: *mut WlProxy, serial: u32,
+) {
+    // ack_configure opcode = 1 on xdg_surface
+    wl_proxy_marshal_flags(
+        xdg_surface, 1,
+        std::ptr::null(), wl_proxy_get_version(xdg_surface), 0,
+        serial,
+    );
+}
+
+// ── Helper functions ────────────────────────────────────────────────────
+
+unsafe fn write_all_fd(fd: RawFd, data: &[u8]) {
+    let mut written = 0;
+    while written < data.len() {
+        let n = libc::write(
+            fd,
+            data[written..].as_ptr() as *const c_void,
+            data.len() - written,
+        );
+        if n <= 0 { break; }
+        written += n as usize;
+    }
+}
+
+unsafe fn destroy_proxy_opcode(proxy: *mut WlProxy, opcode: u32) {
+    wl_proxy_marshal_flags(
+        proxy, opcode,
+        std::ptr::null(), 0, WL_MARSHAL_FLAG_DESTROY,
+    );
+}
+
+unsafe fn destroy_cur_offer(state: &mut WlState) {
+    if !state.cur_offer.is_null() {
+        match state.kind {
+            BackendKind::Zwlr => destroy_proxy_opcode(state.cur_offer, 1),
+            BackendKind::Core => wl_proxy_destroy(state.cur_offer),
+        }
+        state.cur_offer = std::ptr::null_mut();
     }
 }
 
@@ -555,15 +856,12 @@ fn get_handle() -> Option<&'static WlHandle> {
 }
 
 fn try_init() -> Option<WlHandle> {
-    let wl = unsafe { load_wayland()? };
-
-    // Quick check: can we connect and find the protocol?
     unsafe {
-        let display = (wl.display_connect)(std::ptr::null());
+        let display = wl_display_connect(std::ptr::null());
         if display.is_null() {
             return None;
         }
-        (wl.display_disconnect)(display);
+        wl_display_disconnect(display);
     }
 
     let mut pipe_fds = [0 as RawFd; 2];
@@ -586,22 +884,26 @@ fn try_init() -> Option<WlHandle> {
     })
 }
 
-unsafe fn wayland_thread(rx: mpsc::Receiver<WlCmd>, wake_rd: RawFd) {
-    let wl = match load_wayland() {
-        Some(w) => w,
-        None => return,
-    };
+// ── Wayland thread ──────────────────────────────────────────────────────
 
-    let display = (wl.display_connect)(std::ptr::null());
+unsafe fn wayland_thread(rx: mpsc::Receiver<WlCmd>, wake_rd: RawFd) {
+    let display = wl_display_connect(std::ptr::null());
     if display.is_null() {
         return;
     }
 
     let mut state = WlState {
-        wl,
-        manager: std::ptr::null_mut(),
         seat: std::ptr::null_mut(),
-        device: std::ptr::null_mut(),
+        zwlr_manager: std::ptr::null_mut(),
+        compositor: std::ptr::null_mut(),
+        data_device_manager: std::ptr::null_mut(),
+        xdg_wm_base: std::ptr::null_mut(),
+        kind: BackendKind::Zwlr,
+        zwlr_device: std::ptr::null_mut(),
+        core_data_device: std::ptr::null_mut(),
+        surface: std::ptr::null_mut(),
+        xdg_surface: std::ptr::null_mut(),
+        xdg_toplevel: std::ptr::null_mut(),
         cur_offer: std::ptr::null_mut(),
         cur_offer_mimes: Vec::new(),
         text: None,
@@ -612,14 +914,14 @@ unsafe fn wayland_thread(rx: mpsc::Receiver<WlCmd>, wake_rd: RawFd) {
     };
 
     // Get registry
-    let version = (wl.proxy_get_version)(display as *mut WlProxy);
-    let registry = (wl.proxy_marshal_flags)(
+    let version = wl_proxy_get_version(display as *mut WlProxy);
+    let registry = wl_proxy_marshal_flags(
         display as *mut WlProxy, 1,
         &WL_REGISTRY_INTERFACE, version, 0,
         std::ptr::null::<c_void>(),
     );
     if registry.is_null() {
-        (wl.display_disconnect)(display);
+        wl_display_disconnect(display);
         return;
     }
 
@@ -627,52 +929,42 @@ unsafe fn wayland_thread(rx: mpsc::Receiver<WlCmd>, wake_rd: RawFd) {
         global: registry_global,
         global_remove: registry_global_remove,
     };
-    (wl.proxy_add_listener)(
+    wl_proxy_add_listener(
         registry,
         &REG_LISTENER as *const _ as *const c_void,
         &mut state as *mut _ as *mut c_void,
     );
 
-    // Roundtrip to get globals
-    (wl.display_roundtrip)(display);
+    wl_display_roundtrip(display);
 
-    if state.manager.is_null() || state.seat.is_null() {
-        (wl.proxy_destroy)(registry);
-        (wl.display_disconnect)(display);
+    if state.seat.is_null() {
+        wl_proxy_destroy(registry);
+        wl_display_disconnect(display);
         return;
     }
 
-    // Get data device for seat
-    let device = (wl.proxy_marshal_flags)(
-        state.manager, 1,
-        &ZWLR_DATA_CONTROL_DEVICE_V1_INTERFACE,
-        (wl.proxy_get_version)(state.manager), 0,
-        std::ptr::null::<c_void>(),
-        state.seat,
-    );
-    if device.is_null() {
-        (wl.proxy_destroy)(registry);
-        (wl.display_disconnect)(display);
+    // Try zwlr path first, fall back to core wl_data_device
+    if !state.zwlr_manager.is_null() {
+        if !init_zwlr_backend(&mut state, display) {
+            wl_proxy_destroy(registry);
+            wl_display_disconnect(display);
+            return;
+        }
+    } else if !state.data_device_manager.is_null() {
+        if !init_core_backend(&mut state, display) {
+            wl_proxy_destroy(registry);
+            wl_display_disconnect(display);
+            return;
+        }
+    } else {
+        wl_proxy_destroy(registry);
+        wl_display_disconnect(display);
         return;
     }
-    state.device = device;
 
-    static DEV_LISTENER: DeviceListener = DeviceListener {
-        data_offer: device_data_offer,
-        selection: device_selection,
-        finished: device_finished,
-        primary_selection: device_primary_selection,
-    };
-    (wl.proxy_add_listener)(
-        device,
-        &DEV_LISTENER as *const _ as *const c_void,
-        &mut state as *mut _ as *mut c_void,
-    );
+    wl_display_roundtrip(display);
 
-    // Initial roundtrip to get current selection
-    (wl.display_roundtrip)(display);
-
-    let wl_fd = (wl.display_get_fd)(display);
+    let wl_fd = wl_display_get_fd(display);
 
     loop {
         let mut fds = [
@@ -681,38 +973,168 @@ unsafe fn wayland_thread(rx: mpsc::Receiver<WlCmd>, wake_rd: RawFd) {
         ];
         libc::poll(fds.as_mut_ptr(), 2, -1);
 
-        // Drain wake pipe
         if fds[1].revents & libc::POLLIN != 0 {
             let mut buf = [0u8; 64];
             while libc::read(wake_rd, buf.as_mut_ptr() as *mut c_void, buf.len()) > 0 {}
         }
 
-        // Dispatch Wayland events
         if fds[0].revents & libc::POLLIN != 0 {
-            (wl.display_dispatch)(display);
+            wl_display_dispatch(display);
         }
 
-        // Process commands
         while let Ok(cmd) = rx.try_recv() {
             process_command(cmd, &mut state, display);
         }
     }
 }
 
+unsafe fn init_zwlr_backend(state: &mut WlState, display: *mut WlDisplay) -> bool {
+    state.kind = BackendKind::Zwlr;
+
+    let device = wl_proxy_marshal_flags(
+        state.zwlr_manager, 1,
+        &ZWLR_DATA_CONTROL_DEVICE_V1_INTERFACE,
+        wl_proxy_get_version(state.zwlr_manager), 0,
+        std::ptr::null::<c_void>(),
+        state.seat,
+    );
+    if device.is_null() {
+        return false;
+    }
+    state.zwlr_device = device;
+
+    static DEV_LISTENER: ZwlrDeviceListener = ZwlrDeviceListener {
+        data_offer: zwlr_device_data_offer,
+        selection: zwlr_device_selection,
+        finished: zwlr_device_finished,
+        primary_selection: zwlr_device_primary_selection,
+    };
+    wl_proxy_add_listener(
+        device,
+        &DEV_LISTENER as *const _ as *const c_void,
+        state as *mut _ as *mut c_void,
+    );
+
+    wl_display_roundtrip(display);
+    true
+}
+
+unsafe fn init_core_backend(state: &mut WlState, display: *mut WlDisplay) -> bool {
+    state.kind = BackendKind::Core;
+
+    if state.compositor.is_null() || state.xdg_wm_base.is_null() {
+        return false;
+    }
+
+    // Listen for xdg_wm_base ping
+    static WM_BASE_LISTENER: XdgWmBaseListener = XdgWmBaseListener {
+        ping: xdg_wm_base_ping,
+    };
+    wl_proxy_add_listener(
+        state.xdg_wm_base,
+        &WM_BASE_LISTENER as *const _ as *const c_void,
+        state as *mut _ as *mut c_void,
+    );
+
+    // wl_data_device_manager.get_data_device(seat) — opcode 1
+    let data_device = wl_proxy_marshal_flags(
+        state.data_device_manager, 1,
+        &WL_DATA_DEVICE_INTERFACE,
+        wl_proxy_get_version(state.data_device_manager), 0,
+        std::ptr::null::<c_void>(),
+        state.seat,
+    );
+    if data_device.is_null() {
+        return false;
+    }
+    state.core_data_device = data_device;
+
+    static DEV_LISTENER: WlDataDeviceListener = WlDataDeviceListener {
+        data_offer: core_device_data_offer,
+        enter: core_device_enter,
+        selection: core_device_selection,
+    };
+    wl_proxy_add_listener(
+        data_device,
+        &DEV_LISTENER as *const _ as *const c_void,
+        state as *mut _ as *mut c_void,
+    );
+
+    // Create a wl_surface — wl_compositor.create_surface (opcode 0)
+    let surface = wl_proxy_marshal_flags(
+        state.compositor, 0,
+        &WL_SURFACE_INTERFACE,
+        wl_proxy_get_version(state.compositor), 0,
+        std::ptr::null::<c_void>(),
+    );
+    if surface.is_null() {
+        return false;
+    }
+    state.surface = surface;
+
+    // xdg_wm_base.get_xdg_surface(surface) — opcode 0
+    let xdg_surface = wl_proxy_marshal_flags(
+        state.xdg_wm_base, 0,
+        &XDG_SURFACE_INTERFACE,
+        wl_proxy_get_version(state.xdg_wm_base), 0,
+        std::ptr::null::<c_void>(),
+        surface,
+    );
+    if xdg_surface.is_null() {
+        return false;
+    }
+    state.xdg_surface = xdg_surface;
+
+    static XDG_SURFACE_LISTENER: XdgSurfaceListener = XdgSurfaceListener {
+        configure: xdg_surface_configure,
+    };
+    wl_proxy_add_listener(
+        xdg_surface,
+        &XDG_SURFACE_LISTENER as *const _ as *const c_void,
+        state as *mut _ as *mut c_void,
+    );
+
+    // xdg_surface.get_toplevel() — opcode 0 on xdg_surface
+    let toplevel = wl_proxy_marshal_flags(
+        xdg_surface, 0,
+        &XDG_TOPLEVEL_INTERFACE,
+        wl_proxy_get_version(xdg_surface), 0,
+        std::ptr::null::<c_void>(),
+    );
+    if toplevel.is_null() {
+        return false;
+    }
+    state.xdg_toplevel = toplevel;
+
+    // Commit the surface to map it (wl_surface.commit — opcode 6)
+    wl_proxy_marshal_flags(
+        surface, 6,
+        std::ptr::null(), wl_proxy_get_version(surface), 0,
+    );
+
+    wl_display_roundtrip(display);
+
+    // Commit again after configure ack
+    wl_proxy_marshal_flags(
+        surface, 6,
+        std::ptr::null(), wl_proxy_get_version(surface), 0,
+    );
+
+    wl_display_roundtrip(display);
+    true
+}
+
+// ── Command processing ──────────────────────────────────────────────────
+
 unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) {
     match cmd {
         WlCmd::Clear { resp } => {
-            destroy_source(s);
+            destroy_source_obj(s);
             s.text = None;
             s.png = None;
             s.owns = false;
-            // Set selection to null
-            (s.wl.proxy_marshal_flags)(
-                s.device, 0,
-                std::ptr::null(), (s.wl.proxy_get_version)(s.device), 0,
-                std::ptr::null::<c_void>(),
-            );
-            (s.wl.display_roundtrip)(display);
+            set_selection_null(s);
+            wl_display_roundtrip(display);
             s.sequence += 1;
             let _ = resp.send(true);
         }
@@ -722,8 +1144,7 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
                 let _ = resp.send(true);
                 return;
             }
-            // Roundtrip to refresh selection
-            (s.wl.display_roundtrip)(display);
+            wl_display_roundtrip(display);
             let has = s.cur_offer_mimes.iter().any(|m| {
                 m == "text/plain;charset=utf-8" || m == "text/plain"
                     || m == "UTF8_STRING" || m == "STRING"
@@ -736,7 +1157,7 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
                 let _ = resp.send(s.text.clone().unwrap_or_default());
                 return;
             }
-            (s.wl.display_roundtrip)(display);
+            wl_display_roundtrip(display);
             if s.cur_offer.is_null() {
                 let _ = resp.send(String::new());
                 return;
@@ -750,7 +1171,7 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
         }
 
         WlCmd::SetText { text, resp } => {
-            destroy_source(s);
+            destroy_source_obj(s);
             s.text = Some(text);
             s.png = None;
             let ok = create_and_set_source(s, display, &[
@@ -771,7 +1192,7 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
                 let _ = resp.send(true);
                 return;
             }
-            (s.wl.display_roundtrip)(display);
+            wl_display_roundtrip(display);
             let has = s.cur_offer_mimes.iter().any(|m| m == "image/png");
             let _ = resp.send(has);
         }
@@ -782,7 +1203,7 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
                 let _ = resp.send(result);
                 return;
             }
-            (s.wl.display_roundtrip)(display);
+            wl_display_roundtrip(display);
             if s.cur_offer.is_null() {
                 let _ = resp.send(None);
                 return;
@@ -793,7 +1214,7 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
         }
 
         WlCmd::SetImage { width, height, data, resp } => {
-            destroy_source(s);
+            destroy_source_obj(s);
             match super::argb_to_png(width, height, &data) {
                 Some(png_bytes) => {
                     s.png = Some(png_bytes);
@@ -817,12 +1238,34 @@ unsafe fn process_command(cmd: WlCmd, s: &mut WlState, display: *mut WlDisplay) 
     }
 }
 
-unsafe fn destroy_source(s: &mut WlState) {
+unsafe fn set_selection_null(s: &mut WlState) {
+    match s.kind {
+        BackendKind::Zwlr => {
+            // zwlr_data_control_device_v1.set_selection(null) — opcode 0
+            wl_proxy_marshal_flags(
+                s.zwlr_device, 0,
+                std::ptr::null(), wl_proxy_get_version(s.zwlr_device), 0,
+                std::ptr::null::<c_void>(),
+            );
+        }
+        BackendKind::Core => {
+            // wl_data_device.set_selection(null, serial) — opcode 0
+            wl_proxy_marshal_flags(
+                s.core_data_device, 0,
+                std::ptr::null(), wl_proxy_get_version(s.core_data_device), 0,
+                std::ptr::null::<c_void>(),
+                0u32,
+            );
+        }
+    }
+}
+
+unsafe fn destroy_source_obj(s: &mut WlState) {
     if !s.source.is_null() {
-        (s.wl.proxy_marshal_flags)(
-            s.source, 1,
-            std::ptr::null(), 0, WL_MARSHAL_FLAG_DESTROY,
-        );
+        match s.kind {
+            BackendKind::Zwlr => destroy_proxy_opcode(s.source, 1),
+            BackendKind::Core => destroy_proxy_opcode(s.source, 1),
+        }
         s.source = std::ptr::null_mut();
     }
 }
@@ -830,33 +1273,41 @@ unsafe fn destroy_source(s: &mut WlState) {
 unsafe fn create_and_set_source(
     s: &mut WlState, display: *mut WlDisplay, mimes: &[&str],
 ) -> bool {
+    match s.kind {
+        BackendKind::Zwlr => create_and_set_source_zwlr(s, display, mimes),
+        BackendKind::Core => create_and_set_source_core(s, display, mimes),
+    }
+}
+
+unsafe fn create_and_set_source_zwlr(
+    s: &mut WlState, display: *mut WlDisplay, mimes: &[&str],
+) -> bool {
     // manager opcode 0 = create_data_source
-    let source = (s.wl.proxy_marshal_flags)(
-        s.manager, 0,
+    let source = wl_proxy_marshal_flags(
+        s.zwlr_manager, 0,
         &ZWLR_DATA_CONTROL_SOURCE_V1_INTERFACE,
-        (s.wl.proxy_get_version)(s.manager), 0,
+        wl_proxy_get_version(s.zwlr_manager), 0,
         std::ptr::null::<c_void>(),
     );
     if source.is_null() {
         return false;
     }
 
-    static SRC_LISTENER: SourceListener = SourceListener {
+    static SRC_LISTENER: ZwlrSourceListener = ZwlrSourceListener {
         send: source_send,
         cancelled: source_cancelled,
     };
-    (s.wl.proxy_add_listener)(
+    wl_proxy_add_listener(
         source,
         &SRC_LISTENER as *const _ as *const c_void,
         s as *mut _ as *mut c_void,
     );
 
-    // Offer MIME types (source opcode 0 = offer)
     for mime in mimes {
         let c_mime = CString::new(*mime).unwrap();
-        (s.wl.proxy_marshal_flags)(
+        wl_proxy_marshal_flags(
             source, 0,
-            std::ptr::null(), (s.wl.proxy_get_version)(source), 0,
+            std::ptr::null(), wl_proxy_get_version(source), 0,
             c_mime.as_ptr(),
         );
     }
@@ -864,13 +1315,62 @@ unsafe fn create_and_set_source(
     s.source = source;
 
     // device opcode 0 = set_selection
-    (s.wl.proxy_marshal_flags)(
-        s.device, 0,
-        std::ptr::null(), (s.wl.proxy_get_version)(s.device), 0,
+    wl_proxy_marshal_flags(
+        s.zwlr_device, 0,
+        std::ptr::null(), wl_proxy_get_version(s.zwlr_device), 0,
         source,
     );
 
-    (s.wl.display_roundtrip)(display);
+    wl_display_roundtrip(display);
+    true
+}
+
+unsafe fn create_and_set_source_core(
+    s: &mut WlState, display: *mut WlDisplay, mimes: &[&str],
+) -> bool {
+    // wl_data_device_manager.create_data_source() — opcode 0
+    let source = wl_proxy_marshal_flags(
+        s.data_device_manager, 0,
+        &WL_DATA_SOURCE_INTERFACE,
+        wl_proxy_get_version(s.data_device_manager), 0,
+        std::ptr::null::<c_void>(),
+    );
+    if source.is_null() {
+        return false;
+    }
+
+    static SRC_LISTENER: WlDataSourceListener = WlDataSourceListener {
+        target: source_target,
+        send: source_send,
+        cancelled: source_cancelled,
+    };
+    wl_proxy_add_listener(
+        source,
+        &SRC_LISTENER as *const _ as *const c_void,
+        s as *mut _ as *mut c_void,
+    );
+
+    // wl_data_source.offer(mime) — opcode 0
+    for mime in mimes {
+        let c_mime = CString::new(*mime).unwrap();
+        wl_proxy_marshal_flags(
+            source, 0,
+            std::ptr::null(), wl_proxy_get_version(source), 0,
+            c_mime.as_ptr(),
+        );
+    }
+
+    s.source = source;
+
+    // wl_data_device.set_selection(source, serial) — opcode 0
+    wl_proxy_marshal_flags(
+        s.core_data_device, 0,
+        std::ptr::null(), wl_proxy_get_version(s.core_data_device), 0,
+        source,
+        0u32,
+    );
+
+    wl_display_roundtrip(display);
     true
 }
 
@@ -891,19 +1391,32 @@ unsafe fn receive_mime(
     let pipe_rd = pipe_fds[0];
     let pipe_wr = pipe_fds[1];
 
-    // offer opcode 0 = receive(mime_type, fd)
     let c_mime = CString::new(mime).ok()?;
-    (s.wl.proxy_marshal_flags)(
-        s.cur_offer, 0,
-        std::ptr::null(), (s.wl.proxy_get_version)(s.cur_offer), 0,
-        c_mime.as_ptr(),
-        pipe_wr,
-    );
+
+    match s.kind {
+        BackendKind::Zwlr => {
+            // zwlr offer opcode 0 = receive(mime_type, fd)
+            wl_proxy_marshal_flags(
+                s.cur_offer, 0,
+                std::ptr::null(), wl_proxy_get_version(s.cur_offer), 0,
+                c_mime.as_ptr(),
+                pipe_wr,
+            );
+        }
+        BackendKind::Core => {
+            // wl_data_offer.receive(mime_type, fd) — opcode 1
+            wl_proxy_marshal_flags(
+                s.cur_offer, 1,
+                std::ptr::null(), wl_proxy_get_version(s.cur_offer), 0,
+                c_mime.as_ptr(),
+                pipe_wr,
+            );
+        }
+    }
 
     libc::close(pipe_wr);
-    (s.wl.display_roundtrip)(display);
+    wl_display_roundtrip(display);
 
-    // Read all data from pipe
     let mut data = Vec::new();
     let mut buf = [0u8; 65536];
     loop {
@@ -914,17 +1427,6 @@ unsafe fn receive_mime(
     libc::close(pipe_rd);
 
     if data.is_empty() { None } else { Some(data) }
-}
-
-// ── Availability check ──────────────────────────────────────────────────
-
-// Retained as part of the clipboard_wl public surface even though the
-// portal crate doesn't call it (the loader checks Wayland availability
-// at .node load time via the libwayland-client dlopen rather than at
-// the language level).  Dead-code-allowed so the build stays warning-clean.
-#[allow(dead_code)]
-pub fn is_available() -> bool {
-    get_handle().is_some()
 }
 
 // ── Public API ──────────────────────────────────────────────────────────

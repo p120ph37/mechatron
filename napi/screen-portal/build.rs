@@ -6,5 +6,6 @@ fn main() {
     #[cfg(target_os = "linux")]
     {
         println!("cargo:rustc-link-lib=dbus-1");
+        println!("cargo:rustc-link-lib=pipewire-0.3");
     }
 }

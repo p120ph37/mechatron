@@ -65,190 +65,50 @@ impl DBusMessageIter {
     }
 }
 
-// ── Function-pointer table loaded from libdbus-1.so.3 via dlopen ─────
-//
-// All libdbus symbols are resolved at runtime so this crate has no
-// compile-time link dependency on libdbus-1.  If the library is absent,
-// every entry point returns None / is a no-op.
+// ── Linked libdbus-1 functions ───────────────────────────────────────
 
-struct Dbus {
-    dbus_error_init: unsafe extern "C" fn(*mut DBusError),
-    dbus_error_is_set: unsafe extern "C" fn(*const DBusError) -> u32,
-    dbus_error_free: unsafe extern "C" fn(*mut DBusError),
-    dbus_bus_get_private: unsafe extern "C" fn(c_int, *mut DBusError) -> *mut c_void,
-    dbus_bus_get_unique_name: unsafe extern "C" fn(*mut c_void) -> *const c_char,
-    dbus_bus_add_match: unsafe extern "C" fn(*mut c_void, *const c_char, *mut DBusError),
-    dbus_connection_send_with_reply_and_block:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut DBusError) -> *mut c_void,
-    dbus_connection_send: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut u32) -> u32,
-    dbus_connection_read_write: unsafe extern "C" fn(*mut c_void, c_int) -> u32,
-    dbus_connection_pop_message: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    dbus_connection_flush: unsafe extern "C" fn(*mut c_void),
-    dbus_connection_close: unsafe extern "C" fn(*mut c_void),
-    dbus_connection_unref: unsafe extern "C" fn(*mut c_void),
-    dbus_message_new_method_call: unsafe extern "C" fn(
-        *const c_char,
-        *const c_char,
-        *const c_char,
-        *const c_char,
-    ) -> *mut c_void,
-    dbus_message_iter_init_append: unsafe extern "C" fn(*mut c_void, *mut DBusMessageIter),
-    dbus_message_iter_open_container: unsafe extern "C" fn(
-        *mut DBusMessageIter,
-        c_int,
-        *const c_char,
-        *mut DBusMessageIter,
-    ) -> u32,
-    dbus_message_iter_append_basic:
-        unsafe extern "C" fn(*mut DBusMessageIter, c_int, *const c_void) -> u32,
-    dbus_message_iter_close_container:
-        unsafe extern "C" fn(*mut DBusMessageIter, *mut DBusMessageIter) -> u32,
-    dbus_message_iter_init: unsafe extern "C" fn(*mut c_void, *mut DBusMessageIter) -> u32,
-    dbus_message_iter_get_arg_type: unsafe extern "C" fn(*mut DBusMessageIter) -> c_int,
-    dbus_message_iter_get_basic:
-        unsafe extern "C" fn(*mut DBusMessageIter, *mut c_void),
-    dbus_message_iter_recurse:
-        unsafe extern "C" fn(*mut DBusMessageIter, *mut DBusMessageIter),
-    dbus_message_iter_next: unsafe extern "C" fn(*mut DBusMessageIter) -> u32,
-    dbus_message_get_type: unsafe extern "C" fn(*mut c_void) -> c_int,
-    dbus_message_get_path: unsafe extern "C" fn(*mut c_void) -> *const c_char,
-    dbus_message_get_member: unsafe extern "C" fn(*mut c_void) -> *const c_char,
-    dbus_message_get_interface: unsafe extern "C" fn(*mut c_void) -> *const c_char,
-    dbus_message_unref: unsafe extern "C" fn(*mut c_void),
+extern "C" {
+    fn dbus_error_init(error: *mut DBusError);
+    fn dbus_error_is_set(error: *const DBusError) -> u32;
+    fn dbus_error_free(error: *mut DBusError);
+    fn dbus_bus_get_private(bus_type: c_int, error: *mut DBusError) -> *mut c_void;
+    fn dbus_bus_get_unique_name(connection: *mut c_void) -> *const c_char;
+    fn dbus_bus_add_match(connection: *mut c_void, rule: *const c_char, error: *mut DBusError);
+    fn dbus_connection_send_with_reply_and_block(
+        connection: *mut c_void, message: *mut c_void, timeout_ms: c_int, error: *mut DBusError,
+    ) -> *mut c_void;
+    fn dbus_connection_send(connection: *mut c_void, message: *mut c_void, serial: *mut u32) -> u32;
+    fn dbus_connection_read_write(connection: *mut c_void, timeout_ms: c_int) -> u32;
+    fn dbus_connection_pop_message(connection: *mut c_void) -> *mut c_void;
+    fn dbus_connection_flush(connection: *mut c_void);
+    fn dbus_connection_close(connection: *mut c_void);
+    fn dbus_connection_unref(connection: *mut c_void);
+    fn dbus_message_new_method_call(
+        destination: *const c_char, path: *const c_char,
+        iface: *const c_char, method: *const c_char,
+    ) -> *mut c_void;
+    fn dbus_message_iter_init_append(message: *mut c_void, iter: *mut DBusMessageIter);
+    fn dbus_message_iter_open_container(
+        iter: *mut DBusMessageIter, container_type: c_int,
+        contained_signature: *const c_char, sub: *mut DBusMessageIter,
+    ) -> u32;
+    fn dbus_message_iter_append_basic(
+        iter: *mut DBusMessageIter, arg_type: c_int, value: *const c_void,
+    ) -> u32;
+    fn dbus_message_iter_close_container(
+        iter: *mut DBusMessageIter, sub: *mut DBusMessageIter,
+    ) -> u32;
+    fn dbus_message_iter_init(message: *mut c_void, iter: *mut DBusMessageIter) -> u32;
+    fn dbus_message_iter_get_arg_type(iter: *mut DBusMessageIter) -> c_int;
+    fn dbus_message_iter_get_basic(iter: *mut DBusMessageIter, value: *mut c_void);
+    fn dbus_message_iter_recurse(iter: *mut DBusMessageIter, sub: *mut DBusMessageIter);
+    fn dbus_message_iter_next(iter: *mut DBusMessageIter) -> u32;
+    fn dbus_message_get_type(message: *mut c_void) -> c_int;
+    fn dbus_message_get_path(message: *mut c_void) -> *const c_char;
+    fn dbus_message_get_member(message: *mut c_void) -> *const c_char;
+    fn dbus_message_get_interface(message: *mut c_void) -> *const c_char;
+    fn dbus_message_unref(message: *mut c_void);
 }
-
-static LIB: std::sync::OnceLock<Dbus> = std::sync::OnceLock::new();
-
-unsafe fn load_sym<T>(handle: *mut c_void, name: &[u8]) -> Option<T> {
-    let sym = libc::dlsym(handle, name.as_ptr() as *const c_char);
-    if sym.is_null() {
-        return None;
-    }
-    Some(std::mem::transmute_copy(&sym))
-}
-
-unsafe fn try_load_lib() -> Option<Dbus> {
-    let handle = libc::dlopen(
-        b"libdbus-1.so.3\0".as_ptr() as *const c_char,
-        libc::RTLD_NOW | libc::RTLD_LOCAL,
-    );
-    if handle.is_null() {
-        return None;
-    }
-    macro_rules! sym {
-        ($name:literal) => {
-            load_sym(handle, $name)?
-        };
-    }
-    Some(Dbus {
-        dbus_error_init: sym!(b"dbus_error_init\0"),
-        dbus_error_is_set: sym!(b"dbus_error_is_set\0"),
-        dbus_error_free: sym!(b"dbus_error_free\0"),
-        dbus_bus_get_private: sym!(b"dbus_bus_get_private\0"),
-        dbus_bus_get_unique_name: sym!(b"dbus_bus_get_unique_name\0"),
-        dbus_bus_add_match: sym!(b"dbus_bus_add_match\0"),
-        dbus_connection_send_with_reply_and_block: sym!(b"dbus_connection_send_with_reply_and_block\0"),
-        dbus_connection_send: sym!(b"dbus_connection_send\0"),
-        dbus_connection_read_write: sym!(b"dbus_connection_read_write\0"),
-        dbus_connection_pop_message: sym!(b"dbus_connection_pop_message\0"),
-        dbus_connection_flush: sym!(b"dbus_connection_flush\0"),
-        dbus_connection_close: sym!(b"dbus_connection_close\0"),
-        dbus_connection_unref: sym!(b"dbus_connection_unref\0"),
-        dbus_message_new_method_call: sym!(b"dbus_message_new_method_call\0"),
-        dbus_message_iter_init_append: sym!(b"dbus_message_iter_init_append\0"),
-        dbus_message_iter_open_container: sym!(b"dbus_message_iter_open_container\0"),
-        dbus_message_iter_append_basic: sym!(b"dbus_message_iter_append_basic\0"),
-        dbus_message_iter_close_container: sym!(b"dbus_message_iter_close_container\0"),
-        dbus_message_iter_init: sym!(b"dbus_message_iter_init\0"),
-        dbus_message_iter_get_arg_type: sym!(b"dbus_message_iter_get_arg_type\0"),
-        dbus_message_iter_get_basic: sym!(b"dbus_message_iter_get_basic\0"),
-        dbus_message_iter_recurse: sym!(b"dbus_message_iter_recurse\0"),
-        dbus_message_iter_next: sym!(b"dbus_message_iter_next\0"),
-        dbus_message_get_type: sym!(b"dbus_message_get_type\0"),
-        dbus_message_get_path: sym!(b"dbus_message_get_path\0"),
-        dbus_message_get_member: sym!(b"dbus_message_get_member\0"),
-        dbus_message_get_interface: sym!(b"dbus_message_get_interface\0"),
-        dbus_message_unref: sym!(b"dbus_message_unref\0"),
-    })
-}
-
-pub(crate) fn is_loaded() -> bool { lib().is_some() }
-
-fn lib() -> Option<&'static Dbus> {
-    static TRIED: std::sync::Once = std::sync::Once::new();
-    TRIED.call_once(|| {
-        if let Some(d) = unsafe { try_load_lib() } {
-            let _ = LIB.set(d);
-        }
-    });
-    LIB.get()
-}
-
-// Thin wrappers that dispatch through the dlopen'd function pointers.
-// These have the same names as the libdbus C API so call-sites read naturally.
-// Each panics if called before lib() returns Some — which cannot happen because
-// every public entry point early-returns None when lib() is None.
-
-macro_rules! dl {
-    () => { lib().unwrap() };
-}
-
-#[inline(always)]
-unsafe fn dbus_error_init(e: *mut DBusError) { (dl!().dbus_error_init)(e) }
-#[inline(always)]
-unsafe fn dbus_error_is_set(e: *const DBusError) -> u32 { (dl!().dbus_error_is_set)(e) }
-#[inline(always)]
-unsafe fn dbus_error_free(e: *mut DBusError) { (dl!().dbus_error_free)(e) }
-#[inline(always)]
-unsafe fn dbus_bus_get_private(t: c_int, e: *mut DBusError) -> *mut c_void { (dl!().dbus_bus_get_private)(t, e) }
-#[inline(always)]
-unsafe fn dbus_bus_get_unique_name(c: *mut c_void) -> *const c_char { (dl!().dbus_bus_get_unique_name)(c) }
-#[inline(always)]
-unsafe fn dbus_bus_add_match(c: *mut c_void, r: *const c_char, e: *mut DBusError) { (dl!().dbus_bus_add_match)(c, r, e) }
-#[inline(always)]
-unsafe fn dbus_connection_send_with_reply_and_block(c: *mut c_void, m: *mut c_void, t: c_int, e: *mut DBusError) -> *mut c_void { (dl!().dbus_connection_send_with_reply_and_block)(c, m, t, e) }
-#[inline(always)]
-unsafe fn dbus_connection_send(c: *mut c_void, m: *mut c_void, s: *mut u32) -> u32 { (dl!().dbus_connection_send)(c, m, s) }
-#[inline(always)]
-unsafe fn dbus_connection_read_write(c: *mut c_void, t: c_int) -> u32 { (dl!().dbus_connection_read_write)(c, t) }
-#[inline(always)]
-unsafe fn dbus_connection_pop_message(c: *mut c_void) -> *mut c_void { (dl!().dbus_connection_pop_message)(c) }
-#[inline(always)]
-unsafe fn dbus_connection_flush(c: *mut c_void) { (dl!().dbus_connection_flush)(c) }
-#[inline(always)]
-unsafe fn dbus_connection_close(c: *mut c_void) { (dl!().dbus_connection_close)(c) }
-#[inline(always)]
-unsafe fn dbus_connection_unref(c: *mut c_void) { (dl!().dbus_connection_unref)(c) }
-#[inline(always)]
-unsafe fn dbus_message_new_method_call(d: *const c_char, p: *const c_char, i: *const c_char, m: *const c_char) -> *mut c_void { (dl!().dbus_message_new_method_call)(d, p, i, m) }
-#[inline(always)]
-unsafe fn dbus_message_iter_init_append(m: *mut c_void, i: *mut DBusMessageIter) { (dl!().dbus_message_iter_init_append)(m, i) }
-#[inline(always)]
-unsafe fn dbus_message_iter_open_container(i: *mut DBusMessageIter, t: c_int, s: *const c_char, sub: *mut DBusMessageIter) -> u32 { (dl!().dbus_message_iter_open_container)(i, t, s, sub) }
-#[inline(always)]
-unsafe fn dbus_message_iter_append_basic(i: *mut DBusMessageIter, t: c_int, v: *const c_void) -> u32 { (dl!().dbus_message_iter_append_basic)(i, t, v) }
-#[inline(always)]
-unsafe fn dbus_message_iter_close_container(i: *mut DBusMessageIter, sub: *mut DBusMessageIter) -> u32 { (dl!().dbus_message_iter_close_container)(i, sub) }
-#[inline(always)]
-unsafe fn dbus_message_iter_init(m: *mut c_void, i: *mut DBusMessageIter) -> u32 { (dl!().dbus_message_iter_init)(m, i) }
-#[inline(always)]
-unsafe fn dbus_message_iter_get_arg_type(i: *mut DBusMessageIter) -> c_int { (dl!().dbus_message_iter_get_arg_type)(i) }
-#[inline(always)]
-unsafe fn dbus_message_iter_get_basic(i: *mut DBusMessageIter, v: *mut c_void) { (dl!().dbus_message_iter_get_basic)(i, v) }
-#[inline(always)]
-unsafe fn dbus_message_iter_recurse(i: *mut DBusMessageIter, sub: *mut DBusMessageIter) { (dl!().dbus_message_iter_recurse)(i, sub) }
-#[inline(always)]
-unsafe fn dbus_message_iter_next(i: *mut DBusMessageIter) -> u32 { (dl!().dbus_message_iter_next)(i) }
-#[inline(always)]
-unsafe fn dbus_message_get_type(m: *mut c_void) -> c_int { (dl!().dbus_message_get_type)(m) }
-#[inline(always)]
-unsafe fn dbus_message_get_path(m: *mut c_void) -> *const c_char { (dl!().dbus_message_get_path)(m) }
-#[inline(always)]
-unsafe fn dbus_message_get_member(m: *mut c_void) -> *const c_char { (dl!().dbus_message_get_member)(m) }
-#[inline(always)]
-unsafe fn dbus_message_get_interface(m: *mut c_void) -> *const c_char { (dl!().dbus_message_get_interface)(m) }
-#[inline(always)]
-unsafe fn dbus_message_unref(m: *mut c_void) { (dl!().dbus_message_unref)(m) }
 
 // ── DBusConn ─────────────────────────────────────────────────────────
 
@@ -260,7 +120,6 @@ pub(crate) struct DBusConn {
 // ── Connection ───────────────────────────────────────────────────────
 
 pub(crate) unsafe fn dbus_connect() -> Option<DBusConn> {
-    lib()?; // ensure libdbus-1 is loaded
     let mut err = std::mem::zeroed::<DBusError>();
     dbus_error_init(&mut err);
 
@@ -295,7 +154,6 @@ pub(crate) fn request_path(unique_name: &str, token: &str) -> String {
 // ── Match rule ───────────────────────────────────────────────────────
 
 pub(crate) unsafe fn add_match(conn: &mut DBusConn, rule: &str) {
-    if lib().is_none() { return; }
     let crule = match CString::new(rule) {
         Ok(c) => c,
         Err(_) => return,

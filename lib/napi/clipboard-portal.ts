@@ -1,12 +1,11 @@
 /**
  * napi clipboard backend (portal variant) — Linux-only.
  *
- * Loads the mechatron-clipboard-portal.<platform>.node binary out of the
- * @mechatronic/napi-clipboard package.  The binary has no NEEDED libs
- * other than libc — libwayland-client is dlopen'd lazily inside
- * clipboard_wl.rs — so it loads without Wayland present.  The clipboard
- * ops then fail at call time on systems without WAYLAND_DISPLAY, which
- * the dispatcher in lib/backend.ts treats as a runtime miss.
+ * Loads the mechatron-clipboard-portal.<platform>.node binary which links
+ * libwayland-client directly.  Autodetects Wayland flavor at init:
+ * zwlr_data_control_v1 (wlroots) or core wl_data_device (GNOME/Mutter).
+ * If libwayland-client is absent the binary fails to load and the
+ * dispatcher in lib/backend.ts moves to the next backend.
  */
 
 import { loadNapi } from "./resolve";
