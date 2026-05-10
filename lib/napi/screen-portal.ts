@@ -18,4 +18,4 @@ const native = loadNapi("screen", "portal");
 export const screen_synchronize: () => Promise<any[] | null> = native.screen_synchronize;
 export const screen_grabScreen: (x: number, y: number, w: number, h: number, windowHandle?: number) => Promise<Uint32Array | null> = native.screen_grabScreen;
 export const screen_getPortalToken: () => Promise<string | null> = native.screen_getPortalToken;
-export const screen_setPortalToken: (token: string) => Promise<void> = native.screen_setPortalToken;
+export const screen_setPortalToken: (token: string | null) => Promise<void> = native.screen_setPortalToken;

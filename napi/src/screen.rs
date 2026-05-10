@@ -367,7 +367,7 @@ impl Task for GetPortalTokenTask {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub struct SetPortalTokenTask {
-    _token: String,
+    _token: Option<String>,
 }
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Task for SetPortalTokenTask {
@@ -409,6 +409,6 @@ pub fn screen_get_portal_token() -> AsyncTask<GetPortalTokenTask> {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "screen_setPortalToken")]
-pub fn screen_set_portal_token(token: String) -> AsyncTask<SetPortalTokenTask> {
+pub fn screen_set_portal_token(token: Option<String>) -> AsyncTask<SetPortalTokenTask> {
     AsyncTask::new(SetPortalTokenTask { _token: token })
 }

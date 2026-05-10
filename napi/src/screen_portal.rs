@@ -42,7 +42,7 @@ fn platform_get_portal_token() -> Option<String> {
     crate::screencast::get_token()
 }
 
-fn platform_set_portal_token(token: String) {
+fn platform_set_portal_token(token: Option<String>) {
     crate::screencast::set_token(token);
 }
 
@@ -121,7 +121,7 @@ impl Task for GetPortalTokenTask {
 }
 
 pub struct SetPortalTokenTask {
-    token: String,
+    token: Option<String>,
 }
 impl Task for SetPortalTokenTask {
     type Output = ();
@@ -154,6 +154,6 @@ pub fn screen_get_portal_token() -> AsyncTask<GetPortalTokenTask> {
 }
 
 #[napi(js_name = "screen_setPortalToken")]
-pub fn screen_set_portal_token(token: String) -> AsyncTask<SetPortalTokenTask> {
+pub fn screen_set_portal_token(token: Option<String>) -> AsyncTask<SetPortalTokenTask> {
     AsyncTask::new(SetPortalTokenTask { token })
 }
