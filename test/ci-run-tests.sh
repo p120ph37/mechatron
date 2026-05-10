@@ -476,14 +476,14 @@ if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   sudo tee /usr/share/xdg-desktop-portal/portals/ci-autoaccept.portal > /dev/null <<'PORTALEOF'
 [portal]
 DBusName=org.freedesktop.impl.portal.ci.autoaccept
-Interfaces=org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;
+Interfaces=org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.Clipboard;
 UseIn=gnome
 PORTALEOF
   # Remove RemoteDesktop and ScreenCast from the GNOME portal so our
   # autoaccept backend is the only one claiming these interfaces. This
   # is the only routing mechanism for xdg-desktop-portal < 1.15
   # (Ubuntu 22.04) which lacks portals.conf support.
-  sudo sed -i 's/org\.freedesktop\.impl\.portal\.RemoteDesktop;//g; s/org\.freedesktop\.impl\.portal\.ScreenCast;//g; s/org\.freedesktop\.impl\.portal\.Screenshot;//g' \
+  sudo sed -i 's/org\.freedesktop\.impl\.portal\.RemoteDesktop;//g; s/org\.freedesktop\.impl\.portal\.ScreenCast;//g; s/org\.freedesktop\.impl\.portal\.Screenshot;//g; s/org\.freedesktop\.impl\.portal\.Clipboard;//g' \
     /usr/share/xdg-desktop-portal/portals/gnome.portal 2>/dev/null || true
   # Update gnome-portals.conf for xdg-desktop-portal >= 1.15.
   if [ -f /usr/share/xdg-desktop-portal/gnome-portals.conf ]; then
@@ -496,6 +496,7 @@ org.freedesktop.impl.portal.Secret=gnome-keyring;
 org.freedesktop.impl.portal.RemoteDesktop=ci-autoaccept;
 org.freedesktop.impl.portal.ScreenCast=ci-autoaccept;
 org.freedesktop.impl.portal.Screenshot=ci-autoaccept;
+org.freedesktop.impl.portal.Clipboard=ci-autoaccept;
 CONFEOF
   fi
 
@@ -533,6 +534,18 @@ const XML = `<node>
       <arg type="a{sv}" name="options" direction="in"/>
       <arg type="u" name="response" direction="out"/>
       <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="EnableClipboard">
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+    </method>
+    <method name="DisableClipboard">
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+    </method>
+    <method name="SetSelection">
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
     </method>
     <property name="AvailableDeviceTypes" type="u" access="read"/>
     <property name="version" type="u" access="read"/>
@@ -582,6 +595,16 @@ const XML = `<node>
     <method name="Close"><arg type="u" direction="out"/><arg type="a{sv}" direction="out"/></method>
     <signal name="Closed"/>
   </interface>
+  <interface name="org.freedesktop.impl.portal.Clipboard">
+    <method name="RequestClipboard">
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+    </method>
+    <method name="SetSelection">
+      <arg type="o" name="session_handle" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+    </method>
+  </interface>
 </node>`;
 const ni = Gio.DBusNodeInfo.new_for_xml(XML);
 const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
@@ -610,6 +633,14 @@ function onCall(c, s, p, iface, method, params, inv) {
   print("[portal-autoaccept] " + iface + "." + method);
   if (iface === "org.freedesktop.impl.portal.Screenshot" && method === "Screenshot") {
     takeScreenshot(inv);
+    return;
+  }
+  if (iface === "org.freedesktop.impl.portal.Clipboard") {
+    if (method === "RequestClipboard" || method === "SetSelection") {
+      inv.return_value(null);
+    } else {
+      inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method);
+    }
     return;
   }
   if (iface === "org.freedesktop.impl.portal.ScreenCast") {
@@ -644,6 +675,8 @@ function onCall(c, s, p, iface, method, params, inv) {
       results["streams"] = new GLib.Variant("a(ua{sv})", [[42, {}]]);
     }
     inv.return_value(new GLib.Variant("(ua{sv})", [0, results]));
+  } else if (method === "EnableClipboard" || method === "DisableClipboard" || method === "SetSelection") {
+    inv.return_value(null);
   } else if (method === "Close") {
     const sh = p;
     delete screenCastSessions[sh];
@@ -662,6 +695,7 @@ function onProp(c, s, p, iface, prop) {
 bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[0], onCall, onProp, null);
 bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[1], onCall, onProp, null);
 bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[2], onCall, onProp, null);
+bus.register_object("/org/freedesktop/portal/desktop", ni.interfaces[4], onCall, onProp, null);
 Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept] ready"), () => loop.quit());
 loop.run();
 AUTOACCEPT_HEREDOC

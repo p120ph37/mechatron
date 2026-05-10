@@ -47,18 +47,20 @@ impl Handle {
 static INIT: Once = Once::new();
 static mut HANDLE_PTR: *const Handle = std::ptr::null();
 static AVAILABLE: AtomicBool = AtomicBool::new(false);
+static INIT_DONE: AtomicBool = AtomicBool::new(false);
 
 fn get_handle() -> Option<&'static Handle> {
     unsafe {
         INIT.call_once(|| {
             if let Some(h) = try_init() {
                 HANDLE_PTR = Box::into_raw(Box::new(h));
+            } else {
+                INIT_DONE.store(true, Ordering::Release);
             }
         });
-        // Wait briefly for the thread to signal readiness
         if !HANDLE_PTR.is_null() {
             for _ in 0..100 {
-                if AVAILABLE.load(Ordering::Acquire) { break; }
+                if AVAILABLE.load(Ordering::Acquire) || INIT_DONE.load(Ordering::Acquire) { break; }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             if AVAILABLE.load(Ordering::Acquire) {
@@ -110,13 +112,23 @@ struct ClipState {
 // ── Background thread ───────────────────────────────────────────────
 
 unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
+    match clipboard_thread_init(wake_rd) {
+        Some((mut conn, mut state)) => {
+            AVAILABLE.store(true, Ordering::Release);
+            INIT_DONE.store(true, Ordering::Release);
+            clipboard_event_loop(&mut conn, &mut state, rx, wake_rd);
+        }
+        None => {
+            INIT_DONE.store(true, Ordering::Release);
+        }
+    }
+}
+
+unsafe fn clipboard_thread_init(wake_rd: RawFd) -> Option<(DBusConn, ClipState)> {
     use std::sync::atomic::AtomicU32;
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-    let mut conn = match dbus_portal::dbus_connect() {
-        Some(c) => c,
-        None => return,
-    };
+    let mut conn = dbus_portal::dbus_connect()?;
 
     let pid = libc::getpid();
     let cnt = COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
@@ -126,7 +138,7 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
     let session_token = format!("mechatron_clip_{}_{}_s", pid, cnt);
     let token1_c = token1.clone();
     let session_token_c = session_token.clone();
-    let resp1 = match dbus_portal::portal_call(
+    let resp1 = dbus_portal::portal_call(
         &mut conn, RD_IFACE, "CreateSession", &token1,
         |iter| {
             dbus_portal::iter_append_asv(iter, &[
@@ -134,21 +146,17 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
                 AsvEntry::Str("session_handle_token", &session_token_c),
             ]);
         },
-    ) {
-        Some(r) => r,
-        None => return,
-    };
+    )?;
     let session_path = match dbus_portal::extract_session_handle(&resp1) {
-        Some(s) => s,
-        None => { dbus_portal::response_data_free(resp1); return; }
+        Some(s) => { dbus_portal::response_data_free(resp1); s }
+        None => { dbus_portal::response_data_free(resp1); return None; }
     };
-    dbus_portal::response_data_free(resp1);
 
     // SelectDevices (keyboard + pointer)
     let token2 = format!("mechatron_clip_{}_{}_sd", pid, cnt);
     let sp2 = session_path.clone();
     let token2_c = token2.clone();
-    let resp2 = match dbus_portal::portal_call(
+    let resp2 = dbus_portal::portal_call(
         &mut conn, RD_IFACE, "SelectDevices", &token2,
         |iter| {
             dbus_portal::iter_append_object_path(iter, &sp2);
@@ -157,11 +165,8 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
                 AsvEntry::U32("types", 3),
             ]);
         },
-    ) {
-        Some(r) => r,
-        None => return,
-    };
-    if resp2.code != 0 { dbus_portal::response_data_free(resp2); return; }
+    )?;
+    if resp2.code != 0 { dbus_portal::response_data_free(resp2); return None; }
     dbus_portal::response_data_free(resp2);
 
     // RequestClipboard (on Clipboard interface, BEFORE Start)
@@ -172,17 +177,14 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
             dbus_portal::iter_append_object_path(iter, &sp_rc);
             dbus_portal::iter_append_asv(iter, &[]);
         },
-    );
-    match reply {
-        Some(r) => dbus_portal::msg_unref(r),
-        None => return, // Clipboard portal not available
-    }
+    )?;
+    dbus_portal::msg_unref(reply);
 
     // Start
     let token3 = format!("mechatron_clip_{}_{}_st", pid, cnt);
     let sp3 = session_path.clone();
     let token3_c = token3.clone();
-    let resp3 = match dbus_portal::portal_call(
+    let resp3 = dbus_portal::portal_call(
         &mut conn, RD_IFACE, "Start", &token3,
         |iter| {
             dbus_portal::iter_append_object_path(iter, &sp3);
@@ -191,11 +193,8 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
                 AsvEntry::Str("handle_token", &token3_c),
             ]);
         },
-    ) {
-        Some(r) => r,
-        None => return,
-    };
-    if resp3.code != 0 { dbus_portal::response_data_free(resp3); return; }
+    )?;
+    if resp3.code != 0 { dbus_portal::response_data_free(resp3); return None; }
     dbus_portal::response_data_free(resp3);
 
     // Subscribe to Clipboard signals
@@ -203,7 +202,7 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
         "type='signal',interface='{}'", CLIP_IFACE
     ));
 
-    let mut state = ClipState {
+    let state = ClipState {
         session_path,
         text: None,
         png: None,
@@ -212,32 +211,36 @@ unsafe fn clipboard_thread(rx: mpsc::Receiver<Cmd>, wake_rd: RawFd) {
         sequence: 0,
     };
 
-    AVAILABLE.store(true, Ordering::Release);
+    let _ = wake_rd;
+    Some((conn, state))
+}
 
-    // Event loop — short timeouts so we can check for commands
+unsafe fn clipboard_event_loop(
+    conn: &mut DBusConn,
+    state: &mut ClipState,
+    rx: mpsc::Receiver<Cmd>,
+    wake_rd: RawFd,
+) {
     loop {
-        if !dbus_portal::conn_read_write(&mut conn, 100) {
-            break; // disconnected
+        if !dbus_portal::conn_read_write(conn, 100) {
+            break;
         }
 
-        // Process D-Bus messages
         loop {
-            let msg = dbus_portal::conn_pop_message(&mut conn);
+            let msg = dbus_portal::conn_pop_message(conn);
             if msg.is_null() { break; }
             let mtype = dbus_portal::msg_get_type(msg);
             if mtype == DBUS_MESSAGE_TYPE_SIGNAL {
-                handle_signal(msg, &mut state, &mut conn);
+                handle_signal(msg, state, conn);
             }
             dbus_portal::msg_unref(msg);
         }
 
-        // Drain wake pipe
         let mut buf = [0u8; 64];
         while libc::read(wake_rd, buf.as_mut_ptr() as *mut c_void, buf.len()) > 0 {}
 
-        // Process commands
         while let Ok(cmd) = rx.try_recv() {
-            process_cmd(cmd, &mut state, &mut conn);
+            process_cmd(cmd, state, conn);
         }
     }
 }
