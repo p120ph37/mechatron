@@ -377,6 +377,15 @@ export async function memory_find(
   return out;
 }
 
-export async function memory_bufferAddress(_buf: Buffer): Promise<bigint> {
-  throw new Error("memory_bufferAddress: not supported in nolib backend (requires native pointer access)");
+export async function memory_bufferAddress(buf: Buffer): Promise<bigint> {
+  // Pure-TS has no way to obtain a Buffer's native address; defer to bun:ffi's
+  // pointer-extraction primitive (lib/ffi/bun.ts:bp), the one ffi function
+  // that has no nolib equivalent.  Under Node.js, bun:ffi is unavailable and
+  // this throws — that's a fundamental runtime limitation, not a missing
+  // implementation.
+  const { getBunFFI, bp } = require("../ffi/bun") as typeof import("../ffi/bun");
+  if (!getBunFFI()) {
+    throw new Error("memory_bufferAddress: requires Bun runtime (bun:ffi for pointer access)");
+  }
+  return bp(buf);
 }

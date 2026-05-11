@@ -187,34 +187,13 @@ for be in "${BACKENDS[@]}"; do
   UNIT_DONE=true
 done
 
-# ── Worker polyfill: re-run ffi with in-process dispatch for coverage ────────
-# bun --coverage only instruments the main thread; worker_threads code is
-# invisible. The polyfill replaces Worker with an in-process shim that loads
-# the impl module directly, so bun's coverage sees the *-impl.ts code paths.
-if [ "$RUNNER_OS" = "Linux" ]; then
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-worker-polyfill.xml"
-  BE_COV_DIR="$COV_DIR/ffi-worker-polyfill"
-  mkdir -p "$BE_COV_DIR"
-  BE_RC=0
-  MECHATRON_BACKEND=ffi \
-  MECHATRON_WORKER_POLYFILL=1 \
-  MECHATRON_SKIP_UNIT=1 \
-    run_bun "ffi-worker-polyfill" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-      --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-      --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-    || BE_RC=$?
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-worker-polyfill" \
-    "bun test for ffi-worker-polyfill exited ${BE_RC} without producing a JUnit report."
-  [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-fi
-
-# ── Linux-only: FFI + nolib[vt] input (uinput path) ──────────────
+# ── Linux-only: napi + nolib[vt] input (uinput path) ──────────────
 if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-vt-input.xml"
   BE_COV_DIR="$COV_DIR/nolib-vt-input"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
-  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND=napi \
   MECHATRON_BACKEND_KEYBOARD='nolib[vt]' \
   MECHATRON_BACKEND_MOUSE='nolib[vt]' \
   MECHATRON_SKIP_UNIT=1 \
@@ -227,13 +206,13 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -w /dev/uinput ]; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
-# ── Linux-only: FFI + nolib[x11] input (xproto path) ────────────
+# ── Linux-only: napi + nolib[x11] input (xproto path) ────────────
 if [ "$RUNNER_OS" = "Linux" ]; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-x11-input.xml"
   BE_COV_DIR="$COV_DIR/nolib-x11-input"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
-  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND=napi \
   MECHATRON_BACKEND_KEYBOARD='nolib[x11]' \
   MECHATRON_BACKEND_MOUSE='nolib[x11]' \
   MECHATRON_SKIP_UNIT=1 \
@@ -246,7 +225,7 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
-# ── Linux-only: FFI + nolib[x11] window + screen (xproto path) ──
+# ── Linux-only: napi + nolib[x11] window + screen (xproto path) ──
 # Exercises lib/nolib/window-x11.ts and lib/nolib/screen-x11.ts which
 # have no other CI cell: the portal and gext runs use their own variant,
 # and the nolib[x11] input cell above only overrides keyboard+mouse.
@@ -255,7 +234,7 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   BE_COV_DIR="$COV_DIR/nolib-x11-winscrn"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
-  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND=napi \
   MECHATRON_BACKEND_WINDOW='nolib[x11]' \
   MECHATRON_BACKEND_SCREEN='nolib[x11]' \
   MECHATRON_SKIP_UNIT=1 \
@@ -299,7 +278,7 @@ for y in range(H):
     mkdir -p "$BE_COV_DIR"
     BE_RC=0
     if [ "$FB_USE_STUB" = true ]; then
-      MECHATRON_BACKEND=ffi \
+      MECHATRON_BACKEND=napi \
       MECHATRON_BACKEND_SCREEN='nolib[vt]' \
       MECHATRON_FB_STUB_W=$FB_W \
       MECHATRON_FB_STUB_H=$FB_H \
@@ -311,7 +290,7 @@ for y in range(H):
           --reporter=junit --reporter-outfile="$JUNIT_FILE" \
         || BE_RC=$?
     else
-      MECHATRON_BACKEND=ffi \
+      MECHATRON_BACKEND=napi \
       MECHATRON_BACKEND_SCREEN='nolib[vt]' \
       MECHATRON_SKIP_UNIT=1 \
         run_bun "nolib-vt-fb" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
@@ -327,36 +306,13 @@ for y in range(H):
 fi
 
 
-# ── Linux-only: FFI with dlopen-block LD_PRELOAD shim ─────────────
-if [ "$RUNNER_OS" = "Linux" ]; then
-  for variant in "no-xtst:libXtst.so.6" "no-xrandr:libXrandr.so.2"; do
-    label="${variant%%:*}"
-    block="${variant#*:}"
-    JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-${label}.xml"
-    BE_COV_DIR="$COV_DIR/ffi-${label}"
-    mkdir -p "$BE_COV_DIR"
-    BE_RC=0
-    MECHATRON_BACKEND=ffi \
-    MECHATRON_BLOCK_DLOPEN="$block" \
-    MECHATRON_SKIP_UNIT=1 \
-    LD_PRELOAD="$(pwd)/test/dlopen-block.so" \
-      run_bun "ffi-$label" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
-        --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
-        --reporter=junit --reporter-outfile="$JUNIT_FILE" \
-      || BE_RC=$?
-    guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-${label}" \
-      "bun test for ffi-${label} (LD_PRELOAD dlopen-block $block) exited ${BE_RC} without producing a JUnit report."
-    [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
-  done
-fi
-
 # ── Linux-only: nolib[sh] clipboard (xclip subprocess path) ──────
 if [ "$RUNNER_OS" = "Linux" ] && command -v xclip >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-sh-clipboard.xml"
   BE_COV_DIR="$COV_DIR/nolib-sh-clipboard"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
-  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND=napi \
   MECHATRON_BACKEND_CLIPBOARD='nolib[sh]' \
   MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-sh-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
@@ -396,7 +352,7 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   BE_COV_DIR="$COV_DIR/nolib-x11-clipboard"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
-  MECHATRON_BACKEND=ffi \
+  MECHATRON_BACKEND=napi \
   MECHATRON_BACKEND_CLIPBOARD='nolib[x11]' \
   MECHATRON_SKIP_UNIT=1 \
     run_bun "nolib-x11-clipboard" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
@@ -416,21 +372,21 @@ fi
 # in this cell — that's the whole point — so MECHATRON_SKIP_UNIT is
 # left unset.
 if [ "$RUNNER_OS" = "Linux" ] && [ -x /usr/libexec/at-spi-bus-launcher ]; then
-  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-atspi.xml"
-  BE_COV_DIR="$COV_DIR/ffi-atspi"
+  JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-atspi.xml"
+  BE_COV_DIR="$COV_DIR/nolib-atspi"
   mkdir -p "$BE_COV_DIR"
   BE_RC=0
   /usr/libexec/at-spi-bus-launcher --launch-immediately &
   ATSPI_PID=$!
   sleep 1
-  MECHATRON_BACKEND=ffi \
-    run_bun "ffi-atspi" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
+  MECHATRON_BACKEND='nolib[portal]' \
+    run_bun "nolib-atspi" "$JUNIT_FILE" -- "${WRAP[@]}" "$BUN" test test/bun.test.ts \
       --coverage --coverage-reporter=lcov --coverage-dir="$BE_COV_DIR" \
       --reporter=junit --reporter-outfile="$JUNIT_FILE" \
     || BE_RC=$?
   kill "$ATSPI_PID" 2>/dev/null || true
-  guard_junit "$BE_RC" "$JUNIT_FILE" "ffi-atspi" \
-    "bun test for ffi-atspi exited ${BE_RC} without producing a JUnit report."
+  guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-atspi" \
+    "bun test for nolib-atspi exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC
 fi
 
@@ -450,19 +406,15 @@ fi
 # can't reach Wayland clients). The mechatron extension is still loaded
 # for the gext test cell that follows.
 #
-# Inside this single Wayland session we exercise all three [portal]
-# variants — nolib[portal], ffi[portal], and napi (which the resolver
-# falls through to napi[portal] under Wayland-only since napi[x11]
-# can't open a display) — so the autoaccept shim, gnome-shell, and
-# pipewire startup costs are amortised across them.
+# Inside this single Wayland session we exercise both [portal]
+# variants — nolib[portal] and napi[portal] — so the autoaccept shim,
+# gnome-shell, and pipewire startup costs are amortised across them.
 if [ "$RUNNER_OS" = "Linux" ] && command -v gnome-shell >/dev/null 2>&1; then
   JUNIT_FILE="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-nolib-portal.xml"
   BE_COV_DIR="$COV_DIR/nolib-portal"
-  FFI_PORTAL_JUNIT="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-ffi-portal.xml"
-  FFI_PORTAL_COV_DIR="$COV_DIR/ffi-portal"
   NAPI_PORTAL_JUNIT="$JUNIT_DIR/mechatron-${MATRIX_OS}-${MATRIX_ARCH}-napi-portal.xml"
   NAPI_PORTAL_COV_DIR="$COV_DIR/napi-portal"
-  mkdir -p "$BE_COV_DIR" "$FFI_PORTAL_COV_DIR" "$NAPI_PORTAL_COV_DIR"
+  mkdir -p "$BE_COV_DIR" "$NAPI_PORTAL_COV_DIR"
   BE_RC=0
 
   TOKENS_FILE="${RUNNER_TEMP:-/tmp}/mechatron-portal-tokens"
@@ -709,7 +661,7 @@ Gio.bus_own_name_on_connection(bus, BUS_NAME, 0, () => print("[portal-autoaccept
 loop.run();
 AUTOACCEPT_HEREDOC
 
-  export BUN JUNIT_FILE BE_COV_DIR FFI_PORTAL_JUNIT FFI_PORTAL_COV_DIR \
+  export BUN JUNIT_FILE BE_COV_DIR \
          NAPI_PORTAL_JUNIT NAPI_PORTAL_COV_DIR \
          TOKENS_FILE EXT_UUID GNOME_SHELL_VER PORTAL_AUTOACCEPT
   dbus-run-session -- bash -c '
@@ -868,17 +820,6 @@ AUTOACCEPT_HEREDOC
         --reporter=junit --reporter-outfile="$JUNIT_FILE"
     RC=$?
 
-    # ffi[portal] in the same Wayland session — same autoaccept shim,
-    # exercises lib/ffi/{keyboard,mouse,screen}-portal.ts which delegate
-    # to the shared lib/portal/* wire code.
-    MECHATRON_BACKEND="ffi[portal]" \
-    MECHATRON_SKIP_UNIT=1 \
-      "$BUN" test test/bun.test.ts \
-        --coverage --coverage-reporter=lcov --coverage-dir="$FFI_PORTAL_COV_DIR" \
-        --reporter=junit --reporter-outfile="$FFI_PORTAL_JUNIT"
-    FFI_RC=$?
-    [ "$FFI_RC" = 0 ] || RC=$FFI_RC
-
     # napi[portal] explicitly: the napi[x11] .node binary would also
     # load on this Ubuntu system (libX11 is present even without
     # $DISPLAY), so we need an explicit variant pin to exercise the
@@ -896,8 +837,6 @@ AUTOACCEPT_HEREDOC
   ' 2>&1 | tee -a "$TEST_LOG" || BE_RC=$?
   guard_junit "$BE_RC" "$JUNIT_FILE" "nolib-portal" \
     "nolib-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
-  guard_junit "$BE_RC" "$FFI_PORTAL_JUNIT" "ffi-portal" \
-    "ffi-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
   guard_junit "$BE_RC" "$NAPI_PORTAL_JUNIT" "napi-portal" \
     "napi-portal test (gnome-shell --headless + portal) exited ${BE_RC} without producing a JUnit report."
   [ "$BE_RC" = 0 ] || OVERALL_RC=$BE_RC

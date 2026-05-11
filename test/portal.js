@@ -734,14 +734,14 @@ function testDbusWire() {
 		return true;
 	}
 
-	function testFfiLinuxLibc() {
-		log("  ffi linux/libc... ");
+	function testFfiLibc() {
+		log("  ffi libc... ");
 		var IS_BUN = typeof globalThis.Bun !== "undefined";
 		if (!IS_BUN) { log("(skip: node)\n"); return true; }
 		if (process.platform !== "linux") { log("(skip: non-linux)\n"); return true; }
 
-		// Exercise the libc lazy-open path in ffi/libc.ts.
-		// uinput.ts imports it but never calls libc() without /dev/uinput.
+		// Exercise the libc lazy-open path in ffi/libc.ts.  Used by
+		// nolib/memory.ts via lib/ffi/bun.ts's bp() for memory_bufferAddress.
 		var libcMod = require("../lib/ffi/libc");
 		var lc = libcMod.libc();
 		assert(lc !== null, "libc() resolves on Linux/Bun");
@@ -760,126 +760,6 @@ function testDbusWire() {
 		assert(libcMod.O_RDWR === 2, "O_RDWR");
 		assert(typeof libcMod.PROT_READ === "number", "PROT_READ");
 		assert(typeof libcMod.MAP_FAILED === "bigint", "MAP_FAILED");
-
-		// Exercise ffi/uinput.ts lazy-open failure path (/dev/uinput absent)
-		var uinputMod = require("../lib/ffi/uinput");
-		var dev = uinputMod.getUinputDevice();
-		assert(uinputMod.uinputReady() === (dev !== null), "uinputReady matches device state");
-		if (dev) {
-			log("(uinput: available) ");
-			uinputMod.closeUinputDevice();
-			assert(uinputMod.uinputReady() === false, "uinputReady false after close");
-		} else {
-			var reason = uinputMod.uinputOpenReason();
-			assert(typeof reason === "string", "uinputOpenReason returns string on failure");
-			assert(reason.length > 0, "uinputOpenReason is non-empty");
-			log("(uinput: " + reason + ") ");
-			uinputMod.closeUinputDevice();
-		}
-
-		// Exercise ffi/linux.ts — imported only by worker -impl files.
-		var linuxMod = require("../lib/ffi/linux");
-		var lc2 = linuxMod.libc();
-		assert(lc2 !== null, "linux libc() resolves");
-		assert(typeof lc2.process_vm_readv === "function", "libc has process_vm_readv");
-		assert(typeof lc2.kill === "function", "libc has kill");
-		assert(typeof lc2.sysconf === "function", "libc has sysconf");
-		assert(typeof lc2.getpid === "function", "libc has getpid");
-
-		var pid = lc2.getpid();
-		assert(pid === process.pid, "getpid matches process.pid");
-
-		var ffi2 = linuxMod.libcFFI();
-		assert(ffi2 !== null, "linux libcFFI() resolves");
-
-		assert(linuxMod.SIGTERM === 15, "SIGTERM");
-		assert(linuxMod.SIGKILL === 9, "SIGKILL");
-		assert(linuxMod._SC_PAGESIZE === 30, "_SC_PAGESIZE");
-
-		// makeIovec / makeRemoteIovec
-		var testBuf = new Uint8Array(32);
-		var iov = linuxMod.makeIovec(ffi2, testBuf);
-		assert(iov.iov instanceof BigUint64Array, "makeIovec iov is BigUint64Array");
-		assert(iov.iov.length === 2, "makeIovec iov length 2");
-		assert(iov.iov[1] === 32n, "makeIovec len = 32");
-		assert(typeof iov.dataPtr === "bigint", "makeIovec dataPtr is bigint");
-
-		var riov = linuxMod.makeRemoteIovec(0x1000n, 64);
-		assert(riov instanceof BigUint64Array, "makeRemoteIovec returns BigUint64Array");
-		assert(riov[0] === 0x1000n, "makeRemoteIovec addr");
-		assert(riov[1] === 64n, "makeRemoteIovec len");
-
-		log("OK\n");
-		return true;
-	}
-
-	function testFfiX11Helpers() {
-		log("  ffi x11 helpers... ");
-		var IS_BUN = typeof globalThis.Bun !== "undefined";
-		if (!IS_BUN) { log("(skip: node)\n"); return true; }
-		if (process.platform !== "linux" || !process.env.DISPLAY) {
-			log("(skip: no X11)\n"); return true;
-		}
-
-		var x11mod = require("../lib/ffi/x11");
-
-		// Getter functions — these are normally only called from worker threads
-		var display = x11mod.getDisplay();
-		assert(display !== null && display !== undefined, "getDisplay returns non-null");
-		var X = x11mod.x11();
-		assert(X !== null, "x11() returns non-null");
-		var F = x11mod.ffi();
-		assert(F !== null, "ffi() returns non-null");
-		assert(typeof x11mod.isXTestAvailable() === "boolean", "isXTestAvailable boolean");
-		assert(typeof x11mod.isXrandrAvailable() === "boolean", "isXrandrAvailable boolean");
-
-		var xt = x11mod.xtest();
-		log("(xtest=" + (xt !== null) + " xrandr=" + x11mod.isXrandrAvailable() + ") ");
-
-		var xr = x11mod.xrandr();
-
-		// atom() — intern a well-known atom
-		var wmName = x11mod.atom("WM_NAME", true);
-		assert(typeof wmName === "bigint", "atom WM_NAME is bigint");
-		assert(wmName > 0n, "atom WM_NAME > 0");
-
-		// atom with onlyIfExists=false
-		var customAtom = x11mod.atom("_MECHATRON_TEST_ATOM", false);
-		assert(typeof customAtom === "bigint", "custom atom is bigint");
-
-		// getWindowProperty on root window
-		var NET_CLIENT_LIST = x11mod.atom("_NET_CLIENT_LIST", true);
-		if (NET_CLIENT_LIST > 0n) {
-			var defaultScreen = X.XDefaultScreen(display);
-			var root = X.XRootWindow(display, defaultScreen);
-			var prop = x11mod.getWindowProperty(root, NET_CLIENT_LIST);
-			if (prop) {
-				assert(typeof prop.format === "number", "prop.format is number");
-				assert(typeof prop.nitems === "bigint", "prop.nitems is bigint");
-				X.XFree(prop.data);
-			}
-		}
-
-		// getWindowProperty with non-existent property → null
-		var bogus = x11mod.getWindowProperty(0n, 0n);
-		assert(bogus === null, "getWindowProperty(0, 0) returns null");
-
-		// getWindowAttributes on root window
-		var defaultScreen2 = X.XDefaultScreen(display);
-		var root2 = X.XRootWindow(display, defaultScreen2);
-		var attrs = x11mod.getWindowAttributes(root2);
-		assert(attrs !== null, "getWindowAttributes root non-null");
-		assert(attrs.width > 0, "root width > 0");
-		assert(attrs.height > 0, "root height > 0");
-		assert(typeof attrs.map_state === "number", "map_state is number");
-		assert(typeof attrs.screen === "bigint", "screen is bigint");
-
-		// sendClientMessage — send a harmless _NET_ACTIVE_WINDOW to root
-		var NET_ACTIVE = x11mod.atom("_NET_ACTIVE_WINDOW", true);
-		if (NET_ACTIVE > 0n) {
-			x11mod.sendClientMessage(defaultScreen2, root2, NET_ACTIVE, [1n, 0n, 0n, 0n, 0n]);
-			X.XSync(display, 0);
-		}
 
 		log("OK\n");
 		return true;
@@ -910,8 +790,7 @@ function testDbusWire() {
 		{ name: "remote-desktop", functions: [], unit: true, test: testRemoteDesktop },
 		{ name: "dbus wire", functions: [], unit: true, test: testDbusWire },
 		{ name: "dbus connection", functions: [], unit: true, test: testDbusConnection },
-		{ name: "ffi linux/libc", functions: [], unit: true, test: testFfiLinuxLibc },
-		{ name: "ffi x11 helpers", functions: [], unit: true, test: testFfiX11Helpers },
+		{ name: "ffi libc", functions: [], unit: true, test: testFfiLibc },
 		{ name: "portal util", functions: [], unit: true, test: testPortalUtil },
 		{ name: "platform api", functions: [], unit: true, test: testPlatformApi },
 	];

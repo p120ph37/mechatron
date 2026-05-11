@@ -2,17 +2,14 @@
  * ffi mouse backend — main-thread async proxy to mouse-worker.ts for
  * non-Linux platforms (macOS, Windows).
  *
- * On Linux this base file throws so the backend resolver picks up the
- * variant-specific entry (ffi/mouse-x11 for X11/uinput, ffi/mouse-portal
- * for libei).  Mirrors the napi mouse variant split.
+ * Linux is served by napi[x11/portal/gext] or nolib[x11/portal/gext/vt];
+ * ffi has no Linux backend.
  */
 
 import { createDispatcher } from "./_dispatch";
 
 if (process.platform === "linux") {
-  throw new Error(
-    "ffi/mouse: use ffi/mouse-x11 (linux x11) or ffi/mouse-portal (linux libei) variant on linux",
-  );
+  throw new Error("ffi/mouse: not available on Linux — use napi or nolib");
 }
 if (!["win32", "darwin"].includes(process.platform)) {
   throw new Error("ffi/mouse: unsupported platform");

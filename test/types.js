@@ -762,14 +762,18 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(e2[0].backend === "napi", "napi[x11] backend");
 				assert(e2[0].variant === "x11", "napi[x11] variant");
 
-				// Bracket: ffi[portal]
-				var e3 = parse("ffi[portal]");
-				assert(e3.length === 1, "ffi[portal] → 1 entry");
-				assert(e3[0].variant === "portal", "ffi[portal] variant");
+				// Bracket: napi[portal]
+				var e3 = parse("napi[portal]");
+				assert(e3.length === 1, "napi[portal] → 1 entry");
+				assert(e3[0].variant === "portal", "napi[portal] variant");
 
 				// Bracket with invalid variant
 				var e4 = parse("napi[bogus]");
 				assert(e4.length === 0, "napi[bogus] → 0 entries");
+
+				// ffi has no Linux variants; ffi[x11] should be silently dropped
+				var eFfi = parse("ffi[x11]");
+				assert(eFfi.length === 0, "ffi[x11] → 0 entries (no ffi variants)");
 
 				// Multiple bracket entries: nolib[x11],nolib[portal]
 				var e5 = parse("nolib[x11],nolib[portal]");
@@ -783,9 +787,9 @@ module.exports = function (mechatron, log, assert, waitFor) {
 				assert(e6[0].backend === "napi", "first backend napi");
 
 				// Mixed: bracket + plain
-				var e7 = parse("ffi[x11],nolib");
-				assert(e7.length >= 2, "ffi[x11],nolib → ≥2 entries");
-				assert(e7[0].backend === "ffi" && e7[0].variant === "x11", "first is ffi[x11]");
+				var e7 = parse("napi[x11],nolib");
+				assert(e7.length >= 2, "napi[x11],nolib → ≥2 entries");
+				assert(e7[0].backend === "napi" && e7[0].variant === "x11", "first is napi[x11]");
 
 				// defaultOrder: returns a non-empty preference list
 				var defOrder = require("../lib/backend")._defaultOrderForTests;

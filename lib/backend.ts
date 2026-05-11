@@ -5,17 +5,21 @@
  *   - **napi**: Rust `.node` binaries from `@mechatronic/napi-<sub>`.
  *     Works in Node.js and Bun.  Fastest; full platform coverage.
  *
- *   - **ffi**: dlopen via `bun:ffi` (libX11/libXtst on Linux, user32 on
- *     Windows, CoreGraphics on macOS).  Bun only.  Fast; full coverage.
+ *   - **ffi**: dlopen via `bun:ffi` (Win/Darwin only — user32 on Windows,
+ *     CoreGraphics on macOS).  Bun only.  Linux ffi was dropped — napi
+ *     and nolib together cover everything ffi did, except memory_bufferAddress
+ *     which is served by lib/nolib/memory.ts via lib/ffi/bun.ts's `bp()`.
  *
  *   - **nolib**: Pure TypeScript — no native libraries.  Uses direct
  *     protocols, subprocess bridges, or device access.
  *
- * Variants (apply to all backends on Linux):
- *   - **x11**:    X11-based (napi: libX11/libXtst, ffi: dlopen, nolib: xproto).
- *   - **portal**: Wayland portal (napi: libei, ffi: dlopen libei,
- *                 nolib: D-Bus RemoteDesktop + Screenshot).
+ * Variants (apply only to napi/nolib on Linux):
+ *   - **x11**:    X11-based (napi: libX11/libXtst, nolib: xproto).
+ *   - **portal**: Wayland portal (napi: libei, nolib: D-Bus RemoteDesktop
+ *                 + Screenshot).
+ *   - **gext**:   Mechatron GNOME Shell extension over D-Bus.
  *   - **vt**:     Device-level (nolib only: uinput + framebuffer).
+ *   - **sh**:     Subprocess (nolib only: xclip/wl-copy/pbcopy).
  *
  * On non-Linux, variants are ignored — napi/ffi use native OS APIs directly.
  *
@@ -24,17 +28,13 @@
  *   Per-subsystem overrides via `MECHATRON_BACKEND_KEYBOARD`, `_SCREEN`, etc.
  *
  *   Examples:
- *     MECHATRON_BACKEND=ffi,nolib               # all defaults per backend
- *     MECHATRON_BACKEND=ffi[x11],nolib[portal]  # explicit variant selection
- *     MECHATRON_BACKEND=napi[x11],napi[portal]  # x11 napi first, portal napi fallback
+ *     MECHATRON_BACKEND=napi,nolib              # all defaults per backend
+ *     MECHATRON_BACKEND=napi[x11],nolib[portal] # explicit variant selection
  *     MECHATRON_BACKEND_SCREEN=nolib[vt]        # framebuffer for screen only
  *
- *   Defaults (Linux, Bun):
- *     napi[x11], napi[portal], ffi[x11], ffi[portal],
- *     nolib[x11], nolib[portal], nolib[vt]
- *
- *   Defaults (Linux, Node):
- *     napi[x11], napi[portal], nolib[x11], nolib[portal], nolib[vt]
+ *   Defaults (Linux):
+ *     napi[x11], napi[portal], napi[gext],
+ *     nolib[x11], nolib[portal], nolib[gext], nolib[vt], nolib[sh]
  *
  *   Defaults (non-Linux):
  *     napi, ffi (Bun) or napi (Node)
@@ -59,7 +59,11 @@ const IS_LINUX = process.platform === "linux";
 const VALID_VARIANTS: readonly Variant[] = ["x11", "portal", "gext", "vt", "sh"];
 
 const NAPI_VARIANTS: readonly Variant[] = ["x11", "portal", "gext"];
-const FFI_VARIANTS: readonly Variant[] = ["x11", "portal", "gext"];
+// FFI on Linux is no longer a backend variant: napi/nolib cover everything
+// except memory_bufferAddress, which lives in lib/ffi/bun.ts and is loaded
+// on demand by lib/nolib/memory.ts under Bun.  On Win/Darwin, ffi has no
+// variants — the base lib/ffi/<sub>.ts handles all subsystems.
+const FFI_VARIANTS: readonly Variant[] = [];
 const NOLIB_VARIANTS: readonly Variant[] = ["x11", "portal", "gext", "vt", "sh"];
 
 function variantsFor(backend: Backend): readonly Variant[] {
@@ -86,7 +90,17 @@ function parseEntries(raw: string): BackendEntry[] {
         }
       }
     } else if (IS_LINUX) {
-      for (const v of variantsFor(backend)) entries.push({ backend, variant: v });
+      // ffi has no variants on Linux — the entry is silently dropped because
+      // backend resolution would fail to load lib/ffi/<sub>.ts (base files
+      // throw on Linux).  napi/nolib still expand to their variant list.
+      const vs = variantsFor(backend);
+      if (vs.length === 0) {
+        // Allow plain "ffi" on Linux only for explicit memory_bufferAddress
+        // access; backend.tryLoad will pick this up if no napi/nolib succeed.
+        entries.push({ backend });
+      } else {
+        for (const v of vs) entries.push({ backend, variant: v });
+      }
     } else if (backend === "nolib") {
       entries.push({ backend, variant: "sh" });
     } else {
@@ -119,13 +133,10 @@ function defaultOrder(): BackendEntry[] {
     return base;
   }
   const entries: BackendEntry[] = [];
-  // napi[x11], napi[portal]
+  // napi[x11], napi[portal], napi[gext]
   for (const v of NAPI_VARIANTS) entries.push({ backend: "napi", variant: v });
-  // ffi[x11], ffi[portal]  (Bun only)
-  if (IS_BUN) {
-    for (const v of FFI_VARIANTS) entries.push({ backend: "ffi", variant: v });
-  }
-  // nolib[x11], nolib[portal], nolib[vt]
+  // No ffi on Linux — napi + nolib cover everything except memory_bufferAddress.
+  // nolib[x11], nolib[portal], nolib[gext], nolib[vt], nolib[sh]
   for (const v of NOLIB_VARIANTS) entries.push({ backend: "nolib", variant: v });
   return entries;
 }

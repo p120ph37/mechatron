@@ -199,7 +199,7 @@ jobs:
               const col = ef.platform + "-" + ef.backend;
               testedCols.add(col);
               // Also mark the actual per-subsystem columns as tested (e.g.
-              // "linux-ffi[x11]") so variant columns aren't falsely reported
+              // "linux-napi[x11]") so variant columns aren't falsely reported
               // as untested when they're covered by this run.
               for (const tc of ef.testedColumns || []) testedCols.add(tc);
               if (!allOk[col]) allOk[col] = new Set();

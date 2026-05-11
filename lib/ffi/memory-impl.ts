@@ -1,18 +1,19 @@
 /**
- * Memory subsystem — pure FFI implementation.
+ * Memory subsystem — pure FFI implementation (Win/Darwin only).
  *
- * Linux: parses /proc/PID/maps and performs IO via libc.process_vm_readv /
- * libc.process_vm_writev.  Windows: VirtualQueryEx + ReadProcessMemory /
- * WriteProcessMemory + VirtualProtectEx.  macOS: throws.
+ * Windows: VirtualQueryEx + ReadProcessMemory / WriteProcessMemory +
+ * VirtualProtectEx.  macOS: mach_vm_region / mach_vm_read_overwrite /
+ * mach_vm_write / mach_vm_protect.  Linux is served by napi or nolib.
  *
  * Mirrors the napi-rs `memory_*` exports.  All addresses cross the FFI
  * boundary as BigInt, matching the napi adapter.
+ *
+ * `memory_bufferAddress` is exported on every platform — it's pure
+ * pointer math (bp(buf)) and is the one ffi function that pure-TS
+ * (nolib) can't replicate.
  */
 
-import * as fs from "fs";
-
 import { bp } from "./bun";
-import { libc, libcFFI, _SC_PAGESIZE, makeIovec, makeRemoteIovec } from "./linux";
 import { kernel32, winFFI } from "./win";
 import {
   libc as mac, macFFI,
@@ -22,7 +23,6 @@ import {
   PROC_PIDT_SHORTBSDINFO, _SC_PAGESIZE as MAC_SC_PAGESIZE,
 } from "./mac";
 
-const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 
@@ -55,63 +55,6 @@ function emptyRegion(): RegionInfo {
 const FLAG_DEFAULT     = 0;
 const FLAG_SKIP_ERRORS = 1;
 const FLAG_AUTO_ACCESS = 2;
-
-// ── Linux internals ───────────────────────────────────────────────────
-
-function isProcValid(pid: number): boolean {
-  return pid > 0 && fs.existsSync(`/proc/${pid}`);
-}
-
-function parseMaps(pid: number): RegionInfo[] {
-  const out: RegionInfo[] = [];
-  let txt: string;
-  try { txt = fs.readFileSync(`/proc/${pid}/maps`, "utf8"); }
-  catch { return out; }
-  for (const line of txt.split("\n")) {
-    if (!line) continue;
-    const parts = line.split(/\s+/);
-    if (parts.length < 2) continue;
-    const [s, e] = parts[0].split("-");
-    if (!s || !e) continue;
-    const start = BigInt("0x" + s);
-    const stop = BigInt("0x" + e);
-    const perms = parts[1] || "";
-    const readable = perms.includes("r");
-    const writable = perms.includes("w");
-    const executable = perms.includes("x");
-    const isPrivate = perms.includes("p");
-    let access = 0;
-    if (readable)   access |= 1;
-    if (writable)   access |= 2;
-    if (executable) access |= 4;
-    out.push({
-      valid: true, bound: true, start, stop, size: stop - start,
-      readable, writable, executable, access,
-      private: isPrivate, guarded: false,
-    });
-  }
-  return out;
-}
-
-function linuxRead(pid: number, addr: bigint, buf: Uint8Array): number {
-  const c = libc();
-  const F = libcFFI();
-  if (!c || !F || pid <= 0 || buf.length === 0) return 0;
-  const local = makeIovec(F, buf);
-  const remote = makeRemoteIovec(addr, buf.length);
-  const n = c.process_vm_readv(pid, F.ptr(local.iov) as any, 1n, F.ptr(remote) as any, 1n, 0n);
-  return n < 0n ? 0 : Number(n);
-}
-
-function linuxWrite(pid: number, addr: bigint, buf: Uint8Array): number {
-  const c = libc();
-  const F = libcFFI();
-  if (!c || !F || pid <= 0 || buf.length === 0) return 0;
-  const local = makeIovec(F, buf);
-  const remote = makeRemoteIovec(addr, buf.length);
-  const n = c.process_vm_writev(pid, F.ptr(local.iov) as any, 1n, F.ptr(remote) as any, 1n, 0n);
-  return n < 0n ? 0 : Number(n);
-}
 
 // ── macOS internals ───────────────────────────────────────────────────
 
@@ -416,7 +359,6 @@ function findInBuffer(buf: Uint8Array, len: number, pat: (number | null)[]): num
 // ── NAPI-compatible exports ───────────────────────────────────────────
 
 export function memory_isValid(pid: number): boolean {
-  if (IS_LINUX) return isProcValid(pid);
   if (IS_WIN) {
     const h = winOpen(pid, PROCESS_QUERY_LIMITED_INFORMATION);
     if (h === 0n) return false;
@@ -428,13 +370,6 @@ export function memory_isValid(pid: number): boolean {
 }
 
 export function memory_getRegion(pid: number, address: bigint): RegionInfo {
-  if (IS_LINUX) {
-    const regions = parseMaps(pid);
-    for (const r of regions) {
-      if (address >= r.start && address < r.stop) return r;
-    }
-    return emptyRegion();
-  }
   if (IS_WIN) {
     const h = winOpen(pid, PROCESS_QUERY_INFORMATION);
     if (h === 0n) return emptyRegion();
@@ -473,9 +408,6 @@ export function memory_getRegion(pid: number, address: bigint): RegionInfo {
 export function memory_getRegions(pid: number, start?: bigint, stop?: bigint): RegionInfo[] {
   const startAddr = start ?? 0n;
   const stopAddr = stop ?? BigInt(Number.MAX_SAFE_INTEGER);
-  if (IS_LINUX) {
-    return parseMaps(pid).filter(r => r.stop > startAddr && r.start < stopAddr);
-  }
   if (IS_WIN) {
     return winQueryRegions(pid, startAddr, stopAddr);
   }
@@ -489,7 +421,6 @@ export function memory_getRegions(pid: number, start?: bigint, stop?: bigint): R
 }
 
 export function memory_setAccess(pid: number, regionStart: bigint, readable: boolean, writable: boolean, executable: boolean): boolean {
-  if (IS_LINUX) return false;
   if (IS_MAC) {
     let access = 0;
     if (readable)   access |= VM_PROT_READ;
@@ -512,7 +443,6 @@ export function memory_setAccess(pid: number, regionStart: bigint, readable: boo
 }
 
 export function memory_setAccessFlags(pid: number, regionStart: bigint, flags: number): boolean {
-  if (IS_LINUX) return false;
   if (IS_MAC) {
     const m = mac();
     if (!m) return false;
@@ -559,19 +489,6 @@ export function memory_getPtrSize(pid: number): number {
     }
     return 8;
   }
-  if (IS_LINUX) {
-    if (!isProcValid(pid)) return 0;
-    try {
-      const fd = fs.openSync(`/proc/${pid}/exe`, "r");
-      const buf = Buffer.alloc(5);
-      fs.readSync(fd, buf, 0, 5, 0);
-      fs.closeSync(fd);
-      if (buf[0] === 0x7F && buf[1] === 0x45 && buf[2] === 0x4C && buf[3] === 0x46) {
-        return buf[4] === 2 ? 8 : 4;
-      }
-    } catch { /* fall through */ }
-    return process.arch === "x64" || process.arch === "arm64" ? 8 : 4;
-  }
   if (IS_WIN) {
     const k = kernel32();
     const F = winFFI();
@@ -589,32 +506,19 @@ export function memory_getPtrSize(pid: number): number {
   return 0;
 }
 
-export function memory_getMinAddress(pid: number): bigint {
-  if (IS_LINUX) {
-    const regions = parseMaps(pid);
-    return regions.length > 0 ? regions[0].start : 0n;
-  }
+export function memory_getMinAddress(_pid: number): bigint {
   if (IS_WIN) return winSysInfo().minAddr;
   if (IS_MAC) return BigInt(MAC_MIN_VM);
   return 0n;
 }
 
-export function memory_getMaxAddress(pid: number): bigint {
-  if (IS_LINUX) {
-    const regions = parseMaps(pid);
-    return regions.length > 0 ? regions[regions.length - 1].stop : 0n;
-  }
+export function memory_getMaxAddress(_pid: number): bigint {
   if (IS_WIN) return winSysInfo().maxAddr;
   if (IS_MAC) return BigInt(MAC_MAX_VM_64);
   return 0n;
 }
 
 export function memory_getPageSize(_pid: number): number {
-  if (IS_LINUX) {
-    const c = libc();
-    if (!c) return 4096;
-    return Number(c.sysconf(_SC_PAGESIZE));
-  }
   if (IS_WIN) return winSysInfo().pageSize;
   if (IS_MAC) {
     const m = mac();
@@ -636,13 +540,11 @@ export function memory_find(
   if (pat.length === 0) return out;
 
   const macTask = IS_MAC ? macGetTask(pid) : 0;
-  const regions = IS_LINUX ? parseMaps(pid)
-    : IS_WIN ? winQueryRegions(pid, startAddr, stopAddr)
+  const regions = IS_WIN ? winQueryRegions(pid, startAddr, stopAddr)
     : IS_MAC ? macQueryRegions(macTask, startAddr, stopAddr < BigInt(MAC_MAX_VM_64) ? stopAddr : BigInt(MAC_MAX_VM_64))
     : [];
 
-  const reader = IS_LINUX ? linuxRead
-    : IS_WIN ? winRead
+  const reader = IS_WIN ? winRead
     : IS_MAC ? ((_pid: number, addr: bigint, buf: Uint8Array) => macRead(macTask, addr, buf))
     : null;
   if (!reader) return out;
@@ -673,45 +575,6 @@ export function memory_readData(pid: number, address: bigint, length: number, fl
   const len = length | 0;
   if (len <= 0) return null;
   const f = flags === undefined ? FLAG_DEFAULT : flags;
-
-  if (IS_LINUX) {
-    if (f === FLAG_DEFAULT) {
-      const buf = new Uint8Array(len);
-      const got = linuxRead(pid, address, buf);
-      return got > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
-    }
-    // SKIP_ERRORS / AUTO_ACCESS
-    const buf = new Uint8Array(len);
-    const stop = address + BigInt(len);
-    const regions = parseMaps(pid);
-    let bytes = 0;
-    let a = address;
-    let idx = 0;
-    while (a < stop && idx < regions.length) {
-      while (idx < regions.length && regions[idx].stop <= a) idx++;
-      if (idx >= regions.length) break;
-      const region = regions[idx];
-      if (region.start > a) {
-        const gapEnd = region.start < stop ? region.start : stop;
-        bytes += Number(gapEnd - a);
-        a = gapEnd;
-        continue;
-      }
-      const end = region.stop < stop ? region.stop : stop;
-      const regionLen = Number(end - a);
-      const offset = Number(a - address);
-      if (region.readable) {
-        const slice = new Uint8Array(regionLen);
-        const n = linuxRead(pid, a, slice);
-        if (n > 0) buf.set(slice.subarray(0, n), offset);
-      }
-      bytes += regionLen;
-      a = end;
-      idx++;
-    }
-    bytes += Number(stop > a ? stop - a : 0n);
-    return bytes > 0 ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : null;
-  }
 
   if (IS_MAC) {
     const task = macGetTask(pid);
@@ -823,34 +686,6 @@ export function memory_writeData(pid: number, address: bigint, data: Buffer | Ui
   const buf: Uint8Array = data;
   const len = buf.length;
   if (len === 0) return 0;
-
-  if (IS_LINUX) {
-    if (f === FLAG_DEFAULT) return linuxWrite(pid, address, buf);
-    const stop = address + BigInt(len);
-    const regions = parseMaps(pid);
-    let bytes = 0;
-    let a = address;
-    for (const region of regions) {
-      if (a >= stop) break;
-      if (region.stop <= a) continue;
-      if (region.start > a) {
-        const gapEnd = region.start < stop ? region.start : stop;
-        bytes += Number(gapEnd - a);
-        a = gapEnd;
-      }
-      if (a >= stop) break;
-      const end = region.stop < stop ? region.stop : stop;
-      const regionLen = Number(end - a);
-      const offset = Number(a - address);
-      if (region.writable) {
-        linuxWrite(pid, a, buf.subarray(offset, offset + regionLen));
-      }
-      bytes += regionLen;
-      a = end;
-    }
-    bytes += Number(stop > a ? stop - a : 0n);
-    return bytes;
-  }
 
   if (IS_MAC) {
     const task = macGetTask(pid);

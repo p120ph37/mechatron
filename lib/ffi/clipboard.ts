@@ -1,5 +1,5 @@
 /**
- * Clipboard subsystem — pure FFI implementation (non-Linux base).
+ * Clipboard subsystem — pure FFI implementation (Win/Darwin only).
  *
  * Windows uses CF_UNICODETEXT (UTF-16LE NUL-terminated) and CF_DIB
  * (BITMAPINFOHEADER + pixel rows).  Memory is allocated with GMEM_MOVEABLE
@@ -10,16 +10,12 @@
  * with per-signature CFunctions so we can call methods with whatever arg
  * layout they need without dlopening the symbol multiple times.
  *
- * On Linux this base file throws so the backend resolver picks up the
- * variant-specific entry (ffi/clipboard-x11 for X11 ICCCM selections;
- * ffi/clipboard-portal would be a future Wayland variant).  Mirrors the
- * napi clipboard variant split.
+ * Linux is served by napi[x11/portal] or nolib[x11/sh]; ffi has no Linux
+ * backend.
  */
 
 if (process.platform === "linux") {
-  throw new Error(
-    "ffi/clipboard: use ffi/clipboard-x11 (linux x11) variant on linux",
-  );
+  throw new Error("ffi/clipboard: not available on Linux — use napi or nolib");
 }
 if (!["win32", "darwin"].includes(process.platform)) {
   throw new Error("ffi/clipboard: unsupported platform");

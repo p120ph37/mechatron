@@ -2,9 +2,8 @@
  * ffi screen backend — main-thread async proxy to screen-worker.ts for
  * non-Linux platforms (macOS, Windows).
  *
- * On Linux this base file throws so the backend resolver picks up the
- * variant-specific entry (ffi/screen-x11 for X11, ffi/screen-portal for
- * PipeWire).  Mirrors the napi screen variant split.
+ * Linux is served by napi[x11/portal] or nolib[x11/portal/vt]; ffi has
+ * no Linux backend.
  */
 
 import { createDispatcher } from "./_dispatch";
@@ -12,9 +11,7 @@ import type { ScreenInfo } from "./screen-impl";
 export type { ScreenInfo } from "./screen-impl";
 
 if (process.platform === "linux") {
-  throw new Error(
-    "ffi/screen: use ffi/screen-x11 (linux x11) or ffi/screen-portal (linux pipewire) variant on linux",
-  );
+  throw new Error("ffi/screen: not available on Linux — use napi or nolib");
 }
 if (!["win32", "darwin"].includes(process.platform)) {
   throw new Error("ffi/screen: unsupported platform");

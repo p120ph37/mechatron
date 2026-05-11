@@ -247,10 +247,11 @@ jobs:
 
       - name: Enable /dev/uinput
         if: runner.os == 'Linux'
-        # Expose /dev/uinput to the test process so lib/ffi/uinput.ts can
-        # run its full open + UI_SET_*BIT + UI_DEV_SETUP + UI_DEV_CREATE
-        # dance.  Without this the ioctl paths (~150 LOC of FFI glue) sit
-        # uncovered.  GitHub's ubuntu-* runners ship the `uinput` kernel
+        # Expose /dev/uinput to the test process so the nolib[vt] backend
+        # (lib/nolib/uinput.ts) and the ioctl-bridge helpers in
+        # lib/input/uinput.ts can run their full open + UI_SET_*BIT +
+        # UI_DEV_SETUP + UI_DEV_CREATE dance.  GitHub's ubuntu-* runners
+        # ship the `uinput` kernel
         # module but don't load it at boot and leave the device node
         # root-only; we modprobe the module and chmod 0666 the node
         # (simpler and more reliable than a udev rule + group change,
@@ -278,14 +279,11 @@ jobs:
 
       - name: Build LD_PRELOAD shims
         if: runner.os == 'Linux'
-        # dlopen-block: force FFI loader "library unavailable" catch arms
-        # to fire without uninstalling libXtst / libXrandr.
         # fb-stub: fake /dev/fb0 ioctl responses so the framebuffer
         # capture path can be tested against a synthetic pixel file.
         run: |
-          clang -shared -fPIC -ldl -o test/dlopen-block.so test/dlopen-block.c
           clang -shared -fPIC -ldl -o test/fb-stub.so test/fb-stub.c
-          ls -la test/dlopen-block.so test/fb-stub.so
+          ls -la test/fb-stub.so
 
       - name: Run tests
         run: bash test/ci-run-tests.sh

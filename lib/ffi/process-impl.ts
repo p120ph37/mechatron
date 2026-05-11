@@ -1,21 +1,17 @@
 /**
- * Process subsystem — pure FFI implementation.
+ * Process subsystem — pure FFI implementation (Win/Darwin only).
  *
- * Linux: /proc filesystem (read via Node `fs`) + libc.kill().  Windows: psapi
- * + kernel32.  macOS: libproc (proc_pidpath/proc_name/proc_listallpids) +
- * mach (task_for_pid, task_info/TASK_DYLD_INFO, task_get_exception_ports).
+ * Windows: psapi + kernel32.  macOS: libproc (proc_pidpath/proc_name/
+ * proc_listallpids) + mach (task_for_pid, task_info/TASK_DYLD_INFO,
+ * task_get_exception_ports).  Linux is served by napi or nolib.
  *
  * Mirrors the napi-rs `process_*` exports (js_name) one-for-one so the
  * unified loader can swap in this module transparently.
  */
 
-import * as fs from "fs";
-import * as path from "path";
-
-import { libc, libcFFI, SIGTERM, SIGKILL } from "./linux";
 import {
   user32, kernel32, psapi, winFFI,
-  w2js, js2w,
+  w2js,
 } from "./win";
 import { bp } from "./bun";
 import {
@@ -24,47 +20,12 @@ import {
   EXC_MASK_ALL, EXC_MASK_RESOURCE, EXC_MASK_GUARD, EXC_TYPES_COUNT,
 } from "./mac";
 
-const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
+const SIGTERM = 15;
+const SIGKILL = 9;
 
 export interface ModuleEntry { valid: boolean; name: string; path: string; base: bigint; size: bigint; pid: number; }
-
-// ── Helpers (Linux) ─────────────────────────────────────────────────────
-
-interface LinuxProcInfo {
-  name: string;
-  path: string;
-  is64: boolean;
-}
-
-function procInfo(pid: number): LinuxProcInfo | null {
-  if (pid <= 0) return null;
-  const dir = `/proc/${pid}`;
-  if (!fs.existsSync(dir)) return null;
-  let p = "";
-  let name = "";
-  let is64 = process.arch === "x64" || process.arch === "arm64";
-  try {
-    p = fs.readlinkSync(`/proc/${pid}/exe`);
-    name = path.basename(p);
-  } catch { /* permissions */ }
-  try {
-    const fd = fs.openSync(`/proc/${pid}/exe`, "r");
-    const buf = Buffer.alloc(5);
-    fs.readSync(fd, buf, 0, 5, 0);
-    fs.closeSync(fd);
-    if (buf[0] === 0x7F && buf[1] === 0x45 && buf[2] === 0x4C && buf[3] === 0x46) {
-      is64 = buf[4] === 2;
-    }
-  } catch { /* permissions */ }
-  return { name, path: p, is64 };
-}
-
-function procHasExited(pid: number): boolean {
-  if (pid <= 0) return true;
-  return !fs.existsSync(`/proc/${pid}`);
-}
 
 // ── Helpers (Windows) ──────────────────────────────────────────────────
 
@@ -357,7 +318,6 @@ function makeRegex(s?: string): RegExp | null {
 // ── NAPI-compatible exports ────────────────────────────────────────────
 
 export function process_open(pid: number): boolean {
-  if (IS_LINUX) return procInfo(pid) !== null;
   if (IS_WIN) {
     const access = PROCESS_VM_OPERATION | PROCESS_VM_READ
       | PROCESS_QUERY_INFORMATION | PROCESS_VM_WRITE | PROCESS_TERMINATE;
@@ -373,7 +333,6 @@ export function process_open(pid: number): boolean {
 export function process_close(_pid: number): void { /* no-op */ }
 
 export function process_isValid(pid: number): boolean {
-  if (IS_LINUX) return procInfo(pid) !== null;
   if (IS_WIN) {
     const h = winOpenProcess(pid, PROCESS_QUERY_LIMITED_INFORMATION);
     if (h === 0n) return false;
@@ -385,10 +344,6 @@ export function process_isValid(pid: number): boolean {
 }
 
 export function process_is64Bit(pid: number): boolean {
-  if (IS_LINUX) {
-    const i = procInfo(pid);
-    return i ? i.is64 : false;
-  }
   if (IS_WIN) {
     const k = kernel32();
     const F = winFFI();
@@ -408,17 +363,6 @@ export function process_is64Bit(pid: number): boolean {
 }
 
 export function process_isDebugged(pid: number): boolean {
-  if (IS_LINUX) {
-    try {
-      const txt = fs.readFileSync(`/proc/${pid}/status`, "utf8");
-      for (const line of txt.split("\n")) {
-        if (line.startsWith("TracerPid:")) {
-          return line.substring("TracerPid:".length).trim() !== "0";
-        }
-      }
-    } catch { /* not found */ }
-    return false;
-  }
   if (IS_WIN) {
     const k = kernel32();
     const F = winFFI();
@@ -454,25 +398,18 @@ export function process_getHandle(pid: number): number {
 }
 
 export function process_getName(pid: number): string {
-  if (IS_LINUX) return procInfo(pid)?.name || "";
   if (IS_WIN) return winGetName(pid);
   if (IS_MAC) return macGetName(pid);
   return "";
 }
 
 export function process_getPath(pid: number): string {
-  if (IS_LINUX) return procInfo(pid)?.path || "";
   if (IS_WIN) return winGetPath(pid);
   if (IS_MAC) return macGetPath(pid);
   return "";
 }
 
 export function process_exit(pid: number): void {
-  if (IS_LINUX) {
-    const c = libc();
-    if (c && pid > 0) c.kill(pid, SIGTERM);
-    return;
-  }
   if (IS_MAC) {
     const m = mac();
     if (m && pid > 0) m.kill(pid, SIGTERM);
@@ -509,11 +446,6 @@ export function process_exit(pid: number): void {
 }
 
 export function process_kill(pid: number): void {
-  if (IS_LINUX) {
-    const c = libc();
-    if (c && pid > 0) c.kill(pid, SIGKILL);
-    return;
-  }
   if (IS_MAC) {
     const m = mac();
     if (m && pid > 0) m.kill(pid, SIGKILL);
@@ -531,7 +463,6 @@ export function process_kill(pid: number): void {
 }
 
 export function process_hasExited(pid: number): boolean {
-  if (IS_LINUX) return procHasExited(pid);
   if (IS_WIN) return winHasExited(pid);
   if (IS_MAC) return !macProcessExists(pid);
   return true;
@@ -540,28 +471,6 @@ export function process_hasExited(pid: number): boolean {
 export function process_getModules(pid: number, regexStr?: string): ModuleEntry[] {
   const re = makeRegex(regexStr);
   const out: ModuleEntry[] = [];
-
-  if (IS_LINUX) {
-    let txt: string;
-    try { txt = fs.readFileSync(`/proc/${pid}/maps`, "utf8"); }
-    catch { return out; }
-    const seen = new Set<string>();
-    for (const line of txt.split("\n")) {
-      const parts = line.split(/\s+/);
-      if (parts.length < 6) continue;
-      const pStr = parts.slice(5).join(" ").trim();
-      if (!pStr || pStr.startsWith("[")) continue;
-      if (seen.has(pStr)) continue;
-      seen.add(pStr);
-      const name = path.basename(pStr);
-      if (re && !re.test(name)) continue;
-      const [s, e] = parts[0].split("-");
-      const base = BigInt("0x" + s);
-      const end = BigInt("0x" + e);
-      out.push({ valid: true, name, path: pStr, base, size: end - base, pid });
-    }
-    return out;
-  }
 
   if (IS_MAC) return macGetModules(pid, re);
 
@@ -607,23 +516,6 @@ export function process_getList(regexStr?: string): number[] {
   const re = makeRegex(regexStr);
   const out: number[] = [];
 
-  if (IS_LINUX) {
-    let entries: string[];
-    try { entries = fs.readdirSync("/proc"); }
-    catch { return out; }
-    for (const ent of entries) {
-      if (!/^\d+$/.test(ent)) continue;
-      const pid = parseInt(ent, 10);
-      if (pid <= 0) continue;
-      if (re) {
-        const info = procInfo(pid);
-        if (!info || !re.test(info.name)) continue;
-      }
-      out.push(pid);
-    }
-    return out;
-  }
-
   if (IS_MAC) return macGetList(re);
 
   if (IS_WIN) {
@@ -649,10 +541,6 @@ export function process_getList(regexStr?: string): number[] {
 }
 
 export function process_getCurrent(): number {
-  if (IS_LINUX) {
-    const c = libc();
-    return c ? c.getpid() : process.pid;
-  }
   if (IS_WIN) {
     const k = kernel32();
     return k ? k.GetCurrentProcessId() : process.pid;
@@ -665,11 +553,6 @@ export function process_getCurrent(): number {
 }
 
 export function process_isSys64Bit(): boolean {
-  if (IS_LINUX) {
-    // posix uname not bound here; rely on os.arch which returns the kernel arch
-    const a = process.arch;
-    return a === "x64" || a === "arm64";
-  }
   if (IS_MAC) {
     const m = mac();
     const F = macFFI();
@@ -697,36 +580,7 @@ export function process_isSys64Bit(): boolean {
 
 export interface SegmentEntry { valid: boolean; base: bigint; size: bigint; name: string; }
 
-export function process_getSegments(pid: number, base: bigint): SegmentEntry[] {
-  if (!IS_LINUX) return [];
-  const out: SegmentEntry[] = [];
-  let txt: string;
-  try { txt = fs.readFileSync(`/proc/${pid}/maps`, "utf8"); }
-  catch { return out; }
-
-  // Locate module path matching the base address
-  let modulePath = "";
-  for (const line of txt.split("\n")) {
-    const parts = line.split(/\s+/);
-    if (parts.length < 6) continue;
-    const [s] = parts[0].split("-");
-    const start = BigInt("0x" + s);
-    if (start === base) {
-      modulePath = parts.slice(5).join(" ").trim();
-      break;
-    }
-  }
-  if (!modulePath) return out;
-
-  for (const line of txt.split("\n")) {
-    const parts = line.split(/\s+/);
-    if (parts.length < 6) continue;
-    const pStr = parts.slice(5).join(" ").trim();
-    if (pStr !== modulePath) continue;
-    const [s, e] = parts[0].split("-");
-    const start = BigInt("0x" + s);
-    const end = BigInt("0x" + e);
-    out.push({ valid: true, base: start, size: end - start, name: parts[1] });
-  }
-  return out;
+export function process_getSegments(_pid: number, _base: bigint): SegmentEntry[] {
+  // Linux is served by napi/nolib; Win/Mac don't support segment enumeration here.
+  return [];
 }

@@ -1,19 +1,14 @@
 /**
- * Window subsystem — pure FFI implementation.
+ * Window subsystem — pure FFI implementation (Win/Darwin only).
  *
- * Linux: full EWMH window management via libX11 (state, bounds, frame
- * extents, title, enumeration, activation).
  * Windows: Win32 window management via user32.dll (state, bounds, title,
  * enumeration, activation).
  * macOS: CoreGraphics CGWindowList for read-only enumeration; Accessibility
  * framework for mutation (loaded separately to isolate Bun FFI crashes).
+ *
+ * Linux is served by napi[x11] or nolib[x11/portal/gext].
  */
 
-import {
-  x11, ffi as x11ffi, getDisplay,
-  atom, getWindowProperty, getWindowAttributes,
-  sendClientMessage, IsViewable, PropModeReplace, CurrentTime,
-} from "./x11";
 import { user32, winFFI, w2js, js2w } from "./win";
 import { getBunFFI, bp, cstr, cstringFromPtr, type Pointer } from "./bun";
 import {
@@ -23,240 +18,14 @@ import {
   kAXValueCGPointType, kAXValueCGSizeType,
 } from "./mac";
 
-const IS_LINUX = process.platform === "linux";
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 
-// ── Atom helpers (lazy/cached) ───────────────────────────────────────
-
-function A(name: string, onlyIfExists = true): bigint { return atom(name, onlyIfExists); }
-
-const STATE_TOPMOST  = 0;
-const STATE_MINIMIZE = 1;
-const STATE_MAXIMIZE = 2;
-
-// ── Validity ─────────────────────────────────────────────────────────
-
-function winIsValid(handle: number): boolean {
-  if (handle === 0) return false;
-  const X = x11();
-  const d = getDisplay();
-  if (!X || !d) return false;
-  const wmPid = A("_NET_WM_PID");
-  if (wmPid === 0n) return false;
-  const r = getWindowProperty(BigInt(handle), wmPid);
-  if (!r) return false;
-  X.XFree(r.data);
-  return true;
-}
-
-// ── State predicates ────────────────────────────────────────────────
-
-function getWmState(win: bigint, setting: number): boolean {
-  const X = x11();
-  const F = x11ffi();
-  if (!X || !F) return false;
-  const wmState = A("_NET_WM_STATE");
-  const wmAbove = A("_NET_WM_STATE_ABOVE");
-  const wmHidden = A("_NET_WM_STATE_HIDDEN");
-  const wmHmax = A("_NET_WM_STATE_MAXIMIZED_HORZ");
-  const wmVmax = A("_NET_WM_STATE_MAXIMIZED_VERT");
-  if (wmState === 0n || wmAbove === 0n || wmVmax === 0n || wmHmax === 0n || wmHidden === 0n) return false;
-  const r = getWindowProperty(win, wmState);
-  if (!r) return false;
-  let test1 = false, test2 = false;
-  for (let i = 0n; i < r.nitems; i++) {
-    const a = F.read.u64(Number(r.data), Number(i) * 8);
-    switch (setting) {
-      case STATE_TOPMOST:
-        if (a === wmAbove) { test1 = true; test2 = true; }
-        break;
-      case STATE_MINIMIZE:
-        if (a === wmHidden) { test1 = true; test2 = true; }
-        break;
-      case STATE_MAXIMIZE:
-        if (a === wmHmax) test1 = true;
-        if (a === wmVmax) test2 = true;
-        break;
-    }
-    if (test1 && test2) break;
-  }
-  X.XFree(r.data);
-  return test1 && test2;
-}
-
-function setWmState(win: bigint, setting: number, state: boolean): void {
-  const X = x11();
-  const d = getDisplay();
-  if (!X || !d) return;
-  const attr = getWindowAttributes(win);
-
-  if (setting === STATE_MINIMIZE) {
-    if (state) {
-      if (!attr) return;
-      const screenNum = X.XScreenNumberOfScreen(attr.screen);
-      X.XIconifyWindow(d, win, screenNum);
-    } else {
-      windowSetActiveInternal(win);
-    }
-    return;
-  }
-
-  const wmState = A("_NET_WM_STATE");
-  const wmAbove = A("_NET_WM_STATE_ABOVE");
-  const wmHmax = A("_NET_WM_STATE_MAXIMIZED_HORZ");
-  const wmVmax = A("_NET_WM_STATE_MAXIMIZED_VERT");
-  if (wmState === 0n || wmAbove === 0n || wmVmax === 0n || wmHmax === 0n || !attr) return;
-
-  const screenNum = X.XScreenNumberOfScreen(attr.screen);
-  const longs: bigint[] = [BigInt(state ? 1 : 0), 0n, 0n, 0n, 0n];
-  if (setting === STATE_TOPMOST) {
-    longs[1] = wmAbove;
-  } else if (setting === STATE_MAXIMIZE) {
-    longs[1] = wmHmax;
-    longs[2] = wmVmax;
-  } else {
-    return;
-  }
-  sendClientMessage(screenNum, win, wmState, longs);
-}
-
-function windowSetActiveInternal(win: bigint): void {
-  const X = x11();
-  const d = getDisplay();
-  if (!X || !d) return;
-  const wmActive = A("_NET_ACTIVE_WINDOW");
-  const attr = getWindowAttributes(win);
-  if (wmActive !== 0n && attr) {
-    const screenNum = X.XScreenNumberOfScreen(attr.screen);
-    sendClientMessage(screenNum, win, wmActive, [2n, CurrentTime, 0n, 0n, 0n]);
-  }
-  X.XMapWindow(d, win);
-  X.XRaiseWindow(d, win);
-}
-
-// ── Frame / client / title ──────────────────────────────────────────
-
-function getFrame(win: bigint): { left: number; top: number; right: number; bottom: number } {
-  const X = x11();
-  const F = x11ffi();
-  if (!X || !F) return { left: 0, top: 0, right: 0, bottom: 0 };
-  const wmExtents = A("_NET_FRAME_EXTENTS");
-  if (wmExtents === 0n) return { left: 0, top: 0, right: 0, bottom: 0 };
-  const r = getWindowProperty(win, wmExtents);
-  if (!r) return { left: 0, top: 0, right: 0, bottom: 0 };
-  if (r.nitems !== 4n) { X.XFree(r.data); return { left: 0, top: 0, right: 0, bottom: 0 }; }
-  const rData = Number(r.data);
-  const left   = Number(F.read.u64(rData, 0));
-  const right  = Number(F.read.u64(rData, 8));
-  const top    = Number(F.read.u64(rData, 16));
-  const bottom = Number(F.read.u64(rData, 24));
-  X.XFree(r.data);
-  // Returns (left, top, leftPlusRight, topPlusBottom) for caller convenience
-  return { left, top, right: left + right, bottom: top + bottom };
-}
-
-function getTitle(win: bigint): string {
-  const X = x11();
-  const F = x11ffi();
-  if (!X || !F) return "";
-  const wmName = A("_NET_WM_NAME");
-  if (wmName !== 0n) {
-    const r = getWindowProperty(win, wmName);
-    if (r && r.nitems > 0n) {
-      // r.data is a bigint (XGetWindowProperty allocates the buffer);
-      // F.CString rejects bigint pointers — see CLAUDE.md item on
-      // bun:ffi pointer-handling. cstringFromPtr copies via libc memcpy
-      // into a JS buffer and decodes UTF-8 there.
-      const s = cstringFromPtr(r.data as bigint, Number(r.nitems));
-      X.XFree(r.data);
-      if (s) return s;
-    } else if (r) {
-      X.XFree(r.data);
-    }
-  }
-  const xaWmName = atom("WM_NAME", false);
-  if (xaWmName !== 0n) {
-    const r = getWindowProperty(win, xaWmName);
-    if (r) {
-      const s = cstringFromPtr(r.data as bigint, Number(r.nitems));
-      X.XFree(r.data);
-      return s;
-    }
-  }
-  return "";
-}
-
-function getPid(win: bigint): number {
-  const X = x11();
-  const F = x11ffi();
-  if (!X || !F) return 0;
-  const wmPid = A("_NET_WM_PID");
-  if (wmPid === 0n) return 0;
-  const r = getWindowProperty(win, wmPid);
-  if (!r) return 0;
-  const v = Number(F.read.u64(Number(r.data), 0) & 0xFFFFFFFFn);
-  X.XFree(r.data);
-  return v;
-}
-
-function getClient(win: bigint): { x: number; y: number; w: number; h: number } {
-  const X = x11();
-  const F = x11ffi();
-  const d = getDisplay();
-  if (!X || !F || !d) return { x: 0, y: 0, w: 0, h: 0 };
-  const attr = getWindowAttributes(win);
-  if (!attr) return { x: 0, y: 0, w: 0, h: 0 };
-  const root = X.XDefaultRootWindow(d);
-  const xRet = new Int32Array(1);
-  const yRet = new Int32Array(1);
-  const childRet = new BigUint64Array(1);
-  X.XTranslateCoordinates(d, win, root, 0, 0, F.ptr(xRet), F.ptr(yRet), F.ptr(childRet));
-  return { x: xRet[0], y: yRet[0], w: attr.width, h: attr.height };
-}
-
-// ── Enumeration ─────────────────────────────────────────────────────
+// ── Shared helpers ──────────────────────────────────────────────────
 
 function makeRegex(s?: string): RegExp | null {
   if (!s) return null;
   try { return new RegExp(s); } catch { return null; }
-}
-
-function enumWindows(win: bigint, re: RegExp | null, pidFilter: number, out: number[]): void {
-  const X = x11();
-  const F = x11ffi();
-  const d = getDisplay();
-  if (!X || !F || !d) return;
-  const attr = getWindowAttributes(win);
-  if (attr && attr.map_state === IsViewable) {
-    if (winIsValid(Number(win))) {
-      const matchPid = pidFilter === 0 || getPid(win) === pidFilter;
-      if (matchPid) {
-        let ok = true;
-        if (re) {
-          const t = getTitle(win);
-          ok = re.test(t);
-        }
-        if (ok) out.push(Number(win));
-      }
-    }
-  }
-  const root = new BigUint64Array(1);
-  const parent = new BigUint64Array(1);
-  const children = new BigUint64Array(1);
-  const ncount = new Uint32Array(1);
-  if (X.XQueryTree(d, win, F.ptr(root), F.ptr(parent), F.ptr(children), F.ptr(ncount)) !== 0) {
-    const ptr = children[0];
-    const n = ncount[0];
-    if (ptr !== 0n && n > 0) {
-      for (let i = 0; i < n; i++) {
-        // Bun's read.u64 rejects bigint pointer args; see process.ts:438.
-        const child = F.read.u64(Number(ptr), i * 8);
-        enumWindows(child, re, pidFilter, out);
-      }
-      X.XFree(ptr);
-    }
-  }
 }
 
 // ── Win32 constants ─────────────────────────────────────────────────
@@ -924,7 +693,6 @@ function mac_isAxEnabled(): boolean {
 
 export function window_isValid(handle: bigint): boolean {
   const h = Number(handle);
-  if (IS_LINUX) return winIsValid(h);
   if (IS_WIN) return win_isValid(h);
   if (IS_MAC) return mac_isValid(h);
   return false;
@@ -932,23 +700,10 @@ export function window_isValid(handle: bigint): boolean {
 
 export function window_close(handle: bigint): void {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return;
-    const X = x11();
-    const d = getDisplay();
-    if (!X || !d) return;
-    X.XDestroyWindow(d, BigInt(h));
-  } else if (IS_WIN) {
-    if (!win_isValid(h)) return;
-    win_close(h);
-  } else if (IS_MAC) {
-    mac_close(h);
-  }
 }
 
 export function window_isTopMost(handle: bigint): boolean {
   const h = Number(handle);
-  if (IS_LINUX) return winIsValid(h) && getWmState(BigInt(h), STATE_TOPMOST);
   if (IS_WIN) return win_isValid(h) && win_isTopMost(h);
   if (IS_MAC) {
     const keys = getCGKeys();
@@ -967,27 +722,12 @@ export function window_isTopMost(handle: bigint): boolean {
 
 export function window_isBorderless(handle: bigint): boolean {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return false;
-    const X = x11();
-    const F = x11ffi();
-    if (!X || !F) return false;
-    const wmHints = A("_MOTIF_WM_HINTS");
-    if (wmHints === 0n) return false;
-    const r = getWindowProperty(BigInt(h), wmHints);
-    if (!r) return false;
-    // _MOTIF_WM_HINTS: flags(ulong), funcs(ulong), decorations(ulong) at offset 16
-    const decorations = F.read.u64(Number(r.data), 16);
-    X.XFree(r.data);
-    return decorations === 0n;
-  }
   if (IS_WIN) return win_isValid(h) && win_isBorderless(h);
   return false;
 }
 
 export function window_isMinimized(handle: bigint): boolean {
   const h = Number(handle);
-  if (IS_LINUX) return winIsValid(h) && getWmState(BigInt(h), STATE_MINIMIZE);
   if (IS_WIN) return win_isValid(h) && win_isMinimized(h);
   if (IS_MAC) return mac_isMinimized(h);
   return false;
@@ -995,7 +735,6 @@ export function window_isMinimized(handle: bigint): boolean {
 
 export function window_isMaximized(handle: bigint): boolean {
   const h = Number(handle);
-  if (IS_LINUX) return winIsValid(h) && getWmState(BigInt(h), STATE_MAXIMIZE);
   if (IS_WIN) return win_isValid(h) && win_isMaximized(h);
   if (IS_MAC) return mac_isMaximized(h);
   return false;
@@ -1003,70 +742,22 @@ export function window_isMaximized(handle: bigint): boolean {
 
 export function window_setTopMost(handle: bigint, topMost: boolean): void {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return;
-    setWmState(BigInt(h), STATE_TOPMOST, topMost);
-  } else if (IS_WIN) {
-    if (!win_isValid(h)) return;
-    win_setTopMost(h, topMost);
-  }
 }
 
 export function window_setBorderless(handle: bigint, borderless: boolean): void {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return;
-    const X = x11();
-    const F = x11ffi();
-    const d = getDisplay();
-    if (!X || !F || !d) return;
-    const wmHints = A("_MOTIF_WM_HINTS");
-    if (wmHints === 0n) return;
-    // 5 ulong/long values: flags=2 (MWM_HINTS_DECORATIONS), funcs=0,
-    // decorations=(borderless?0:1), mode=0, stat=0
-    const buf = new BigUint64Array(5);
-    buf[0] = 2n;
-    buf[1] = 0n;
-    buf[2] = borderless ? 0n : 1n;
-    buf[3] = 0n;
-    buf[4] = 0n;
-    X.XChangeProperty(d, BigInt(h), wmHints, wmHints, 32, PropModeReplace, F.ptr(buf), 5);
-  } else if (IS_WIN) {
-    if (!win_isValid(h)) return;
-    win_setBorderless(h, borderless);
-  }
 }
 
 export function window_setMinimized(handle: bigint, minimized: boolean): void {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return;
-    setWmState(BigInt(h), STATE_MINIMIZE, minimized);
-  } else if (IS_WIN) {
-    if (!win_isValid(h)) return;
-    win_setMinimized(h, minimized);
-  } else if (IS_MAC) {
-    mac_setMinimized(h, minimized);
-  }
 }
 
 export function window_setMaximized(handle: bigint, maximized: boolean): void {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return;
-    setWmState(BigInt(h), STATE_MINIMIZE, false);
-    setWmState(BigInt(h), STATE_MAXIMIZE, maximized);
-  } else if (IS_WIN) {
-    if (!win_isValid(h)) return;
-    win_setMaximized(h, maximized);
-  } else if (IS_MAC) {
-    mac_setMaximized(h, maximized);
-  }
 }
 
 export function window_getProcess(handle: bigint): number {
   const h = Number(handle);
-  if (IS_LINUX) return winIsValid(h) ? getPid(BigInt(h)) : 0;
   if (IS_WIN) return win_isValid(h) ? win_getPid(h) : 0;
   if (IS_MAC) return mac_getPid(h);
   return 0;
@@ -1081,7 +772,6 @@ export function window_getHandle(handle: bigint): bigint { return handle; }
 export function window_setHandle(_handle: bigint, newHandle: bigint): boolean {
   if (newHandle === 0n) return true;
   const nh = Number(newHandle);
-  if (IS_LINUX) return winIsValid(nh);
   if (IS_WIN) return win_isValid(nh);
   if (IS_MAC) return mac_isValid(nh);
   return false;
@@ -1089,7 +779,6 @@ export function window_setHandle(_handle: bigint, newHandle: bigint): boolean {
 
 export function window_getTitle(handle: bigint): string {
   const h = Number(handle);
-  if (IS_LINUX) return winIsValid(h) ? getTitle(BigInt(h)) : "";
   if (IS_WIN) return win_isValid(h) ? win_getTitle(h) : "";
   if (IS_MAC) return mac_getTitle(h);
   return "";
@@ -1097,43 +786,10 @@ export function window_getTitle(handle: bigint): string {
 
 export function window_setTitle(handle: bigint, title: string): void {
   const h = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(h)) return;
-    const X = x11();
-    const F = x11ffi();
-    const d = getDisplay();
-    if (!X || !F || !d) return;
-    // WM_NAME (legacy ICCCM): latin-1 STRING property.
-    X.XStoreName(d, BigInt(h), F.ptr(cstr(title)));
-    // _NET_WM_NAME (EWMH): UTF-8 string. window_getTitle reads this
-    // first, so modern apps that publish their own _NET_WM_NAME at
-    // startup would otherwise mask our XStoreName change. Set both
-    // to keep the round-trip consistent.
-    const netWmName = atom("_NET_WM_NAME", false);
-    const utf8Type = atom("UTF8_STRING", false);
-    if (netWmName !== 0n && utf8Type !== 0n) {
-      const buf = cstr(title);
-      X.XChangeProperty(
-        d, BigInt(h), netWmName, utf8Type,
-        8, PropModeReplace, F.ptr(buf), buf.length - 1,
-      );
-    }
-  } else if (IS_WIN) {
-    if (!win_isValid(h)) return;
-    win_setTitle(h, title);
-  } else if (IS_MAC) {
-    mac_setTitle(h, title);
-  }
 }
 
 export function window_getBounds(handle: bigint): { x: number; y: number; w: number; h: number } {
   const hh = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(hh)) return { x: 0, y: 0, w: 0, h: 0 };
-    const c = getClient(BigInt(hh));
-    const f = getFrame(BigInt(hh));
-    return { x: c.x - f.left, y: c.y - f.top, w: c.w + f.right, h: c.h + f.bottom };
-  }
   if (IS_WIN) return win_isValid(hh) ? win_getBounds(hh) : { x: 0, y: 0, w: 0, h: 0 };
   if (IS_MAC) return mac_getBounds(hh);
   return { x: 0, y: 0, w: 0, h: 0 };
@@ -1141,26 +797,10 @@ export function window_getBounds(handle: bigint): { x: number; y: number; w: num
 
 export function window_setBounds(handle: bigint, x: number, y: number, w: number, h: number): void {
   const hh = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(hh)) return;
-    const X = x11();
-    const d = getDisplay();
-    if (!X || !d) return;
-    const f = getFrame(BigInt(hh));
-    const ww = Math.max(1, w - f.right);
-    const hp = Math.max(1, h - f.bottom);
-    X.XMoveResizeWindow(d, BigInt(hh), x, y, ww, hp);
-  } else if (IS_WIN) {
-    if (!win_isValid(hh)) return;
-    win_setBounds(hh, x, y, w, h);
-  } else if (IS_MAC) {
-    mac_setBounds(hh, x, y, w, h);
-  }
 }
 
 export function window_getClient(handle: bigint): { x: number; y: number; w: number; h: number } {
   const hh = Number(handle);
-  if (IS_LINUX) return winIsValid(hh) ? getClient(BigInt(hh)) : { x: 0, y: 0, w: 0, h: 0 };
   if (IS_WIN) return win_isValid(hh) ? win_getClient(hh) : { x: 0, y: 0, w: 0, h: 0 };
   if (IS_MAC) return mac_getBounds(hh);
   return { x: 0, y: 0, w: 0, h: 0 };
@@ -1168,27 +808,10 @@ export function window_getClient(handle: bigint): { x: number; y: number; w: num
 
 export function window_setClient(handle: bigint, x: number, y: number, w: number, h: number): void {
   const hh = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(hh)) return;
-    const X = x11();
-    const d = getDisplay();
-    if (!X || !d) return;
-    X.XMoveResizeWindow(d, BigInt(hh), x, y, Math.max(1, w), Math.max(1, h));
-  } else if (IS_WIN) {
-    if (!win_isValid(hh)) return;
-    win_setClient(hh, x, y, w, h);
-  } else if (IS_MAC) {
-    mac_setBounds(hh, x, y, w, h);
-  }
 }
 
 export function window_mapToClient(handle: bigint, x: number, y: number): { x: number; y: number } {
   const hh = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(hh)) return { x, y };
-    const c = getClient(BigInt(hh));
-    return { x: x - c.x, y: y - c.y };
-  }
   if (IS_WIN) return win_isValid(hh) ? win_mapToClient(hh, x, y) : { x, y };
   if (IS_MAC) {
     const b = mac_getBounds(hh);
@@ -1199,11 +822,6 @@ export function window_mapToClient(handle: bigint, x: number, y: number): { x: n
 
 export function window_mapToScreen(handle: bigint, x: number, y: number): { x: number; y: number } {
   const hh = Number(handle);
-  if (IS_LINUX) {
-    if (!winIsValid(hh)) return { x, y };
-    const c = getClient(BigInt(hh));
-    return { x: x + c.x, y: y + c.y };
-  }
   if (IS_WIN) return win_isValid(hh) ? win_mapToScreen(hh, x, y) : { x, y };
   if (IS_MAC) {
     const b = mac_getBounds(hh);
@@ -1213,36 +831,12 @@ export function window_mapToScreen(handle: bigint, x: number, y: number): { x: n
 }
 
 export function window_getList(regexStr?: string): bigint[] {
-  if (IS_LINUX) {
-    const X = x11();
-    const d = getDisplay();
-    if (!X || !d) return [];
-    const re = makeRegex(regexStr);
-    const out: number[] = [];
-    const root = X.XDefaultRootWindow(d);
-    enumWindows(root, re, 0, out);
-    return out.map((n) => BigInt(n));
-  }
   if (IS_WIN) return win_getList(regexStr).map((n) => BigInt(n));
   if (IS_MAC) return mac_getList(regexStr).map((n) => BigInt(n));
   return [];
 }
 
 export function window_getActive(): bigint {
-  if (IS_LINUX) {
-    const X = x11();
-    const F = x11ffi();
-    const d = getDisplay();
-    if (!X || !F || !d) return 0n;
-    const wmActive = A("_NET_ACTIVE_WINDOW");
-    if (wmActive === 0n) return 0n;
-    const root = X.XDefaultRootWindow(d);
-    const r = getWindowProperty(root, wmActive);
-    if (!r) return 0n;
-    const win = F.read.u64(Number(r.data), 0);
-    X.XFree(r.data);
-    return BigInt(win);
-  }
   if (IS_WIN) return BigInt(win_getActive());
   if (IS_MAC) return BigInt(mac_getActive());
   return 0n;
@@ -1251,24 +845,14 @@ export function window_getActive(): bigint {
 export function window_setActive(handle: bigint): void {
   if (handle === 0n) return;
   const h = Number(handle);
-  if (IS_LINUX) {
-    windowSetActiveInternal(BigInt(h));
-  } else if (IS_WIN) {
-    win_setActive(h);
-  } else if (IS_MAC) {
-    mac_setActive(h);
-  }
 }
 
-export function window_isAxEnabled(prompt?: boolean): boolean {
-  if (IS_LINUX || IS_WIN) return true;
+export function window_isAxEnabled(_prompt?: boolean): boolean {
+  if (IS_WIN) return true;
   if (IS_MAC) return mac_isAxEnabled();
   return false;
 }
 
-if (!IS_LINUX && !IS_WIN && !IS_MAC) {
-  throw new Error("ffi/window: requires Linux with libX11, Windows with user32.dll, or macOS with CoreGraphics");
-}
-if (IS_LINUX && !getDisplay()) {
-  throw new Error("ffi/window: requires Linux with libX11 (no display available)");
+if (!IS_WIN && !IS_MAC) {
+  throw new Error("ffi/window: requires Windows with user32.dll or macOS with CoreGraphics");
 }
