@@ -10,7 +10,7 @@
 
 "use strict";
 
-const { Clutter, Gio, GLib, Meta, Shell } = imports.gi;
+const { Clutter, Gio, GLib, Meta, Shell, St } = imports.gi;
 
 const BUS_NAME = "dev.mechatronic.Shell";
 const OBJECT_PATH = "/dev/mechatronic/Shell";
@@ -107,6 +107,66 @@ const IFACE_XML = `
     </method>
     <method name="Ping">
       <arg type="b" direction="out" name="ok"/>
+    </method>
+  </interface>
+</node>
+`;
+
+const SCREEN_IFACE_XML = `
+<node>
+  <interface name="dev.mechatronic.Shell.Screen">
+    <method name="Synchronize">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="GrabScreen">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="i" direction="in" name="x"/>
+      <arg type="i" direction="in" name="y"/>
+      <arg type="i" direction="in" name="w"/>
+      <arg type="i" direction="in" name="h"/>
+      <arg type="ay" direction="out" name="png"/>
+    </method>
+  </interface>
+</node>
+`;
+
+const CLIPBOARD_IFACE_XML = `
+<node>
+  <interface name="dev.mechatronic.Shell.Clipboard">
+    <method name="Clear">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="HasText">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="b" direction="out" name="hasText"/>
+    </method>
+    <method name="GetText">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="s" direction="out" name="text"/>
+    </method>
+    <method name="SetText">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="s" direction="in" name="text"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="HasImage">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="b" direction="out" name="hasImage"/>
+    </method>
+    <method name="GetImage">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="ay" direction="out" name="png"/>
+    </method>
+    <method name="SetImage">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="ay" direction="in" name="png"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="GetSequence">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="out" name="seq"/>
     </method>
   </interface>
 </node>
@@ -360,11 +420,15 @@ class MechatronWMExtension {
   constructor() {
     this._dbus = null;
     this._dbusInput = null;
+    this._dbusInputRegId = 0;
+    this._dbusClipboardRegId = 0;
+    this._dbusScreenRegId = 0;
     this._ownerId = 0;
     this._virtualKeyboard = null;
     this._virtualPointer = null;
     this._pressedKeys = new Set();
     this._pressedButtons = new Set();
+    this._clipSeq = 0;
   }
 
   _ensureVirtualDevices() {
@@ -535,6 +599,162 @@ class MechatronWMExtension {
       null, null,
     );
 
+    const clipboardNodeInfo = Gio.DBusNodeInfo.new_for_xml(CLIPBOARD_IFACE_XML);
+    const clipboardIfaceInfo = clipboardNodeInfo.interfaces[0];
+
+    const clipboard = St.Clipboard.get_default();
+    const TEXT_MIMES = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING"];
+    const IMAGE_MIME = "image/png";
+
+    function hasMime(mimes, want) {
+      if (!mimes) return false;
+      for (const m of mimes) {
+        for (const w of want) if (m === w) return true;
+      }
+      return false;
+    }
+
+    this._dbusClipboardRegId = Gio.DBus.session.register_object(
+      OBJECT_PATH,
+      clipboardIfaceInfo,
+      (conn, sender, path, iface, method, params, invocation) => {
+        try {
+          const args = params.deep_unpack();
+          requireAuth(args[0]);
+
+          switch (method) {
+            case "Clear":
+              clipboard.set_text(St.ClipboardType.CLIPBOARD, "");
+              ext._clipSeq++;
+              invocation.return_value(new GLib.Variant("(b)", [true]));
+              return;
+
+            case "HasText": {
+              const mimes = clipboard.get_mimetypes(St.ClipboardType.CLIPBOARD);
+              invocation.return_value(new GLib.Variant("(b)", [hasMime(mimes, TEXT_MIMES)]));
+              return;
+            }
+
+            case "GetText":
+              clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, text) => {
+                invocation.return_value(new GLib.Variant("(s)", [text || ""]));
+              });
+              return;
+
+            case "SetText":
+              clipboard.set_text(St.ClipboardType.CLIPBOARD, args[1] || "");
+              ext._clipSeq++;
+              invocation.return_value(new GLib.Variant("(b)", [true]));
+              return;
+
+            case "HasImage": {
+              const mimes = clipboard.get_mimetypes(St.ClipboardType.CLIPBOARD);
+              invocation.return_value(new GLib.Variant("(b)", [hasMime(mimes, [IMAGE_MIME])]));
+              return;
+            }
+
+            case "GetImage":
+              clipboard.get_content(St.ClipboardType.CLIPBOARD, IMAGE_MIME, (_cb, bytes) => {
+                const data = (bytes && bytes.get_data) ? bytes.get_data() : new Uint8Array(0);
+                invocation.return_value(new GLib.Variant("(ay)", [data]));
+              });
+              return;
+
+            case "SetImage": {
+              const png = args[1];
+              const buf = png instanceof Uint8Array ? png : new Uint8Array(png);
+              const bytes = GLib.Bytes.new(buf);
+              clipboard.set_content(St.ClipboardType.CLIPBOARD, IMAGE_MIME, bytes);
+              ext._clipSeq++;
+              invocation.return_value(new GLib.Variant("(b)", [true]));
+              return;
+            }
+
+            case "GetSequence":
+              invocation.return_value(new GLib.Variant("(u)", [ext._clipSeq >>> 0]));
+              return;
+
+            default:
+              invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.UnknownMethod", method);
+          }
+        } catch (e) {
+          invocation.return_dbus_error(
+            "org.freedesktop.DBus.Error.Failed", String(e));
+        }
+      },
+      null, null,
+    );
+
+    const screenNodeInfo = Gio.DBusNodeInfo.new_for_xml(SCREEN_IFACE_XML);
+    const screenIfaceInfo = screenNodeInfo.interfaces[0];
+
+    let _screenshot = null;
+    function getScreenshot() {
+      if (!_screenshot) _screenshot = new Shell.Screenshot();
+      return _screenshot;
+    }
+
+    this._dbusScreenRegId = Gio.DBus.session.register_object(
+      OBJECT_PATH,
+      screenIfaceInfo,
+      (conn, sender, path, iface, method, params, invocation) => {
+        try {
+          const args = params.deep_unpack();
+          requireAuth(args[0]);
+
+          switch (method) {
+            case "Synchronize": {
+              const monitors = [];
+              const display = global.display;
+              const n = display.get_n_monitors();
+              const ws = global.workspace_manager.get_workspace_by_index(0);
+              for (let i = 0; i < n; i++) {
+                const g = display.get_monitor_geometry(i);
+                const wa = ws ? ws.get_work_area_for_monitor(i) : g;
+                monitors.push({
+                  bounds: { x: g.x, y: g.y, w: g.width, h: g.height },
+                  usable: { x: wa.x, y: wa.y, w: wa.width, h: wa.height },
+                });
+              }
+              invocation.return_value(new GLib.Variant("(s)", [JSON.stringify(monitors)]));
+              return;
+            }
+
+            case "GrabScreen": {
+              const x = args[1], y = args[2], w = args[3], h = args[4];
+              if (w <= 0 || h <= 0) {
+                invocation.return_value(new GLib.Variant("(ay)", [new Uint8Array(0)]));
+                return;
+              }
+              const screenshot = getScreenshot();
+              const stream = Gio.MemoryOutputStream.new_resizable();
+              screenshot.screenshot_area(x, y, w, h, stream, (_obj, _result) => {
+                try {
+                  stream.close(null);
+                  const bytes = stream.steal_as_bytes();
+                  const data = bytes.get_data() || new Uint8Array(0);
+                  invocation.return_value(new GLib.Variant("(ay)", [data]));
+                } catch (e) {
+                  invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.Failed", String(e));
+                }
+              });
+              return;
+            }
+
+            default:
+              invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.UnknownMethod", method);
+          }
+        } catch (e) {
+          invocation.return_dbus_error(
+            "org.freedesktop.DBus.Error.Failed", String(e));
+        }
+      },
+      null, null,
+    );
+
     this._ownerId = Gio.bus_own_name(
       Gio.BusType.SESSION,
       BUS_NAME,
@@ -546,6 +766,14 @@ class MechatronWMExtension {
   }
 
   disable() {
+    if (this._dbusScreenRegId) {
+      Gio.DBus.session.unregister_object(this._dbusScreenRegId);
+      this._dbusScreenRegId = 0;
+    }
+    if (this._dbusClipboardRegId) {
+      Gio.DBus.session.unregister_object(this._dbusClipboardRegId);
+      this._dbusClipboardRegId = 0;
+    }
     if (this._dbusInputRegId) {
       Gio.DBus.session.unregister_object(this._dbusInputRegId);
       this._dbusInputRegId = 0;
