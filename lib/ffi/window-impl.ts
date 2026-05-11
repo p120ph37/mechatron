@@ -700,6 +700,12 @@ export function window_isValid(handle: bigint): boolean {
 
 export function window_close(handle: bigint): void {
   const h = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(h)) return;
+    win_close(h);
+  } else if (IS_MAC) {
+    mac_close(h);
+  }
 }
 
 export function window_isTopMost(handle: bigint): boolean {
@@ -742,18 +748,38 @@ export function window_isMaximized(handle: bigint): boolean {
 
 export function window_setTopMost(handle: bigint, topMost: boolean): void {
   const h = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(h)) return;
+    win_setTopMost(h, topMost);
+  }
 }
 
 export function window_setBorderless(handle: bigint, borderless: boolean): void {
   const h = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(h)) return;
+    win_setBorderless(h, borderless);
+  }
 }
 
 export function window_setMinimized(handle: bigint, minimized: boolean): void {
   const h = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(h)) return;
+    win_setMinimized(h, minimized);
+  } else if (IS_MAC) {
+    mac_setMinimized(h, minimized);
+  }
 }
 
 export function window_setMaximized(handle: bigint, maximized: boolean): void {
   const h = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(h)) return;
+    win_setMaximized(h, maximized);
+  } else if (IS_MAC) {
+    mac_setMaximized(h, maximized);
+  }
 }
 
 export function window_getProcess(handle: bigint): number {
@@ -786,6 +812,12 @@ export function window_getTitle(handle: bigint): string {
 
 export function window_setTitle(handle: bigint, title: string): void {
   const h = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(h)) return;
+    win_setTitle(h, title);
+  } else if (IS_MAC) {
+    mac_setTitle(h, title);
+  }
 }
 
 export function window_getBounds(handle: bigint): { x: number; y: number; w: number; h: number } {
@@ -797,6 +829,12 @@ export function window_getBounds(handle: bigint): { x: number; y: number; w: num
 
 export function window_setBounds(handle: bigint, x: number, y: number, w: number, h: number): void {
   const hh = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(hh)) return;
+    win_setBounds(hh, x, y, w, h);
+  } else if (IS_MAC) {
+    mac_setBounds(hh, x, y, w, h);
+  }
 }
 
 export function window_getClient(handle: bigint): { x: number; y: number; w: number; h: number } {
@@ -808,6 +846,12 @@ export function window_getClient(handle: bigint): { x: number; y: number; w: num
 
 export function window_setClient(handle: bigint, x: number, y: number, w: number, h: number): void {
   const hh = Number(handle);
+  if (IS_WIN) {
+    if (!win_isValid(hh)) return;
+    win_setClient(hh, x, y, w, h);
+  } else if (IS_MAC) {
+    mac_setBounds(hh, x, y, w, h);
+  }
 }
 
 export function window_mapToClient(handle: bigint, x: number, y: number): { x: number; y: number } {
@@ -845,6 +889,11 @@ export function window_getActive(): bigint {
 export function window_setActive(handle: bigint): void {
   if (handle === 0n) return;
   const h = Number(handle);
+  if (IS_WIN) {
+    win_setActive(h);
+  } else if (IS_MAC) {
+    mac_setActive(h);
+  }
 }
 
 export function window_isAxEnabled(_prompt?: boolean): boolean {
