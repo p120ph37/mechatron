@@ -132,6 +132,54 @@ if [ "$RUNNER_OS" = "Linux" ]; then
   }
   trap cleanup_x EXIT
   WRAP=()
+elif [ "$RUNNER_OS" = "Windows" ]; then
+  # Launch notepad as a predictable test window, mirroring xmessage on Linux.
+  # System windows (e.g. Recycle Bin) reject SetWindowTextW, causing
+  # setTitle round-trip tests to be flaky. notepad is always available on
+  # Windows and creates a standard top-level window that accepts title changes.
+  notepad.exe &
+  NOTEPAD_PID=$!
+  # Wait for the notepad window to appear, then rename it via PowerShell so
+  # the tests find it by the "MechatronTestWindow" regex.  We write the
+  # PowerShell to a temp file to avoid bash/PS quoting issues with the
+  # C# DllImport strings.
+  PS_SCRIPT="${RUNNER_TEMP}/find-notepad.ps1"
+  cat > "$PS_SCRIPT" <<'PSEOF'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern IntPtr FindWindowW(string lpClassName, string lpWindowName);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern bool SetWindowTextW(IntPtr hWnd, string lpString);
+}
+"@
+$action = $args[0]
+if ($action -eq "find") {
+  $h = [Win32]::FindWindowW("Notepad", $null)
+  if ($h -ne [IntPtr]::Zero) { $h.ToInt64() }
+} elseif ($action -eq "rename") {
+  $hwnd = [IntPtr][long]$args[1]
+  [Win32]::SetWindowTextW($hwnd, "MechatronTestWindow") | Out-Null
+}
+PSEOF
+  for _ in $(seq 1 50); do
+    HWND=$(powershell.exe -NoProfile -File "$PS_SCRIPT" find 2>/dev/null | tr -d '\r')
+    [ -n "$HWND" ] && [ "$HWND" != "0" ] && break
+    sleep 0.2
+  done
+  if [ -n "$HWND" ] && [ "$HWND" != "0" ]; then
+    powershell.exe -NoProfile -File "$PS_SCRIPT" rename "$HWND" 2>/dev/null || true
+    echo ">>> notepad launched as MechatronTestWindow (HWND=$HWND, PID=$NOTEPAD_PID)"
+  else
+    echo ">>> warning: notepad window not found within 10s; window tests may have reduced coverage"
+  fi
+  cleanup_notepad() {
+    taskkill.exe //F //PID "$NOTEPAD_PID" 2>/dev/null || true
+  }
+  trap cleanup_notepad EXIT
+  WRAP=()
 elif [ "$RUNNER_OS" = "macOS" ]; then
   WRAP=(sudo -E)
 else

@@ -80,7 +80,7 @@ returned by `process.platform` and `getBackend(subsystem)` at runtime.
 | window_getHandle | ok | ok | ok | ok | ok | ok | ok | ok |
 | window_setHandle | ok | ok | ok | ok | ok | ok | ok | ok |
 | window_getTitle | ok | ok | skip | ok | ok | ok | ok | ok |
-| window_setTitle | ok | ok | skip | skip | ok | skip | ok | ok |
+| window_setTitle | ok | ok | skip | skip | ok | ok | ok | ok |
 | window_getBounds | ok | ok | skip | ok | ok | ok | ok | ok |
 | window_setBounds | ok | ok | skip | ok | ok | ok | ok | ok |
 | window_getClient | ok | ok | skip | ok | ok | ok | ok | ok |
