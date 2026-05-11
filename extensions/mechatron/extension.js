@@ -22,6 +22,7 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Meta from "gi://Meta";
 import Shell from "gi://Shell";
+import St from "gi://St";
 import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 
 const BUS_NAME = "dev.mechatronic.Shell";
@@ -119,6 +120,47 @@ const IFACE_XML = `
     </method>
     <method name="Ping">
       <arg type="b" direction="out" name="ok"/>
+    </method>
+  </interface>
+</node>
+`;
+
+const CLIPBOARD_IFACE_XML = `
+<node>
+  <interface name="dev.mechatronic.Shell.Clipboard">
+    <method name="Clear">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="HasText">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="b" direction="out" name="hasText"/>
+    </method>
+    <method name="GetText">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="s" direction="out" name="text"/>
+    </method>
+    <method name="SetText">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="s" direction="in" name="text"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="HasImage">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="b" direction="out" name="hasImage"/>
+    </method>
+    <method name="GetImage">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="ay" direction="out" name="png"/>
+    </method>
+    <method name="SetImage">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="ay" direction="in" name="png"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="GetSequence">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="out" name="seq"/>
     </method>
   </interface>
 </node>
@@ -266,11 +308,14 @@ function rectJson(rect) {
 export default class MechatronWMExtension extends Extension {
   _dbus = null;
   _dbusInput = null;
+  _dbusInputRegId = 0;
+  _dbusClipboardRegId = 0;
   _ownerId = 0;
   _virtualKeyboard = null;
   _virtualPointer = null;
   _pressedKeys = new Set();
   _pressedButtons = new Set();
+  _clipSeq = 0;
 
   _ensureVirtualDevices() {
     if (!this._virtualKeyboard) {
@@ -562,6 +607,97 @@ export default class MechatronWMExtension extends Extension {
       null, null,
     );
 
+    const clipboardNodeInfo = Gio.DBusNodeInfo.new_for_xml(CLIPBOARD_IFACE_XML);
+    const clipboardIfaceInfo = clipboardNodeInfo.interfaces[0];
+
+    // St.Clipboard's get_text/get_content are callback-based; we use
+    // register_object (rather than wrapJSObject) so the D-Bus reply is
+    // sent from inside the callback after the data is in hand.  Same
+    // pattern as the Input interface above.
+    const clipboard = St.Clipboard.get_default();
+    const TEXT_MIMES = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING"];
+    const IMAGE_MIME = "image/png";
+
+    function hasMime(mimes, want) {
+      if (!mimes) return false;
+      for (const m of mimes) {
+        for (const w of want) if (m === w) return true;
+      }
+      return false;
+    }
+
+    this._dbusClipboardRegId = Gio.DBus.session.register_object(
+      OBJECT_PATH,
+      clipboardIfaceInfo,
+      (conn, sender, path, iface, method, params, invocation) => {
+        try {
+          const args = params.deep_unpack();
+          requireAuth(args[0]);
+
+          switch (method) {
+            case "Clear":
+              clipboard.set_text(St.ClipboardType.CLIPBOARD, "");
+              ext._clipSeq++;
+              invocation.return_value(new GLib.Variant("(b)", [true]));
+              return;
+
+            case "HasText": {
+              const mimes = clipboard.get_mimetypes(St.ClipboardType.CLIPBOARD);
+              invocation.return_value(new GLib.Variant("(b)", [hasMime(mimes, TEXT_MIMES)]));
+              return;
+            }
+
+            case "GetText":
+              clipboard.get_text(St.ClipboardType.CLIPBOARD, (_cb, text) => {
+                invocation.return_value(new GLib.Variant("(s)", [text || ""]));
+              });
+              return;
+
+            case "SetText":
+              clipboard.set_text(St.ClipboardType.CLIPBOARD, args[1] || "");
+              ext._clipSeq++;
+              invocation.return_value(new GLib.Variant("(b)", [true]));
+              return;
+
+            case "HasImage": {
+              const mimes = clipboard.get_mimetypes(St.ClipboardType.CLIPBOARD);
+              invocation.return_value(new GLib.Variant("(b)", [hasMime(mimes, [IMAGE_MIME])]));
+              return;
+            }
+
+            case "GetImage":
+              clipboard.get_content(St.ClipboardType.CLIPBOARD, IMAGE_MIME, (_cb, bytes) => {
+                const data = (bytes && bytes.get_data) ? bytes.get_data() : new Uint8Array(0);
+                invocation.return_value(new GLib.Variant("(ay)", [data]));
+              });
+              return;
+
+            case "SetImage": {
+              const png = args[1];
+              const buf = png instanceof Uint8Array ? png : new Uint8Array(png);
+              const bytes = GLib.Bytes.new(buf);
+              clipboard.set_content(St.ClipboardType.CLIPBOARD, IMAGE_MIME, bytes);
+              ext._clipSeq++;
+              invocation.return_value(new GLib.Variant("(b)", [true]));
+              return;
+            }
+
+            case "GetSequence":
+              invocation.return_value(new GLib.Variant("(u)", [ext._clipSeq >>> 0]));
+              return;
+
+            default:
+              invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.UnknownMethod", method);
+          }
+        } catch (e) {
+          invocation.return_dbus_error(
+            "org.freedesktop.DBus.Error.Failed", String(e));
+        }
+      },
+      null, null,
+    );
+
     this._ownerId = Gio.bus_own_name(
       Gio.BusType.SESSION,
       BUS_NAME,
@@ -573,6 +709,10 @@ export default class MechatronWMExtension extends Extension {
   }
 
   disable() {
+    if (this._dbusClipboardRegId) {
+      Gio.DBus.session.unregister_object(this._dbusClipboardRegId);
+      this._dbusClipboardRegId = 0;
+    }
     if (this._dbusInputRegId) {
       Gio.DBus.session.unregister_object(this._dbusInputRegId);
       this._dbusInputRegId = 0;

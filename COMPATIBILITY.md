@@ -131,17 +131,17 @@ specialty fallbacks, then Windows, then macOS.
 
 ## Clipboard
 
-| Function | linux-napi[x11] | linux-nolib[x11] | linux-napi[portal] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
-|----------|------|------|------|------|------|------|------|------|------|
-| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_clear | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasText | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_getText | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_setText | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| clipboard_hasImage | ok | ok | ok | ok | ok | ok | ok | ok | skip |
-| clipboard_getImage | ok | ok | ok | ok | ok | ok | ok | ok | skip |
-| clipboard_setImage | ok | ok | ok | ok | ok | ok | ok | ok | skip |
-| clipboard_getSequence | ok | ok | ok | ok | ok | ok | ok | ok | skip |
+| Function | linux-napi[x11] | linux-nolib[x11] | linux-nolib[gext] | linux-napi[portal] | linux-nolib[sh] | win32-napi | win32-ffi | darwin-napi | darwin-ffi | darwin-nolib[sh] |
+|----------|------|------|------|------|------|------|------|------|------|------|
+| clipboard_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_clear | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_getText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_setText | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| clipboard_hasImage | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
+| clipboard_getImage | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
+| clipboard_setImage | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
+| clipboard_getSequence | ok | ok | ok | ok | ok | ok | ok | ok | ok | skip |
 
 ## Memory
 

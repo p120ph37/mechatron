@@ -3,9 +3,12 @@
  *
  * Dispatches to variant-specific implementations:
  *   - x11:  ICCCM CLIPBOARD selection over the xproto wire protocol.
+ *   - gext: D-Bus call into the Mechatron GNOME Shell extension's
+ *           St.Clipboard wrapper.  GNOME-only, no popups, no subprocess.
  *   - sh:   wl-copy / xclip / xsel subprocess on Linux, pbcopy / pbpaste
  *           on macOS.
- *   - portal: (TODO) D-Bus xdg-desktop-portal Clipboard interface.
+ *   - portal: (TODO) xdg-desktop-portal has no clipboard interface —
+ *           reserved for if/when one ships.
  */
 
 import { getNolibVariant } from "../backend";
@@ -15,6 +18,8 @@ const VARIANT = getNolibVariant();
 const impl: typeof import("./clipboard-x11") =
   VARIANT === "x11"
     ? require("./clipboard-x11")
+    : VARIANT === "gext"
+    ? require("./clipboard-gext")
     : require("./clipboard-sh");
 
 export const clipboard_clear      = impl.clipboard_clear;
