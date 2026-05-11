@@ -175,6 +175,13 @@ module.exports = function (mechatron, log, assert, waitFor) {
 
 					var backend = (process.env.MECHATRON_BACKEND || "").replace(/\[.*$/, "");
 					if (backend !== "nolib") { log("(skip: not nolib)\n"); return; }
+					// gext writes to St.Clipboard (Wayland data-device).  Headless
+					// gnome-shell's Xwayland bridge doesn't reliably round-trip
+					// arbitrary mime types to X11 selections, so xclip can't see
+					// the image we set.  Cross-protocol clipboard sync is outside
+					// the gext path's scope.
+					var variant = (process.env.MECHATRON_BACKEND || "").match(/\[(.+)\]/);
+					if (variant && variant[1] === "gext") { log("(skip: gext, no X11 selection)\n"); return; }
 
 					// Build a tiny 2x2 PNG for cross-client testing
 					var src = new Image();
