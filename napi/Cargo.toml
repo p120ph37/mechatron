@@ -14,6 +14,7 @@ members = [
     "screen-x11",
     "screen-portal",
     "window",
+    "window-portal",
     "process",
     "memory",
 ]

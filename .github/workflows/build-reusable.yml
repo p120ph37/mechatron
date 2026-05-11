@@ -165,7 +165,7 @@ jobs:
           # one npm package: $PKG below maps each crate back to the
           # subsystem's package directory (`keyboard-x11` → `keyboard`).
           if [ "${{ runner.os }}" = "Linux" ]; then
-            SUBS="keyboard-x11 keyboard-portal mouse-x11 mouse-portal clipboard-x11 clipboard-portal screen-x11 screen-portal window process memory"
+            SUBS="keyboard-x11 keyboard-portal mouse-x11 mouse-portal clipboard-x11 clipboard-portal screen-x11 screen-portal window window-portal process memory"
           else
             SUBS="keyboard mouse clipboard screen window process memory"
           fi

@@ -192,6 +192,11 @@ pub(crate) unsafe fn iter_append_u32(iter: &mut DBusMessageIter, v: u32) {
     dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT32, &v as *const _ as *const c_void);
 }
 
+/// Append an i32 argument to an iterator.
+pub(crate) unsafe fn iter_append_i32(iter: &mut DBusMessageIter, v: i32) {
+    dbus_message_iter_append_basic(iter, DBUS_TYPE_INT32, &v as *const _ as *const c_void);
+}
+
 /// Append a variant containing a string.
 unsafe fn iter_append_variant_string(iter: &mut DBusMessageIter, s: &str) {
     let sig = CString::new("s").unwrap();

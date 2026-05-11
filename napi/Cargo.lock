@@ -364,6 +364,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mechatron-window-portal"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "regex",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
