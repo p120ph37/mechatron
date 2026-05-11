@@ -3,6 +3,8 @@
  *
  * Dispatches to variant-specific implementations:
  *   - x11:    xproto GetImage + RandR GetMonitors. Requires $DISPLAY.
+ *   - gext:   Mechatron GNOME Shell extension's Shell.Screenshot wrapper.
+ *             GNOME-only, no popups, no /tmp file detour.
  *   - portal: xdg-desktop-portal Screenshot + Mutter DisplayConfig.
  *   - vt:     Linux framebuffer (/dev/fb0) raw byte read.
  */
@@ -11,12 +13,9 @@ import { getNolibVariant } from "../backend";
 
 const VARIANT = getNolibVariant();
 
-if (VARIANT === "gext") {
-  throw new Error("nolib/screen[gext]: no gext screen implementation; use nolib[portal] or nolib[x11]");
-}
-
 const impl: typeof import("./screen-x11") =
   VARIANT === "portal" ? require("./screen-portal") :
+  VARIANT === "gext"   ? require("./screen-gext") :
   VARIANT === "vt"     ? require("./screen-vt") :
                          require("./screen-x11");
 

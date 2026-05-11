@@ -121,13 +121,13 @@ specialty fallbacks, then Windows, then macOS.
 
 ## Screen
 
-| Function | linux-napi[x11] | linux-nolib[x11] | linux-napi[portal] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
-|----------|------|------|------|------|------|------|------|------|------|
-| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| screen_getPortalToken | skip | skip | ok | ok | skip | skip | skip | skip | skip |
-| screen_setPortalToken | skip | skip | ok | ok | skip | skip | skip | skip | skip |
+| Function | linux-napi[x11] | linux-nolib[x11] | linux-nolib[gext] | linux-napi[portal] | linux-nolib[portal] | linux-nolib[vt] | win32-napi | win32-ffi | darwin-napi | darwin-ffi |
+|----------|------|------|------|------|------|------|------|------|------|------|
+| screen_ctor | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_synchronize | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_grabScreen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| screen_getPortalToken | skip | skip | skip | ok | ok | skip | skip | skip | skip | skip |
+| screen_setPortalToken | skip | skip | skip | ok | ok | skip | skip | skip | skip | skip |
 
 ## Clipboard
 

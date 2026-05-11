@@ -125,6 +125,25 @@ const IFACE_XML = `
 </node>
 `;
 
+const SCREEN_IFACE_XML = `
+<node>
+  <interface name="dev.mechatronic.Shell.Screen">
+    <method name="Synchronize">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="s" direction="out" name="json"/>
+    </method>
+    <method name="GrabScreen">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="i" direction="in" name="x"/>
+      <arg type="i" direction="in" name="y"/>
+      <arg type="i" direction="in" name="w"/>
+      <arg type="i" direction="in" name="h"/>
+      <arg type="ay" direction="out" name="png"/>
+    </method>
+  </interface>
+</node>
+`;
+
 const CLIPBOARD_IFACE_XML = `
 <node>
   <interface name="dev.mechatronic.Shell.Clipboard">
@@ -310,6 +329,7 @@ export default class MechatronWMExtension extends Extension {
   _dbusInput = null;
   _dbusInputRegId = 0;
   _dbusClipboardRegId = 0;
+  _dbusScreenRegId = 0;
   _ownerId = 0;
   _virtualKeyboard = null;
   _virtualPointer = null;
@@ -698,6 +718,83 @@ export default class MechatronWMExtension extends Extension {
       null, null,
     );
 
+    const screenNodeInfo = Gio.DBusNodeInfo.new_for_xml(SCREEN_IFACE_XML);
+    const screenIfaceInfo = screenNodeInfo.interfaces[0];
+
+    // Lazily construct Shell.Screenshot; it owns a few state machines
+    // (cursor texture, current screencast session) so reuse is cheaper
+    // than allocating per-grab.
+    let _screenshot = null;
+    function getScreenshot() {
+      if (!_screenshot) _screenshot = new Shell.Screenshot();
+      return _screenshot;
+    }
+
+    this._dbusScreenRegId = Gio.DBus.session.register_object(
+      OBJECT_PATH,
+      screenIfaceInfo,
+      (conn, sender, path, iface, method, params, invocation) => {
+        try {
+          const args = params.deep_unpack();
+          requireAuth(args[0]);
+
+          switch (method) {
+            case "Synchronize": {
+              const monitors = [];
+              const display = global.display;
+              const n = display.get_n_monitors();
+              const ws = global.workspace_manager.get_workspace_by_index(0);
+              for (let i = 0; i < n; i++) {
+                const g = display.get_monitor_geometry(i);
+                const wa = ws ? ws.get_work_area_for_monitor(i) : g;
+                monitors.push({
+                  bounds: { x: g.x, y: g.y, w: g.width, h: g.height },
+                  usable: { x: wa.x, y: wa.y, w: wa.width, h: wa.height },
+                });
+              }
+              invocation.return_value(new GLib.Variant("(s)", [JSON.stringify(monitors)]));
+              return;
+            }
+
+            case "GrabScreen": {
+              const x = args[1], y = args[2], w = args[3], h = args[4];
+              if (w <= 0 || h <= 0) {
+                invocation.return_value(new GLib.Variant("(ay)", [new Uint8Array(0)]));
+                return;
+              }
+              const screenshot = getScreenshot();
+              const stream = Gio.MemoryOutputStream.new_resizable();
+              // screenshot_area writes a PNG of the requested region into
+              // the stream.  We keep it in memory (Gio.MemoryOutputStream)
+              // rather than writing to disk — the user's whole reason for
+              // the gext path is to skip the file detour that the portal
+              // Screenshot interface forces.
+              screenshot.screenshot_area(x, y, w, h, stream, (_obj, _result) => {
+                try {
+                  stream.close(null);
+                  const bytes = stream.steal_as_bytes();
+                  const data = bytes.get_data() || new Uint8Array(0);
+                  invocation.return_value(new GLib.Variant("(ay)", [data]));
+                } catch (e) {
+                  invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.Failed", String(e));
+                }
+              });
+              return;
+            }
+
+            default:
+              invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.UnknownMethod", method);
+          }
+        } catch (e) {
+          invocation.return_dbus_error(
+            "org.freedesktop.DBus.Error.Failed", String(e));
+        }
+      },
+      null, null,
+    );
+
     this._ownerId = Gio.bus_own_name(
       Gio.BusType.SESSION,
       BUS_NAME,
@@ -709,6 +806,10 @@ export default class MechatronWMExtension extends Extension {
   }
 
   disable() {
+    if (this._dbusScreenRegId) {
+      Gio.DBus.session.unregister_object(this._dbusScreenRegId);
+      this._dbusScreenRegId = 0;
+    }
     if (this._dbusClipboardRegId) {
       Gio.DBus.session.unregister_object(this._dbusClipboardRegId);
       this._dbusClipboardRegId = 0;
