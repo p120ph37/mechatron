@@ -14,6 +14,7 @@
  * clipboard-x11.ts and the napi backends do.
  */
 
+// @ts-ignore -- pngjs lacks type declarations
 import { PNG } from "pngjs";
 import {
   gextClipAvailable, gextClipClear, gextClipHasText, gextClipGetText,

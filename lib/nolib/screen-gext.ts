@@ -13,6 +13,7 @@
  * portal screenshot path use.
  */
 
+// @ts-ignore -- pngjs lacks type declarations
 import { PNG } from "pngjs";
 import {
   gextScrAvailable, gextScrSynchronize, gextScrGrab,
