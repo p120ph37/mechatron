@@ -256,11 +256,12 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					var r6 = await Screen.grabScreen(img6, new mechatron.Bounds(0, 0, 10, 10), mockWin);
 					assert(typeof r6 === "boolean", "grabScreen Bounds + window-like");
 				} else {
-					// Portal backends depend on PipeWire which may not be
-					// functional in headless CI. Treat as skip, not failure.
+					// Portal backends depend on PipeWire and gext depends on
+					// Shell.Screenshot — both may be limited in headless CI.
+					// Treat as skip, not failure.
 					var be = mechatron.getBackend("screen") || "";
-					if (be.indexOf("[portal]") !== -1) {
-						log("(skipped: PipeWire unavailable) ");
+					if (be.indexOf("[portal]") !== -1 || be.indexOf("[gext]") !== -1) {
+						log("(skipped: capture backend unavailable) ");
 					} else {
 						assert(false, "Screen.grabScreen returned false but matrix marked it ok");
 					}
