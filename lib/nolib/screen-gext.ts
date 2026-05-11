@@ -32,8 +32,8 @@ export interface RawRect { x: number; y: number; w: number; h: number; }
 export interface ScreenInfo { bounds: RawRect; usable: RawRect; }
 
 export async function screen_synchronize(): Promise<ScreenInfo[] | null> {
-  await ensureAvailable();
   try {
+    await ensureAvailable();
     const monitors = await gextScrSynchronize();
     if (!monitors || monitors.length === 0) return null;
     return monitors;
