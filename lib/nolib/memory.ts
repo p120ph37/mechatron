@@ -377,7 +377,11 @@ export async function memory_find(
   return out;
 }
 
-export async function memory_bufferAddress(buf: Buffer): Promise<bigint> {
+// Sync because the public API (Memory.addressOf) is synchronous, matching
+// the napi-rs export.  Pointer extraction must run on the calling thread
+// anyway — a worker thread address would be unrelated to the caller's
+// Buffer.
+export function memory_bufferAddress(buf: Buffer): bigint {
   // Pure-TS has no way to obtain a Buffer's native address; defer to bun:ffi's
   // pointer-extraction primitive (lib/ffi/bun.ts:bp), the one ffi function
   // that has no nolib equivalent.  Under Node.js, bun:ffi is unavailable and
