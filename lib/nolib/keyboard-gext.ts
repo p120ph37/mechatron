@@ -5,7 +5,8 @@
  * Input interface, which injects events via Clutter virtual keyboard
  * inside the compositor. No portal permission dialog required.
  *
- * getKeyState is unavailable (the extension is write-only).
+ * getKeyState queries modifier masks and shadow key-tracking state
+ * via the extension's GetKeyState D-Bus method.
  */
 
 import { gextKeyboardKeysym, gextGetKeyState } from "../gext/input";

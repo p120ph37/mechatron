@@ -204,7 +204,7 @@ module.exports = function (mechatron, log, assert, waitFor) {
 					getHandle: function() { return 0; }
 				};
 				var foundWin = await Screen.getScreen(mockWin);
-				assert(foundWin !== null || foundWin === null, "getScreen by window-like");
+				assert(foundWin === null || (typeof foundWin === "object" && typeof foundWin.x === "number"), "getScreen by window-like");
 
 				// Invalid window-like
 				var mockWinInvalid = {
