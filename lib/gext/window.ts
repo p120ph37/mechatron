@@ -156,6 +156,11 @@ export async function gextWinIsAbove(id: number): Promise<boolean> {
   return result[0] as boolean;
 }
 
+export async function gextWinIsDecorated(id: number): Promise<boolean> {
+  const result = await authedCall("IsDecorated", "u", [id]);
+  return result[0] as boolean;
+}
+
 export async function gextWinGetPID(id: number): Promise<number> {
   const result = await authedCall("GetPID", "u", [id]);
   return result[0] as number;

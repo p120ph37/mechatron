@@ -113,6 +113,11 @@ const IFACE_XML = `
       <arg type="u" direction="in" name="id"/>
       <arg type="b" direction="out" name="above"/>
     </method>
+    <method name="IsDecorated">
+      <arg type="s" direction="in" name="token"/>
+      <arg type="u" direction="in" name="id"/>
+      <arg type="b" direction="out" name="decorated"/>
+    </method>
     <method name="GetPID">
       <arg type="s" direction="in" name="token"/>
       <arg type="u" direction="in" name="id"/>
@@ -462,6 +467,12 @@ export default class MechatronWMExtension extends Extension {
         requireAuth(token);
         const w = findWindow(id);
         return w ? w.is_above() : false;
+      },
+
+      IsDecorated(token, id) {
+        requireAuth(token);
+        const w = findWindow(id);
+        return w ? w.decorated : true;
       },
 
       GetPID(token, id) {

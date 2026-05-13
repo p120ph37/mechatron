@@ -506,10 +506,8 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 			}
 		},
 		// ── Stale-handle probe — verify a window-handle is detected as
-		// invalid once its backing process exits.  Currently exercised
-		// only on Linux FFI (xmessage is the test helper).  To extend
-		// to other platforms, mark window_isValid_proc "ok" in their
-		// matrix column and add platform-appropriate helper spawning.
+		// invalid once its backing process exits.  Exercised on Linux
+		// (xmessage), Windows (notepad.exe), and macOS (TextEdit).
 		{
 			name: "stale-handle probe",
 			functions: ["window_isValid_proc", "window_getList", "window_isValid", "window_close", "window_setHandle"],
@@ -517,11 +515,30 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 				var _cpw = require("child_process");
 				var _tag = "MechatronStaleProbe_" + process.pid;
 				var _xm = null;
-				try {
-					_xm = _cpw.spawn("xmessage",
-						["-name", _tag, "-timeout", "10", _tag],
-						{ stdio: "ignore" });
-				} catch (_) { _xm = null; }
+
+				if (process.platform === "linux") {
+					try {
+						_xm = _cpw.spawn("xmessage",
+							["-name", _tag, "-timeout", "10", _tag],
+							{ stdio: "ignore" });
+					} catch (_) { _xm = null; }
+				} else if (process.platform === "win32") {
+					try {
+						_xm = _cpw.spawn("notepad.exe", [], { stdio: "ignore" });
+						// notepad's default title; used to locate the window
+						_tag = "Untitled - Notepad";
+					} catch (_) { _xm = null; }
+				} else if (process.platform === "darwin") {
+					try {
+						// open -n launches a new TextEdit instance; --args
+						// with no file means an untitled document.
+						_xm = _cpw.spawn("open",
+							["-n", "-W", "-a", "TextEdit", "--args"],
+							{ stdio: "ignore" });
+						_tag = "Untitled";
+					} catch (_) { _xm = null; }
+				}
+
 				var _stale = 0n;
 				if (_xm) {
 					await waitForAsync(async function () {
@@ -531,7 +548,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 							return true;
 						}
 						return false;
-					}, 1500);
+					}, 3000);
 				}
 				if (_stale !== 0n) {
 					var _live = new Window();
@@ -539,7 +556,7 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 						await _live.close();
 						var _gone = await waitForAsync(async function () {
 							return (await Window.getList(_tag)).length === 0;
-						}, 1500);
+						}, 3000);
 						if (_gone) {
 							var _stalew = new Window();
 							assert(await _stalew.setHandle(_stale) === false,
@@ -547,7 +564,17 @@ module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 						}
 					}
 				}
-				if (_xm) { try { _xm.kill(); } catch (_) {} }
+				if (_xm) {
+					try { _xm.kill(); } catch (_) {}
+					// On Windows taskkill is needed for notepad's child tree
+					if (process.platform === "win32" && _xm.pid) {
+						try {
+							_cpw.spawnSync("taskkill.exe",
+								["/F", "/PID", String(_xm.pid)],
+								{ stdio: "ignore" });
+						} catch (_) {}
+					}
+				}
 			}
 		},
 		// ── isAxEnabled ──

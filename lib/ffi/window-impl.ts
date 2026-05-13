@@ -557,6 +557,20 @@ function mac_isMaximized(handle: number): boolean {
   return mac_withAXWindow(handle, (axWin) => mac_axGetBool(axWin, attrs.fullscreen), false);
 }
 
+function mac_isBorderless(handle: number): boolean {
+  const attrs = getAXAttrs();
+  if (!attrs) return false;
+  return mac_withAXWindow(handle, (axWin) => {
+    const AX = ax()!;
+    _axOutBuf[0] = 0n;
+    if (AX.AXUIElementCopyAttributeValue(axWin, attrs.closeButton, bp(_axOutBuf)) !== 0) return true;
+    const btn = _axOutBuf[0];
+    if (!btn) return true;
+    cf()!.CFRelease(btn);
+    return false;
+  }, false);
+}
+
 function mac_close(handle: number): void {
   const attrs = getAXAttrs();
   if (!attrs) return;
@@ -729,6 +743,7 @@ export function window_isTopMost(handle: bigint): boolean {
 export function window_isBorderless(handle: bigint): boolean {
   const h = Number(handle);
   if (IS_WIN) return win_isValid(h) && win_isBorderless(h);
+  if (IS_MAC) return mac_isBorderless(h);
   return false;
 }
 

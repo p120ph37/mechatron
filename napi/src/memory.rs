@@ -484,7 +484,25 @@ fn platform_get_regions(pid: i32, start_addr: u64, stop_addr: u64) -> Vec<Region
 }
 
 #[cfg(target_os = "linux")]
-fn platform_set_access(_pid: i32, _region_start: u64, _readable: bool, _writable: bool, _executable: bool) -> bool { false }
+fn linux_mprotect(pid: i32, region_start: u64, prot: i32) -> bool {
+    // mprotect only works on the calling process's own address space
+    let self_pid = unsafe { libc::getpid() };
+    if pid != self_pid { return false; }
+    let region = platform_get_region(pid, region_start);
+    if !region.valid || !region.bound { return false; }
+    unsafe {
+        libc::mprotect(region.start as *mut libc::c_void, region.size as usize, prot) == 0
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn platform_set_access(pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool) -> bool {
+    let mut prot = libc::PROT_NONE;
+    if readable { prot |= libc::PROT_READ; }
+    if writable { prot |= libc::PROT_WRITE; }
+    if executable { prot |= libc::PROT_EXEC; }
+    linux_mprotect(pid, region_start, prot)
+}
 
 #[cfg(target_os = "windows")]
 fn platform_set_access(pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool) -> bool {
@@ -516,7 +534,13 @@ fn platform_set_access(pid: i32, region_start: u64, readable: bool, writable: bo
 }
 
 #[cfg(target_os = "linux")]
-fn platform_set_access_flags(_pid: i32, _region_start: u64, _flags: u32) -> bool { false }
+fn platform_set_access_flags(pid: i32, region_start: u64, flags: u32) -> bool {
+    let mut prot = libc::PROT_NONE;
+    if flags & 1 != 0 { prot |= libc::PROT_READ; }
+    if flags & 2 != 0 { prot |= libc::PROT_WRITE; }
+    if flags & 4 != 0 { prot |= libc::PROT_EXEC; }
+    linux_mprotect(pid, region_start, prot)
+}
 
 #[cfg(target_os = "windows")]
 fn platform_set_access_flags(pid: i32, region_start: u64, flags: u32) -> bool {

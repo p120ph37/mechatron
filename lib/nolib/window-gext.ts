@@ -18,7 +18,7 @@ import {
   gextWinClose, gextWinGetTitle, gextWinGetBounds, gextWinSetBounds,
   gextWinGetClient, gextWinSetMinimized, gextWinSetMaximized,
   gextWinSetAbove, gextWinIsMinimized, gextWinIsMaximized,
-  gextWinIsAbove, gextWinGetPID,
+  gextWinIsAbove, gextWinIsDecorated, gextWinGetPID,
 } from "../gext/window";
 
 // Token management re-exports — apps that need a custom token can call
@@ -52,11 +52,9 @@ export async function window_isTopMost(handle: bigint): Promise<boolean> {
   return gextWinIsAbove(Number(handle));
 }
 
-export async function window_isBorderless(_handle: bigint): Promise<boolean> {
-  // Mutter doesn't expose CSD/borderless state in a way that's portable
-  // across themes; the extension would need to inspect Meta.Window.frame
-  // structure. TODO if we need it.
-  return false;
+export async function window_isBorderless(handle: bigint): Promise<boolean> {
+  await ensureAvailable();
+  return !(await gextWinIsDecorated(Number(handle)));
 }
 
 export async function window_isMinimized(handle: bigint): Promise<boolean> {

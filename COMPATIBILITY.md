@@ -72,7 +72,7 @@ specialty fallbacks, then Windows, then macOS.
 | window_isValid | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | window_close | ok | ok | ok | skip | skip | ok | ok | ok | ok |
 | window_isTopMost | ok | ok | ok | skip | skip | ok | ok | ok | ok |
-| window_isBorderless | ok | ok | skip | skip | skip | ok | ok | skip | skip |
+| window_isBorderless | ok | ok | ok | skip | skip | ok | ok | skip | ok |
 | window_isMinimized | ok | ok | ok | skip | skip | ok | ok | ok | ok |
 | window_isMaximized | ok | ok | ok | skip | skip | ok | ok | ok | ok |
 | window_setTopMost | ok | ok | ok | skip | skip | ok | ok | skip | skip |
@@ -95,7 +95,7 @@ specialty fallbacks, then Windows, then macOS.
 | window_getActive | ok | ok | ok | skip | skip | ok | ok | ok | ok |
 | window_setActive | ok | ok | ok | skip | skip | ok | ok | ok | ok |
 | window_isAxEnabled | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| window_isValid_proc | skip | skip | skip | skip | skip | skip | skip | skip | skip |
+| window_isValid_proc | ok | ok | ok | skip | skip | skip | ok | skip | ok |
 
 ## Process
 
@@ -158,7 +158,7 @@ specialty fallbacks, then Windows, then macOS.
 | memory_readData | ok | ok | ok | ok | ok | ok |
 | memory_writeData | ok | ok | ok | ok | ok | ok |
 | memory_find | ok | ok | ok | ok | ok | ok |
-| memory_setAccess | skip | skip | ok | ok | ok | ok |
-| memory_setAccessFlags | skip | skip | ok | ok | ok | ok |
+| memory_setAccess | ok | skip | ok | ok | ok | ok |
+| memory_setAccessFlags | ok | skip | ok | ok | ok | ok |
 | memory_bufferAddress | ok | ok | ok | ok | ok | ok |
 | memory_task_for_pid_root | skip | skip | skip | skip | ok | ok |
