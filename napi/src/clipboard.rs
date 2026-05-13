@@ -8,10 +8,9 @@
 // implementation on those platforms.
 //
 // On Linux, see ../src/clipboard_x11_main.rs (X11 ICCCM selections via
-// libX11) and ../src/clipboard_portal_main.rs (Wayland zwlr_data_control_v1
-// via libwayland-client) — the build system selects one of those crates
-// per backend variant rather than runtime-dispatching at the language
-// level.
+// libX11).  Wayland clipboard is served by nolib[sh] (wl-copy/xclip
+// subprocess) or nolib[gext] (GNOME Shell extension D-Bus) rather than
+// a dedicated napi crate.
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi::bindgen_prelude::*;

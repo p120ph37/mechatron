@@ -4,8 +4,8 @@ fn main() {
     napi_build::setup();
 
     // mechatron-clipboard is the non-Linux base crate (macOS / Windows).
-    // Linux variants live in mechatron-clipboard-x11 and
-    // mechatron-clipboard-portal which link their respective system libs.
+    // Linux X11 clipboard lives in mechatron-clipboard-x11 (links libX11).
+    // Wayland clipboard is served by nolib[sh] and nolib[gext] instead.
 
     #[cfg(target_os = "macos")]
     {

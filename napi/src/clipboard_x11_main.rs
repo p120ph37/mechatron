@@ -8,10 +8,7 @@
 // PNG helpers (argb_to_png / png_to_argb) live here because
 // clipboard_x11 uses them as `super::png_to_argb(..)` / `super::argb_to_png(..)`
 // — making this file the parent module of clipboard_x11 places them
-// at the right resolution path.  The portal variant has its own
-// identical-but-separate copy in clipboard_portal_main.rs (the helpers
-// are a few dozen lines and duplicating beats threading another shared
-// crate just for them).
+// at the right resolution path.
 
 use napi::bindgen_prelude::*;
 use napi::Either;

@@ -9,7 +9,6 @@ members = [
     "mouse-portal",
     "clipboard",
     "clipboard-x11",
-    "clipboard-portal",
     "screen",
     "screen-x11",
     "screen-portal",

@@ -17,10 +17,9 @@
  * user-space tools which themselves fork a background owner process that
  * survives.
  *
- * Image support is straightforward PNG piping: `wl-copy --type image/png`
- * and `xclip -selection clipboard -t image/png -i` both accept a PNG byte
- * stream on stdin.  Currently TODO — needs a tiny PNG encoder/decoder for
- * ARGB buffers.  See PLAN.md §6b.
+ * Image support uses PNG piping: `wl-copy --type image/png` and
+ * `xclip -selection clipboard -t image/png -i` both accept a PNG byte
+ * stream on stdin.  pngjs handles ARGB↔RGBA conversion.
  *
  * Loaded only by lib/nolib/clipboard.ts under the [sh] variant; no other
  * backend should consume this file (napi/ffi must use direct lib calls,
@@ -28,6 +27,8 @@
  */
 
 import { spawn } from "child_process";
+// @ts-ignore -- pngjs lacks type declarations
+import { PNG } from "pngjs";
 import {
   getMechanism, listMechanisms, setMechanism, getPreferredMechanisms,
 } from "../platform";
@@ -153,6 +154,78 @@ async function xclipSetText(text: string): Promise<boolean> {
   return (await runCapture("xclip", ["-selection", "clipboard", "-in"], text)).ok;
 }
 
+// ── wl-clipboard image support ───────────────────────────────────────
+
+async function wlHasImage(): Promise<boolean> {
+  const r = await runCapture("wl-paste", ["--list-types"]);
+  if (!r.ok) return false;
+  return /image\/png/.test(r.stdout.toString("utf8"));
+}
+
+async function wlGetImage(): Promise<CbImage | null> {
+  const r = await runCapture("wl-paste", ["--no-newline", "--type", "image/png"]);
+  if (!r.ok || r.stdout.length === 0) return null;
+  let decoded;
+  try { decoded = PNG.sync.read(r.stdout); } catch { return null; }
+  const { width, height, data } = decoded;
+  const out = new Uint32Array(width * height);
+  for (let i = 0; i < out.length; i++) {
+    const o = i * 4;
+    out[i] = ((data[o + 3] & 0xff) << 24) | ((data[o] & 0xff) << 16) | ((data[o + 1] & 0xff) << 8) | (data[o + 2] & 0xff);
+  }
+  return { width, height, data: out };
+}
+
+async function wlSetImage(w: number, h: number, d: Uint32Array): Promise<boolean> {
+  const png = new PNG({ width: w, height: h });
+  for (let i = 0; i < w * h; i++) {
+    const pixel = d[i];
+    const o = i * 4;
+    png.data[o]     = (pixel >>> 16) & 0xff;
+    png.data[o + 1] = (pixel >>> 8) & 0xff;
+    png.data[o + 2] = pixel & 0xff;
+    png.data[o + 3] = (pixel >>> 24) & 0xff;
+  }
+  const buf = PNG.sync.write(png);
+  return (await runCapture("wl-copy", ["--type", "image/png"], buf)).ok;
+}
+
+// ── xclip image support ─────────────────────────────────────────────
+
+async function xclipHasImage(): Promise<boolean> {
+  const r = await runCapture("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"]);
+  if (!r.ok) return false;
+  return /(^|\n)image\/png(\n|$)/.test(r.stdout.toString("utf8"));
+}
+
+async function xclipGetImage(): Promise<CbImage | null> {
+  const r = await runCapture("xclip", ["-selection", "clipboard", "-t", "image/png", "-o"]);
+  if (!r.ok || r.stdout.length === 0) return null;
+  let decoded;
+  try { decoded = PNG.sync.read(r.stdout); } catch { return null; }
+  const { width, height, data } = decoded;
+  const out = new Uint32Array(width * height);
+  for (let i = 0; i < out.length; i++) {
+    const o = i * 4;
+    out[i] = ((data[o + 3] & 0xff) << 24) | ((data[o] & 0xff) << 16) | ((data[o + 1] & 0xff) << 8) | (data[o + 2] & 0xff);
+  }
+  return { width, height, data: out };
+}
+
+async function xclipSetImage(w: number, h: number, d: Uint32Array): Promise<boolean> {
+  const png = new PNG({ width: w, height: h });
+  for (let i = 0; i < w * h; i++) {
+    const pixel = d[i];
+    const o = i * 4;
+    png.data[o]     = (pixel >>> 16) & 0xff;
+    png.data[o + 1] = (pixel >>> 8) & 0xff;
+    png.data[o + 2] = pixel & 0xff;
+    png.data[o + 3] = (pixel >>> 24) & 0xff;
+  }
+  const buf = PNG.sync.write(png);
+  return (await runCapture("xclip", ["-selection", "clipboard", "-t", "image/png", "-i"], buf)).ok;
+}
+
 async function xselHasText(): Promise<boolean> {
   const r = await runCapture("xsel", ["--clipboard", "--output"]);
   return r.ok && r.stdout.length > 0;
@@ -177,12 +250,21 @@ interface LinuxImpl {
   hasText: () => Promise<boolean>;
   getText: () => Promise<string>;
   setText: (s: string) => Promise<boolean>;
+  hasImage: () => Promise<boolean>;
+  getImage: () => Promise<CbImage | null>;
+  setImage: (w: number, h: number, d: Uint32Array) => Promise<boolean>;
 }
 
+const NO_IMAGE: Pick<LinuxImpl, "hasImage" | "getImage" | "setImage"> = {
+  hasImage: async () => false,
+  getImage: async () => null,
+  setImage: async () => false,
+};
+
 const LINUX_IMPLS: Record<string, LinuxImpl> = {
-  "wl-clipboard": { clear: wlClear,                      hasText: wlHasText,    getText: wlGetText,    setText: wlSetText },
-  "xclip":        { clear: () => xclipSetText(""),       hasText: xclipHasText, getText: xclipGetText, setText: xclipSetText },
-  "xsel":         { clear: () => xselSetText(""),        hasText: xselHasText,  getText: xselGetText,  setText: xselSetText },
+  "wl-clipboard": { clear: wlClear, hasText: wlHasText, getText: wlGetText, setText: wlSetText, hasImage: wlHasImage, getImage: wlGetImage, setImage: wlSetImage },
+  "xclip":        { clear: () => xclipSetText(""), hasText: xclipHasText, getText: xclipGetText, setText: xclipSetText, hasImage: xclipHasImage, getImage: xclipGetImage, setImage: xclipSetImage },
+  "xsel":         { clear: () => xselSetText(""), hasText: xselHasText, getText: xselGetText, setText: xselSetText, ...NO_IMAGE },
 };
 
 function linuxDispatchOrder(): string[] {
@@ -265,15 +347,21 @@ export async function clipboard_setText(text: string): Promise<boolean> {
 }
 
 export async function clipboard_hasImage(): Promise<boolean> {
+  if (IS_LINUX) return linuxRun(i => i.hasImage(), false);
   return false;
 }
 
 export async function clipboard_getImage(): Promise<CbImage | null> {
+  if (IS_LINUX) return linuxRun(i => i.getImage(), null);
   return null;
 }
 
-export async function clipboard_setImage(_w: number, _h: number, _d: Uint32Array): Promise<boolean> {
-  return false;
+export async function clipboard_setImage(w: number, h: number, d: Uint32Array): Promise<boolean> {
+  if (w <= 0 || h <= 0 || d.length < w * h) return false;
+  let ok = false;
+  if (IS_LINUX) ok = await linuxRun(i => i.setImage(w, h, d), false);
+  if (ok) bumpSeq();
+  return ok;
 }
 
 export function clipboard_getSequence(): number {

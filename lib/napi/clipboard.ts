@@ -5,18 +5,17 @@
  * fan-out, so this file directly loads `mechatron-clipboard.<platform>.node`
  * from the @mechatronic/napi-clipboard package.
  *
- * On Linux the package instead ships variant-specific binaries
- * (mechatron-clipboard-x11, mechatron-clipboard-portal) which are loaded
- * by lib/napi/clipboard-x11.ts and lib/napi/clipboard-portal.ts.  This
- * base file is reached only as a fallback for an unsupported variant
- * (e.g. an explicit napi[vt] request); throw at load so the dispatcher
- * in lib/backend.ts moves on to the next backend.
+ * On Linux, the only napi clipboard variant is X11 (loaded by
+ * lib/napi/clipboard-x11.ts).  Wayland clipboard is handled by nolib[sh]
+ * or nolib[gext] instead.  This base file is reached only as a fallback
+ * for an unsupported variant; throw at load so the dispatcher in
+ * lib/backend.ts moves on to the next backend.
  */
 
 import { loadNapi } from "./resolve";
 
 if (process.platform === "linux") {
-  throw new Error("napi/clipboard: Linux requires a variant — use napi[x11] or napi[portal]");
+  throw new Error("napi/clipboard: Linux requires a variant — use napi[x11]");
 }
 
 const native = loadNapi("clipboard");
