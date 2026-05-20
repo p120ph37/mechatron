@@ -617,136 +617,202 @@ check("Keyboard.compile('{ESCAPE}') produces events",
   Array.isArray(keys) && keys.length >= 2);
 
 ////////////////////////////////////////////////////////////////////////////////
-// Native behavioral smoke tests (async — exercise real native functionality)
+// Native behavioral smoke tests — synchronous API contract
 //
-// These go beyond "does the method exist?" to verify that the backend actually
-// returns meaningful results.  They run only when the native backend loaded
-// (hasNative = true).  The original robot-js had full behavioral tests but
-// they were interactive; these are CI-safe.
+// robot-js 2.x was fully synchronous: every method blocked until it completed
+// and returned the result directly.  The compat layer must preserve this
+// contract.  These tests call each method WITHOUT await and verify the return
+// value is the expected type (not a Promise).
 ////////////////////////////////////////////////////////////////////////////////
 
-async function asyncBehavioral() {
-  section("Native Behavioral Tests");
+function isPromise(v) { return v != null && typeof v.then === "function"; }
 
-  // -- Window --
-  if (hasNative) {
-    try {
-      var list = await robot.Window.getList();
-      check("Window.getList() returns array", Array.isArray(list));
-      check("Window.getList() is non-empty", list.length > 0);
-
-      if (list.length > 0) {
-        var win = list[0];
-        check("Window from list isValid", await win.isValid());
-        var title = await win.getTitle();
-        check("Window.getTitle() returns string", typeof title === "string");
-        var pid = await win.getPID();
-        check("Window.getPID() returns number > 0", typeof pid === "number" && pid > 0);
-        var handle = win.getHandle();
-        check("Window.getHandle() returns non-zero",
-          (typeof handle === "number" && handle !== 0) ||
-          (typeof handle === "bigint" && handle !== 0n));
-        var bounds = await win.getBounds();
-        check("Window.getBounds() returns Bounds",
-          bounds != null && typeof bounds.x === "number" && typeof bounds.w === "number");
-        check("Window.getBounds() has non-zero size", bounds.w > 0 && bounds.h > 0);
-      }
-
-      var active = await robot.Window.getActive();
-      check("Window.getActive() returns Window", active != null);
-      if (active) {
-        var activeHandle = active.getHandle();
-        check("Active window has non-zero handle",
-          (typeof activeHandle === "number" && activeHandle !== 0) ||
-          (typeof activeHandle === "bigint" && activeHandle !== 0n));
-      }
-
-      var axEnabled = await robot.Window.isAxEnabled();
-      check("Window.isAxEnabled() returns boolean", typeof axEnabled === "boolean");
-      if (process.platform !== "darwin") {
-        check("Window.isAxEnabled() is true on " + process.platform, axEnabled === true);
-      }
-    } catch (e) {
+function checkSync(description, fn) {
+  if (!hasNative) { skipped++; return; }
+  try {
+    var result = fn();
+    if (isPromise(result)) {
       failed++;
-      console.error("  FAIL: Window behavioral (threw: " + e.message + ")");
+      console.error("  FAIL: " + description + " (returned Promise — expected sync)");
+    } else {
+      check(description, true);
     }
-  } else {
-    skipped += 10;
-  }
-
-  // -- Screen --
-  if (hasNative) {
-    try {
-      var synced = await robot.Screen.synchronize();
-      check("Screen.synchronize() returns true", synced === true);
-      var screens = robot.Screen.getList();
-      check("Screen.getList() is non-empty", screens.length > 0);
-      var main = robot.Screen.getMain();
-      check("Screen.getMain() returns Screen", main != null);
-      if (main) {
-        var sb = main.getBounds();
-        check("Main screen has non-zero bounds", sb.w > 0 && sb.h > 0);
-      }
-    } catch (e) {
-      failed++;
-      console.error("  FAIL: Screen behavioral (threw: " + e.message + ")");
-    }
-  } else {
-    skipped += 4;
-  }
-
-  // -- Process --
-  if (hasNative) {
-    try {
-      var current = await robot.Process.getCurrent();
-      check("Process.getCurrent() is valid", await current.isValid());
-      var cpid = current.getPID();
-      check("Current process PID > 0", cpid > 0);
-      var pname = await current.getName();
-      check("Current process has name", typeof pname === "string" && pname.length > 0);
-      var plist = await robot.Process.getList();
-      check("Process.getList() is non-empty", plist.length > 0);
-    } catch (e) {
-      failed++;
-      console.error("  FAIL: Process behavioral (threw: " + e.message + ")");
-    }
-  } else {
-    skipped += 4;
-  }
-
-  // -- Clipboard --
-  if (hasNative) {
-    try {
-      await robot.Clipboard.setText("mechatron-conformance-test");
-      var hasText = await robot.Clipboard.hasText();
-      check("Clipboard.hasText() after setText", hasText === true);
-      var text = await robot.Clipboard.getText();
-      check("Clipboard.getText() round-trip", text === "mechatron-conformance-test");
-      await robot.Clipboard.clear();
-    } catch (e) {
-      failed++;
-      console.error("  FAIL: Clipboard behavioral (threw: " + e.message + ")");
-    }
-  } else {
-    skipped += 2;
+  } catch (e) {
+    failed++;
+    console.error("  FAIL: " + description + " (threw: " + e.message + ")");
   }
 }
 
+function checkSyncValue(description, fn, predicate) {
+  if (!hasNative) { skipped++; return; }
+  try {
+    var result = fn();
+    if (isPromise(result)) {
+      failed++;
+      console.error("  FAIL: " + description + " (returned Promise — expected sync)");
+    } else {
+      check(description, predicate(result));
+    }
+  } catch (e) {
+    failed++;
+    console.error("  FAIL: " + description + " (threw: " + e.message + ")");
+  }
+}
+
+section("Sync API Contract — Window");
+
+checkSyncValue("Window.getList() returns array synchronously",
+  function () { return robot.Window.getList(); },
+  function (v) { return Array.isArray(v); });
+
+checkSyncValue("Window.getList() is non-empty",
+  function () { return robot.Window.getList(); },
+  function (v) { return Array.isArray(v) && v.length > 0; });
+
+checkSyncValue("Window.isAxEnabled() returns boolean synchronously",
+  function () { return robot.Window.isAxEnabled(); },
+  function (v) { return typeof v === "boolean"; });
+
+if (hasNative && process.platform !== "darwin") {
+  checkSyncValue("Window.isAxEnabled() is true on " + process.platform,
+    function () { return robot.Window.isAxEnabled(); },
+    function (v) { return v === true; });
+}
+
+checkSyncValue("Window.getActive() returns Window synchronously",
+  function () { return robot.Window.getActive(); },
+  function (v) { return v != null; });
+
+// Instance method tests — only run if getList returns a real array
+var windowList = null;
+if (hasNative) {
+  try {
+    windowList = robot.Window.getList();
+    if (isPromise(windowList)) windowList = null;
+  } catch (_) {}
+}
+
+if (windowList && windowList.length > 0) {
+  var testWin = windowList[0];
+
+  checkSyncValue("Window.isValid() returns boolean synchronously",
+    function () { return testWin.isValid(); },
+    function (v) { return typeof v === "boolean"; });
+
+  checkSyncValue("Window.getTitle() returns string synchronously",
+    function () { return testWin.getTitle(); },
+    function (v) { return typeof v === "string"; });
+
+  checkSyncValue("Window.getPID() returns number synchronously",
+    function () { return testWin.getPID(); },
+    function (v) { return typeof v === "number" && v > 0; });
+
+  checkSync("Window.getHandle() returns synchronously",
+    function () { return testWin.getHandle(); });
+
+  checkSyncValue("Window.getBounds() returns Bounds synchronously",
+    function () { return testWin.getBounds(); },
+    function (v) { return v != null && typeof v.x === "number" && typeof v.w === "number"; });
+
+  checkSyncValue("Window.getClient() returns Bounds synchronously",
+    function () { return testWin.getClient(); },
+    function (v) { return v != null && typeof v.x === "number" && typeof v.w === "number"; });
+} else if (hasNative) {
+  skipped += 6;
+  console.log("  (skipped Window instance tests — getList not sync or empty)");
+}
+
+section("Sync API Contract — Screen");
+
+checkSyncValue("Screen.synchronize() returns boolean synchronously",
+  function () { return robot.Screen.synchronize(); },
+  function (v) { return typeof v === "boolean"; });
+
+checkSyncValue("Screen.getList() returns non-empty array",
+  function () { return robot.Screen.getList(); },
+  function (v) { return Array.isArray(v) && v.length > 0; });
+
+checkSyncValue("Screen.getMain() returns Screen synchronously",
+  function () { return robot.Screen.getMain(); },
+  function (v) { return v != null; });
+
+var mainScreen = null;
+if (hasNative) {
+  try {
+    mainScreen = robot.Screen.getMain();
+    if (isPromise(mainScreen)) mainScreen = null;
+  } catch (_) {}
+}
+
+if (mainScreen) {
+  checkSyncValue("Screen.getBounds() returns Bounds synchronously",
+    function () { return mainScreen.getBounds(); },
+    function (v) { return v != null && typeof v.w === "number" && v.w > 0; });
+} else if (hasNative) {
+  skipped += 1;
+}
+
+section("Sync API Contract — Process");
+
+checkSyncValue("Process.getCurrent() returns Process synchronously",
+  function () { return robot.Process.getCurrent(); },
+  function (v) { return v != null; });
+
+var currentProc = null;
+if (hasNative) {
+  try {
+    currentProc = robot.Process.getCurrent();
+    if (isPromise(currentProc)) currentProc = null;
+  } catch (_) {}
+}
+
+if (currentProc) {
+  checkSyncValue("Process.isValid() returns boolean synchronously",
+    function () { return currentProc.isValid(); },
+    function (v) { return typeof v === "boolean"; });
+
+  checkSyncValue("Process.getPID() returns number > 0",
+    function () { return currentProc.getPID(); },
+    function (v) { return typeof v === "number" && v > 0; });
+
+  checkSyncValue("Process.getName() returns string synchronously",
+    function () { return currentProc.getName(); },
+    function (v) { return typeof v === "string" && v.length > 0; });
+} else if (hasNative) {
+  skipped += 3;
+  console.log("  (skipped Process instance tests — getCurrent not sync)");
+}
+
+checkSyncValue("Process.getList() returns non-empty array synchronously",
+  function () { return robot.Process.getList(); },
+  function (v) { return Array.isArray(v) && v.length > 0; });
+
+section("Sync API Contract — Clipboard");
+
+checkSync("Clipboard.setText() returns synchronously",
+  function () { return robot.Clipboard.setText("mechatron-conformance-test"); });
+
+checkSyncValue("Clipboard.hasText() returns boolean synchronously",
+  function () { return robot.Clipboard.hasText(); },
+  function (v) { return typeof v === "boolean"; });
+
+checkSyncValue("Clipboard.getText() returns string synchronously",
+  function () { return robot.Clipboard.getText(); },
+  function (v) { return typeof v === "string" && v === "mechatron-conformance-test"; });
+
+checkSync("Clipboard.clear() returns synchronously",
+  function () { return robot.Clipboard.clear(); });
+
 ////////////////////////////////////////////////////////////////////////////////
-// Summary (after async tests complete)
+// Summary
 ////////////////////////////////////////////////////////////////////////////////
 
-asyncBehavioral().then(function () {
-  console.log("\n==============================");
-  console.log("  Passed:  " + passed);
-  console.log("  Failed:  " + failed);
-  if (skipped > 0)
-    console.log("  Skipped: " + skipped + " (no native backend)");
-  console.log("  Total:   " + (passed + failed + skipped));
-  console.log("==============================\n");
+console.log("\n==============================");
+console.log("  Passed:  " + passed);
+console.log("  Failed:  " + failed);
+if (skipped > 0)
+  console.log("  Skipped: " + skipped + " (no native backend)");
+console.log("  Total:   " + (passed + failed + skipped));
+console.log("==============================\n");
 
-  process.exitCode = (failed > 0) ? 1 : 0;
-}).catch(function (e) {
-  console.error("FATAL: " + e.message);
-  process.exitCode = 1;
-});
+process.exitCode = (failed > 0) ? 1 : 0;

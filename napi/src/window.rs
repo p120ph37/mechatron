@@ -592,85 +592,895 @@ fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool {
     true
 }
 
-// ==================== Non-Linux stubs ====================
+// ==================== macOS implementation ====================
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_is_valid(_handle: u64) -> bool { false }
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::ffi::{c_char, c_void};
+    use std::ptr;
+    use std::collections::HashSet;
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_close(_handle: u64) {}
+    pub type CFTypeRef = *const c_void;
+    pub type CFStringRef = CFTypeRef;
+    pub type CFArrayRef = CFTypeRef;
+    pub type CFDictionaryRef = CFTypeRef;
+    pub type CFNumberRef = CFTypeRef;
+    pub type CFBooleanRef = CFTypeRef;
+    pub type CFIndex = isize;
+    pub type CFStringEncoding = u32;
+    pub type AXUIElementRef = CFTypeRef;
+    pub type AXValueRef = CFTypeRef;
+    pub type AXError = i32;
+    pub type CGWindowID = u32;
 
-#[cfg(not(target_os = "linux"))]
+    pub const K_CF_STRING_ENCODING_UTF8: CFStringEncoding = 0x08000100;
+    pub const K_CF_NUMBER_INT_TYPE: u32 = 9;
+    pub const K_AX_ERROR_SUCCESS: AXError = 0;
+    pub const K_CG_NULL_WINDOW_ID: CGWindowID = 0;
+    pub const K_CG_WINDOW_LIST_OPTION_ALL: u32 = 0;
+    pub const K_AX_VALUE_TYPE_CG_POINT: u32 = 1;
+    pub const K_AX_VALUE_TYPE_CG_SIZE: u32 = 2;
+
+    #[repr(C)]
+    #[derive(Default)]
+    pub struct CGPoint { pub x: f64, pub y: f64 }
+
+    #[repr(C)]
+    #[derive(Default)]
+    pub struct CGSize { pub width: f64, pub height: f64 }
+
+    #[repr(C)]
+    pub struct ProcessSerialNumber { pub high_long_of_psn: u32, pub low_long_of_psn: u32 }
+
+    pub const K_SET_FRONT_PROCESS_FRONT_WINDOW_ONLY: u32 = 1;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        pub fn CFRelease(cf: CFTypeRef);
+        pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+        pub fn CFArrayGetCount(the_array: CFArrayRef) -> CFIndex;
+        pub fn CFArrayGetValueAtIndex(the_array: CFArrayRef, idx: CFIndex) -> CFTypeRef;
+        pub fn CFArrayCreate(
+            allocator: CFTypeRef, values: *const CFTypeRef,
+            num_values: CFIndex, callbacks: *const c_void,
+        ) -> CFArrayRef;
+        pub fn CFDictionaryGetValue(dict: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
+        pub fn CFDictionaryCreate(
+            allocator: CFTypeRef, keys: *const CFTypeRef, values: *const CFTypeRef,
+            num_values: CFIndex, key_callbacks: *const c_void, value_callbacks: *const c_void,
+        ) -> CFDictionaryRef;
+        pub fn CFNumberGetValue(number: CFNumberRef, the_type: u32, value_ptr: *mut c_void) -> u8;
+        pub fn CFBooleanGetValue(boolean: CFBooleanRef) -> u8;
+        pub fn CFStringCreateWithCString(
+            allocator: CFTypeRef, c_str: *const c_char, encoding: CFStringEncoding,
+        ) -> CFStringRef;
+        pub fn CFStringGetCString(
+            the_string: CFStringRef, buffer: *mut c_char,
+            buffer_size: CFIndex, encoding: CFStringEncoding,
+        ) -> u8;
+
+        pub static kCFBooleanTrue: CFBooleanRef;
+        pub static kCFBooleanFalse: CFBooleanRef;
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        pub static kCGWindowOwnerPID: CFStringRef;
+        pub fn CGWindowListCopyWindowInfo(option: u32, relative_to: CGWindowID) -> CFArrayRef;
+        pub fn CGWindowListCreateDescriptionFromArray(window_array: CFArrayRef) -> CFArrayRef;
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        pub fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+        pub fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+        pub fn AXUIElementCopyAttributeValues(
+            element: AXUIElementRef, attribute: CFStringRef,
+            index: CFIndex, max_values: CFIndex, values: *mut CFArrayRef,
+        ) -> AXError;
+        pub fn AXUIElementCopyAttributeValue(
+            element: AXUIElementRef, attribute: CFStringRef, value: *mut CFTypeRef,
+        ) -> AXError;
+        pub fn AXUIElementSetAttributeValue(
+            element: AXUIElementRef, attribute: CFStringRef, value: CFTypeRef,
+        ) -> AXError;
+        pub fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
+        pub fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> AXError;
+        pub fn AXValueCreate(the_type: u32, value_ptr: *const c_void) -> AXValueRef;
+        pub fn AXValueGetValue(value: AXValueRef, the_type: u32, value_ptr: *mut c_void) -> u8;
+        pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> u8;
+
+        pub fn _AXUIElementGetWindow(element: AXUIElementRef, wid: *mut CGWindowID) -> AXError;
+
+        pub static kAXWindowsAttribute: CFStringRef;
+        pub static kAXRoleAttribute: CFStringRef;
+        pub static kAXMinimizedAttribute: CFStringRef;
+        pub static kAXTitleAttribute: CFStringRef;
+        pub static kAXPositionAttribute: CFStringRef;
+        pub static kAXSizeAttribute: CFStringRef;
+        pub static kAXCloseButtonAttribute: CFStringRef;
+        pub static kAXFocusedWindowAttribute: CFStringRef;
+        pub static kAXFocusedApplicationAttribute: CFStringRef;
+        pub static kAXRaiseAction: CFStringRef;
+        pub static kAXPressAction: CFStringRef;
+        pub static kAXTrustedCheckOptionPrompt: CFStringRef;
+        pub static kAXFrontmostAttribute: CFStringRef;
+
+        pub fn GetFrontProcess(psn: *mut ProcessSerialNumber) -> i32;
+        pub fn GetProcessPID(psn: *const ProcessSerialNumber, pid: *mut i32) -> i32;
+        pub fn GetProcessForPID(pid: i32, psn: *mut ProcessSerialNumber) -> i32;
+        pub fn SetFrontProcessWithOptions(psn: *const ProcessSerialNumber, options: u32) -> i32;
+    }
+
+    pub unsafe fn get_pid_for_window(win: CGWindowID) -> i32 {
+        if win == 0 { return 0; }
+        let window_ids: [*const c_void; 1] = [win as usize as *const c_void];
+        let wlist = CFArrayCreate(ptr::null(), window_ids.as_ptr(), 1, ptr::null());
+        if wlist.is_null() { return 0; }
+        let info = CGWindowListCreateDescriptionFromArray(wlist);
+        CFRelease(wlist);
+        if info.is_null() { return 0; }
+        let mut pid: i32 = 0;
+        if CFArrayGetCount(info) > 0 {
+            let desc = CFArrayGetValueAtIndex(info, 0);
+            let data = CFDictionaryGetValue(desc, kCGWindowOwnerPID);
+            if !data.is_null() {
+                CFNumberGetValue(data, K_CF_NUMBER_INT_TYPE, &mut pid as *mut i32 as *mut c_void);
+            }
+        }
+        CFRelease(info);
+        pid
+    }
+
+    pub unsafe fn get_ui_element(win: CGWindowID) -> AXUIElementRef {
+        let pid = get_pid_for_window(win);
+        if pid <= 0 { return ptr::null(); }
+
+        let application = AXUIElementCreateApplication(pid);
+        if application.is_null() { return ptr::null(); }
+
+        let mut windows: CFArrayRef = ptr::null();
+        AXUIElementCopyAttributeValues(
+            application, kAXWindowsAttribute, 0, 1024, &mut windows,
+        );
+
+        let mut result: AXUIElementRef = ptr::null();
+        if !windows.is_null() {
+            let count = CFArrayGetCount(windows);
+            for i in 0..count {
+                let element = CFArrayGetValueAtIndex(windows, i);
+                let mut temp: CGWindowID = 0;
+                if _AXUIElementGetWindow(element, &mut temp) == K_AX_ERROR_SUCCESS && temp == win {
+                    CFRetain(element);
+                    result = element;
+                    break;
+                }
+            }
+            CFRelease(windows);
+        }
+        CFRelease(application);
+        result
+    }
+
+    pub unsafe fn with_ax_window<T, F: FnOnce(AXUIElementRef) -> T>(handle: u64, default: T, f: F) -> T {
+        let ax = get_ui_element(handle as CGWindowID);
+        if ax.is_null() { return default; }
+        let result = f(ax);
+        CFRelease(ax);
+        result
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_is_valid(handle: u64) -> bool {
+    if handle == 0 { return false; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, false, |ax| {
+            let mut r: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(ax, kAXRoleAttribute, &mut r) == K_AX_ERROR_SUCCESS
+                && !r.is_null()
+            {
+                CFRelease(r);
+                true
+            } else {
+                false
+            }
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_close(handle: u64) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, (), |ax| {
+            let mut btn: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(ax, kAXCloseButtonAttribute, &mut btn)
+                == K_AX_ERROR_SUCCESS
+                && !btn.is_null()
+            {
+                AXUIElementPerformAction(btn, kAXPressAction);
+                CFRelease(btn);
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn platform_window_is_top_most(_handle: u64) -> bool { false }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn platform_window_is_borderless(_handle: u64) -> bool { false }
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_is_minimized(_handle: u64) -> bool { false }
+#[cfg(target_os = "macos")]
+fn platform_window_is_minimized(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, false, |ax| {
+            let mut data: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(ax, kAXMinimizedAttribute, &mut data)
+                == K_AX_ERROR_SUCCESS
+                && !data.is_null()
+            {
+                let result = CFBooleanGetValue(data) != 0;
+                CFRelease(data);
+                result
+            } else {
+                false
+            }
+        })
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn platform_window_is_maximized(_handle: u64) -> bool { false }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn platform_window_set_top_most(_handle: u64, _top_most: bool) {}
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn platform_window_set_borderless(_handle: u64, _borderless: bool) {}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_set_minimized(_handle: u64, _minimized: bool) {}
+#[cfg(target_os = "macos")]
+fn platform_window_set_minimized(handle: u64, minimized: bool) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, (), |ax| {
+            let val = if minimized { kCFBooleanTrue } else { kCFBooleanFalse };
+            AXUIElementSetAttributeValue(ax, kAXMinimizedAttribute, val);
+        });
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn platform_window_set_maximized(_handle: u64, _maximized: bool) {}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_process(_handle: u64) -> i32 { 0 }
+#[cfg(target_os = "macos")]
+fn platform_window_get_process(handle: u64) -> i32 {
+    platform_window_get_pid(handle)
+}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_pid(_handle: u64) -> i32 { 0 }
+#[cfg(target_os = "macos")]
+fn platform_window_get_pid(handle: u64) -> i32 {
+    if handle == 0 { return 0; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, 0, |ax| {
+            let mut pid: i32 = 0;
+            if AXUIElementGetPid(ax, &mut pid) == K_AX_ERROR_SUCCESS {
+                pid
+            } else {
+                0
+            }
+        })
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn platform_window_get_handle(handle: u64) -> u64 { handle }
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_set_handle(_handle: u64, new_handle: u64) -> bool { new_handle == 0 }
+#[cfg(target_os = "macos")]
+fn platform_window_set_handle(_handle: u64, new_handle: u64) -> bool {
+    if new_handle == 0 { return true; }
+    unsafe {
+        let ax = mac::get_ui_element(new_handle as mac::CGWindowID);
+        if ax.is_null() {
+            false
+        } else {
+            mac::CFRelease(ax);
+            true
+        }
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_title(_handle: u64) -> String { String::new() }
+#[cfg(target_os = "macos")]
+fn platform_window_get_title(handle: u64) -> String {
+    if !platform_window_is_valid(handle) { return String::new(); }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, String::new(), |ax| {
+            let mut data: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(ax, kAXTitleAttribute, &mut data)
+                == K_AX_ERROR_SUCCESS
+                && !data.is_null()
+            {
+                let mut buf = [0u8; 512];
+                if CFStringGetCString(
+                    data,
+                    buf.as_mut_ptr() as *mut std::ffi::c_char,
+                    512,
+                    K_CF_STRING_ENCODING_UTF8,
+                ) != 0
+                {
+                    let cstr = std::ffi::CStr::from_ptr(buf.as_ptr() as *const std::ffi::c_char);
+                    let s = cstr.to_string_lossy().to_string();
+                    CFRelease(data);
+                    s
+                } else {
+                    CFRelease(data);
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        })
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_set_title(_handle: u64, _title: String) {}
+#[cfg(target_os = "macos")]
+fn platform_window_set_title(handle: u64, title: String) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        use mac::*;
+        if let Ok(cstr) = std::ffi::CString::new(title.as_bytes()) {
+            with_ax_window(handle, (), |ax| {
+                let name = CFStringCreateWithCString(
+                    std::ptr::null(),
+                    cstr.as_ptr(),
+                    K_CF_STRING_ENCODING_UTF8,
+                );
+                if !name.is_null() {
+                    AXUIElementSetAttributeValue(ax, kAXTitleAttribute, name);
+                    CFRelease(name);
+                }
+            });
+        }
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_bounds(_handle: u64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
+#[cfg(target_os = "macos")]
+fn platform_window_get_bounds(handle: u64) -> (i32, i32, i32, i32) {
+    if !platform_window_is_valid(handle) { return (0, 0, 0, 0); }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, (0, 0, 0, 0), |ax| {
+            let mut axp: CFTypeRef = std::ptr::null();
+            let mut axs: CFTypeRef = std::ptr::null();
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_set_bounds(_handle: u64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+            if AXUIElementCopyAttributeValue(ax, kAXPositionAttribute, &mut axp)
+                != K_AX_ERROR_SUCCESS
+                || axp.is_null()
+            {
+                return (0, 0, 0, 0);
+            }
+            if AXUIElementCopyAttributeValue(ax, kAXSizeAttribute, &mut axs)
+                != K_AX_ERROR_SUCCESS
+                || axs.is_null()
+            {
+                CFRelease(axp);
+                return (0, 0, 0, 0);
+            }
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_client(_handle: u64) -> (i32, i32, i32, i32) { (0, 0, 0, 0) }
+            let mut p = CGPoint::default();
+            let mut s = CGSize::default();
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_set_client(_handle: u64, _x: i32, _y: i32, _w: i32, _h: i32) {}
+            let ok = AXValueGetValue(axp, K_AX_VALUE_TYPE_CG_POINT, &mut p as *mut CGPoint as *mut std::ffi::c_void) != 0
+                && AXValueGetValue(axs, K_AX_VALUE_TYPE_CG_SIZE, &mut s as *mut CGSize as *mut std::ffi::c_void) != 0;
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_map_to_client(_handle: u64, x: i32, y: i32) -> (i32, i32) { (x, y) }
+            CFRelease(axp);
+            CFRelease(axs);
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_map_to_screen(_handle: u64, x: i32, y: i32) -> (i32, i32) { (x, y) }
+            if ok {
+                (p.x as i32, p.y as i32, s.width as i32, s.height as i32)
+            } else {
+                (0, 0, 0, 0)
+            }
+        })
+    }
+}
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_list(_regex_str: Option<String>) -> Vec<u64> { Vec::new() }
+#[cfg(target_os = "macos")]
+fn platform_window_set_bounds(handle: u64, x: i32, y: i32, w: i32, h: i32) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, (), |ax| {
+            let p = CGPoint { x: x as f64, y: y as f64 };
+            let s = CGSize { width: w as f64, height: h as f64 };
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_get_active() -> u64 { 0 }
+            let axp = AXValueCreate(K_AX_VALUE_TYPE_CG_POINT, &p as *const CGPoint as *const std::ffi::c_void);
+            let axs = AXValueCreate(K_AX_VALUE_TYPE_CG_SIZE, &s as *const CGSize as *const std::ffi::c_void);
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_set_active(_handle: u64) {}
+            if !axp.is_null() && !axs.is_null() {
+                AXUIElementSetAttributeValue(ax, kAXPositionAttribute, axp);
+                AXUIElementSetAttributeValue(ax, kAXSizeAttribute, axs);
+            }
 
-#[cfg(not(target_os = "linux"))]
-fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool { false }
+            if !axp.is_null() { CFRelease(axp); }
+            if !axs.is_null() { CFRelease(axs); }
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_get_client(handle: u64) -> (i32, i32, i32, i32) {
+    platform_window_get_bounds(handle)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_set_client(handle: u64, x: i32, y: i32, w: i32, h: i32) {
+    platform_window_set_bounds(handle, x, y, w, h);
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_map_to_client(handle: u64, x: i32, y: i32) -> (i32, i32) {
+    if !platform_window_is_valid(handle) { return (x, y); }
+    let b = platform_window_get_client(handle);
+    (x - b.0, y - b.1)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_map_to_screen(handle: u64, x: i32, y: i32) -> (i32, i32) {
+    if !platform_window_is_valid(handle) { return (x, y); }
+    let b = platform_window_get_client(handle);
+    (x + b.0, y + b.1)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_get_list(regex_str: Option<String>) -> Vec<u64> {
+    let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
+
+    unsafe {
+        use mac::*;
+        let info = CGWindowListCopyWindowInfo(K_CG_WINDOW_LIST_OPTION_ALL, K_CG_NULL_WINDOW_ID);
+        if info.is_null() { return Vec::new(); }
+
+        let mut pids = HashSet::new();
+        let count = CFArrayGetCount(info);
+        for i in 0..count {
+            let dict = CFArrayGetValueAtIndex(info, i);
+            let data = CFDictionaryGetValue(dict, kCGWindowOwnerPID);
+            if !data.is_null() {
+                let mut pid: i32 = 0;
+                if CFNumberGetValue(data, K_CF_NUMBER_INT_TYPE, &mut pid as *mut i32 as *mut std::ffi::c_void) != 0
+                    && pid > 0
+                {
+                    pids.insert(pid);
+                }
+            }
+        }
+        CFRelease(info);
+
+        let mut results = Vec::new();
+        for pid in pids {
+            let application = AXUIElementCreateApplication(pid);
+            if application.is_null() { continue; }
+
+            let mut windows: CFArrayRef = std::ptr::null();
+            AXUIElementCopyAttributeValues(
+                application, kAXWindowsAttribute, 0, 1024, &mut windows,
+            );
+
+            if !windows.is_null() {
+                let wcount = CFArrayGetCount(windows);
+                for i in 0..wcount {
+                    let element = CFArrayGetValueAtIndex(windows, i);
+                    let mut wid: CGWindowID = 0;
+                    if _AXUIElementGetWindow(element, &mut wid) != K_AX_ERROR_SUCCESS || wid == 0 {
+                        continue;
+                    }
+
+                    if let Some(ref re) = pattern {
+                        let mut data: CFTypeRef = std::ptr::null();
+                        if AXUIElementCopyAttributeValue(element, kAXTitleAttribute, &mut data)
+                            == K_AX_ERROR_SUCCESS
+                            && !data.is_null()
+                        {
+                            let mut buf = [0u8; 512];
+                            let title = if CFStringGetCString(
+                                data,
+                                buf.as_mut_ptr() as *mut std::ffi::c_char,
+                                512,
+                                K_CF_STRING_ENCODING_UTF8,
+                            ) != 0 {
+                                let cstr = std::ffi::CStr::from_ptr(buf.as_ptr() as *const std::ffi::c_char);
+                                cstr.to_string_lossy().to_string()
+                            } else {
+                                String::new()
+                            };
+                            CFRelease(data);
+                            if !re.is_match(&title) { continue; }
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    results.push(wid as u64);
+                }
+                CFRelease(windows);
+            }
+            CFRelease(application);
+        }
+        results
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_get_active() -> u64 {
+    unsafe {
+        use mac::*;
+
+        let mut psn = ProcessSerialNumber { high_long_of_psn: 0, low_long_of_psn: 0 };
+        let mut pid: i32 = 0;
+        #[allow(deprecated)]
+        {
+            if GetFrontProcess(&mut psn) != 0 || GetProcessPID(&psn, &mut pid) != 0 {
+                return 0;
+            }
+        }
+
+        let focused = AXUIElementCreateApplication(pid);
+        if focused.is_null() { return 0; }
+
+        let mut element: CFTypeRef = std::ptr::null();
+        let mut result: u64 = 0;
+        if AXUIElementCopyAttributeValue(focused, kAXFocusedWindowAttribute, &mut element)
+            == K_AX_ERROR_SUCCESS
+            && !element.is_null()
+        {
+            let mut wid: CGWindowID = 0;
+            if _AXUIElementGetWindow(element, &mut wid) == K_AX_ERROR_SUCCESS && wid != 0 {
+                result = wid as u64;
+            }
+            CFRelease(element);
+        }
+        CFRelease(focused);
+        result
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_set_active(handle: u64) {
+    if handle == 0 { return; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, (), |ax| {
+            if AXUIElementPerformAction(ax, kAXRaiseAction) == K_AX_ERROR_SUCCESS {
+                let mut pid: i32 = 0;
+                if AXUIElementGetPid(ax, &mut pid) == K_AX_ERROR_SUCCESS && pid > 0 {
+                    let mut psn = ProcessSerialNumber { high_long_of_psn: 0, low_long_of_psn: 0 };
+                    #[allow(deprecated)]
+                    {
+                        if GetProcessForPID(pid, &mut psn) == 0 {
+                            SetFrontProcessWithOptions(&psn, K_SET_FRONT_PROCESS_FRONT_WINDOW_ONLY);
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_window_is_ax_enabled(prompt: Option<bool>) -> bool {
+    unsafe {
+        use mac::*;
+        let display_prompt = if prompt.unwrap_or(false) {
+            kCFBooleanTrue
+        } else {
+            kCFBooleanFalse
+        };
+        let keys: [CFTypeRef; 1] = [kAXTrustedCheckOptionPrompt];
+        let vals: [CFTypeRef; 1] = [display_prompt];
+        let opts = CFDictionaryCreate(
+            std::ptr::null(), keys.as_ptr(), vals.as_ptr(),
+            1, std::ptr::null(), std::ptr::null(),
+        );
+        let result = AXIsProcessTrustedWithOptions(opts) != 0;
+        CFRelease(opts);
+        result
+    }
+}
+
+// ==================== Windows implementation ====================
+
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, POINT, TRUE};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+#[cfg(target_os = "windows")]
+fn hwnd(handle: u64) -> HWND {
+    HWND(handle as *mut std::ffi::c_void)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_is_valid(handle: u64) -> bool {
+    if handle == 0 { return false; }
+    unsafe { IsWindow(hwnd(handle)).as_bool() }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_close(handle: u64) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe { let _ = PostMessageW(hwnd(handle), WM_CLOSE, None, None); }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_is_top_most(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe { (GetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0) != 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_is_borderless(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd(handle), GWL_STYLE) as u32;
+        (style & WS_TILEDWINDOW.0) == 0
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_is_minimized(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd(handle), GWL_STYLE) as u32;
+        (style & WS_MINIMIZE.0) != 0
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_is_maximized(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd(handle), GWL_STYLE) as u32;
+        (style & WS_MAXIMIZE.0) != 0
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_top_most(handle: u64, top_most: bool) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let insert_after = if top_most { HWND_TOPMOST } else { HWND_NOTOPMOST };
+        let _ = SetWindowPos(hwnd(handle), insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_borderless(handle: u64, borderless: bool) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let h = hwnd(handle);
+        let mut style = GetWindowLongPtrW(h, GWL_STYLE) as u32;
+        if borderless {
+            style &= !WS_TILEDWINDOW.0;
+        } else {
+            style |= WS_TILEDWINDOW.0;
+        }
+        SetWindowLongPtrW(h, GWL_STYLE, style as isize);
+        let _ = SetWindowPos(
+            h, None, 0, 0, 0, 0,
+            SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_minimized(handle: u64, minimized: bool) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let h = hwnd(handle);
+        if minimized {
+            ShowWindow(h, SW_MINIMIZE);
+        } else if platform_window_is_minimized(handle) {
+            ShowWindow(h, SW_RESTORE);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_maximized(handle: u64, maximized: bool) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let h = hwnd(handle);
+        if platform_window_is_minimized(handle) {
+            ShowWindow(h, SW_RESTORE);
+        }
+        if maximized {
+            ShowWindow(h, SW_MAXIMIZE);
+        } else if platform_window_is_maximized(handle) {
+            ShowWindow(h, SW_RESTORE);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_process(handle: u64) -> i32 {
+    platform_window_get_pid(handle)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_pid(handle: u64) -> i32 {
+    if !platform_window_is_valid(handle) { return 0; }
+    unsafe {
+        let mut id: u32 = 0;
+        GetWindowThreadProcessId(hwnd(handle), Some(&mut id));
+        id as i32
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_handle(handle: u64) -> u64 { handle }
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_handle(_handle: u64, new_handle: u64) -> bool {
+    if new_handle == 0 { return true; }
+    platform_window_is_valid(new_handle)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_title(handle: u64) -> String {
+    if !platform_window_is_valid(handle) { return String::new(); }
+    unsafe {
+        let mut buf = [0u16; 512];
+        let len = GetWindowTextW(hwnd(handle), &mut buf);
+        if len > 0 {
+            String::from_utf16_lossy(&buf[..len as usize])
+        } else {
+            String::new()
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_title(handle: u64, title: String) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+        let pcwstr = windows::core::PCWSTR::from_raw(wide.as_ptr());
+        let _ = SetWindowTextW(hwnd(handle), pcwstr);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_bounds(handle: u64) -> (i32, i32, i32, i32) {
+    if !platform_window_is_valid(handle) { return (0, 0, 0, 0); }
+    unsafe {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd(handle), &mut rect).is_ok() {
+            (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+        } else {
+            (0, 0, 0, 0)
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_bounds(handle: u64, x: i32, y: i32, w: i32, h: i32) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let _ = SetWindowPos(hwnd(handle), None, x, y, w, h, SWP_NOZORDER | SWP_NOOWNERZORDER);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_client(handle: u64) -> (i32, i32, i32, i32) {
+    if !platform_window_is_valid(handle) { return (0, 0, 0, 0); }
+    unsafe {
+        let h = hwnd(handle);
+        let mut rect = RECT::default();
+        if GetClientRect(h, &mut rect).is_err() { return (0, 0, 0, 0); }
+        let mut point = POINT { x: rect.left, y: rect.top };
+        let _ = windows::Win32::Graphics::Gdi::ClientToScreen(h, &mut point);
+        (point.x, point.y, rect.right - rect.left, rect.bottom - rect.top)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_client(handle: u64, x: i32, y: i32, w: i32, h: i32) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let h_wnd = hwnd(handle);
+        let mut rect = RECT { left: x, top: y, right: x + w, bottom: y + h };
+        let style = WINDOW_STYLE(GetWindowLongPtrW(h_wnd, GWL_STYLE) as u32);
+        let ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(h_wnd, GWL_EXSTYLE) as u32);
+        let has_menu = !GetMenu(h_wnd).is_invalid();
+        if AdjustWindowRectEx(&mut rect, style, has_menu, ex_style).is_ok() {
+            let _ = SetWindowPos(
+                h_wnd, None, rect.left, rect.top,
+                rect.right - rect.left, rect.bottom - rect.top,
+                SWP_NOZORDER | SWP_NOOWNERZORDER,
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_map_to_client(handle: u64, x: i32, y: i32) -> (i32, i32) {
+    if !platform_window_is_valid(handle) { return (x, y); }
+    let c = platform_window_get_client(handle);
+    (x - c.0, y - c.1)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_map_to_screen(handle: u64, x: i32, y: i32) -> (i32, i32) {
+    if !platform_window_is_valid(handle) { return (x, y); }
+    let c = platform_window_get_client(handle);
+    (x + c.0, y + c.1)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_list(regex_str: Option<String>) -> Vec<u64> {
+    let pattern = regex_str.as_ref().and_then(|s| regex::Regex::new(s).ok());
+    let has_regex = pattern.is_some();
+
+    struct EnumData {
+        pattern: Option<regex::Regex>,
+        has_regex: bool,
+        results: Vec<u64>,
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd_val: HWND, lparam: LPARAM) -> BOOL {
+        if !IsWindowVisible(hwnd_val).as_bool() { return TRUE; }
+        let handle = hwnd_val.0 as u64;
+        if !platform_window_is_valid(handle) { return TRUE; }
+
+        let data = &mut *(lparam.0 as *mut EnumData);
+        if data.has_regex {
+            let title = platform_window_get_title(handle);
+            if let Some(ref re) = data.pattern {
+                if !re.is_match(&title) { return TRUE; }
+            }
+        }
+        data.results.push(handle);
+        TRUE
+    }
+
+    let mut data = EnumData { pattern, has_regex, results: Vec::new() };
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut data as *mut EnumData as isize));
+    }
+    data.results
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_get_active() -> u64 {
+    unsafe {
+        let h = GetForegroundWindow();
+        h.0 as u64
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_set_active(handle: u64) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        let h = hwnd(handle);
+        if platform_window_is_minimized(handle) {
+            ShowWindow(h, SW_RESTORE);
+        }
+        SetForegroundWindow(h);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_window_is_ax_enabled(_prompt: Option<bool>) -> bool { true }
 
 // ==================== Helper structs for complex returns ====================
 
