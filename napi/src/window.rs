@@ -666,6 +666,7 @@ mod mac {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         pub static kCGWindowOwnerPID: CFStringRef;
+        pub static kCGWindowLayer: CFStringRef;
         pub fn CGWindowListCopyWindowInfo(option: u32, relative_to: CGWindowID) -> CFArrayRef;
         pub fn CGWindowListCreateDescriptionFromArray(window_array: CFArrayRef) -> CFArrayRef;
     }
@@ -705,6 +706,7 @@ mod mac {
         pub static kAXPressAction: CFStringRef;
         pub static kAXTrustedCheckOptionPrompt: CFStringRef;
         pub static kAXFrontmostAttribute: CFStringRef;
+        pub static kAXFullScreenAttribute: CFStringRef;
 
         pub fn GetFrontProcess(psn: *mut ProcessSerialNumber) -> i32;
         pub fn GetProcessPID(psn: *const ProcessSerialNumber, pid: *mut i32) -> i32;
@@ -769,6 +771,55 @@ mod mac {
         CFRelease(ax);
         result
     }
+
+    pub unsafe fn get_window_layer(win: CGWindowID) -> i32 {
+        if win == 0 { return -1; }
+        let info = CGWindowListCopyWindowInfo(K_CG_WINDOW_LIST_OPTION_ALL, K_CG_NULL_WINDOW_ID);
+        if info.is_null() { return -1; }
+        let count = CFArrayGetCount(info);
+        let keys = getCGKeys();
+        let mut result: i32 = -1;
+        for i in 0..count {
+            let dict = CFArrayGetValueAtIndex(info, i);
+            let num_ref = CFDictionaryGetValue(dict, keys.number);
+            if num_ref.is_null() { continue; }
+            let mut wid: i32 = 0;
+            CFNumberGetValue(num_ref, K_CF_NUMBER_INT_TYPE, &mut wid as *mut i32 as *mut std::ffi::c_void);
+            if wid == win as i32 {
+                let layer_ref = CFDictionaryGetValue(dict, kCGWindowLayer);
+                if !layer_ref.is_null() {
+                    let mut layer: i32 = 0;
+                    CFNumberGetValue(layer_ref, K_CF_NUMBER_INT_TYPE, &mut layer as *mut i32 as *mut std::ffi::c_void);
+                    result = layer;
+                }
+                break;
+            }
+        }
+        CFRelease(info);
+        result
+    }
+
+    pub struct CGKeys {
+        pub number: CFStringRef,
+        pub layer: CFStringRef,
+    }
+
+    static mut CG_KEYS: Option<CGKeys> = None;
+    static CG_KEYS_INIT: std::sync::Once = std::sync::Once::new();
+
+    pub unsafe fn getCGKeys() -> &'static CGKeys {
+        CG_KEYS_INIT.call_once(|| {
+            CG_KEYS = Some(CGKeys {
+                number: CFStringCreateWithCString(
+                    ptr::null(), b"kCGWindowNumber\0".as_ptr() as *const c_char, K_CF_STRING_ENCODING_UTF8,
+                ),
+                layer: CFStringCreateWithCString(
+                    ptr::null(), b"kCGWindowLayer\0".as_ptr() as *const c_char, K_CF_STRING_ENCODING_UTF8,
+                ),
+            });
+        });
+        CG_KEYS.as_ref().unwrap()
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -809,10 +860,31 @@ fn platform_window_close(handle: u64) {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_window_is_top_most(_handle: u64) -> bool { false }
+fn platform_window_is_top_most(handle: u64) -> bool {
+    if handle == 0 { return false; }
+    unsafe { mac::get_window_layer(handle as mac::CGWindowID) > 0 }
+}
 
 #[cfg(target_os = "macos")]
-fn platform_window_is_borderless(_handle: u64) -> bool { false }
+fn platform_window_is_borderless(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, false, |ax| {
+            let mut btn: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(ax, kAXCloseButtonAttribute, &mut btn)
+                != K_AX_ERROR_SUCCESS
+            {
+                return true;
+            }
+            if btn.is_null() {
+                return true;
+            }
+            CFRelease(btn);
+            false
+        })
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn platform_window_is_minimized(handle: u64) -> bool {
@@ -836,7 +908,25 @@ fn platform_window_is_minimized(handle: u64) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_window_is_maximized(_handle: u64) -> bool { false }
+fn platform_window_is_maximized(handle: u64) -> bool {
+    if !platform_window_is_valid(handle) { return false; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, false, |ax| {
+            let mut data: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(ax, kAXFullScreenAttribute, &mut data)
+                == K_AX_ERROR_SUCCESS
+                && !data.is_null()
+            {
+                let result = CFBooleanGetValue(data) != 0;
+                CFRelease(data);
+                result
+            } else {
+                false
+            }
+        })
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn platform_window_set_top_most(_handle: u64, _top_most: bool) {}
@@ -857,7 +947,16 @@ fn platform_window_set_minimized(handle: u64, minimized: bool) {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_window_set_maximized(_handle: u64, _maximized: bool) {}
+fn platform_window_set_maximized(handle: u64, maximized: bool) {
+    if !platform_window_is_valid(handle) { return; }
+    unsafe {
+        use mac::*;
+        with_ax_window(handle, (), |ax| {
+            let val = if maximized { kCFBooleanTrue } else { kCFBooleanFalse };
+            AXUIElementSetAttributeValue(ax, kAXFullScreenAttribute, val);
+        });
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn platform_window_get_process(handle: u64) -> i32 {
