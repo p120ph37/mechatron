@@ -617,15 +617,136 @@ check("Keyboard.compile('{ESCAPE}') produces events",
   Array.isArray(keys) && keys.length >= 2);
 
 ////////////////////////////////////////////////////////////////////////////////
-// Summary
+// Native behavioral smoke tests (async — exercise real native functionality)
+//
+// These go beyond "does the method exist?" to verify that the backend actually
+// returns meaningful results.  They run only when the native backend loaded
+// (hasNative = true).  The original robot-js had full behavioral tests but
+// they were interactive; these are CI-safe.
 ////////////////////////////////////////////////////////////////////////////////
 
-console.log("\n==============================");
-console.log("  Passed:  " + passed);
-console.log("  Failed:  " + failed);
-if (skipped > 0)
-  console.log("  Skipped: " + skipped + " (no native backend)");
-console.log("  Total:   " + (passed + failed + skipped));
-console.log("==============================\n");
+async function asyncBehavioral() {
+  section("Native Behavioral Tests");
 
-process.exitCode = (failed > 0) ? 1 : 0;
+  // -- Window --
+  if (hasNative) {
+    try {
+      var list = await robot.Window.getList();
+      check("Window.getList() returns array", Array.isArray(list));
+      check("Window.getList() is non-empty", list.length > 0);
+
+      if (list.length > 0) {
+        var win = list[0];
+        check("Window from list isValid", await win.isValid());
+        var title = await win.getTitle();
+        check("Window.getTitle() returns string", typeof title === "string");
+        var pid = await win.getPID();
+        check("Window.getPID() returns number > 0", typeof pid === "number" && pid > 0);
+        var handle = win.getHandle();
+        check("Window.getHandle() returns non-zero",
+          (typeof handle === "number" && handle !== 0) ||
+          (typeof handle === "bigint" && handle !== 0n));
+        var bounds = await win.getBounds();
+        check("Window.getBounds() returns Bounds",
+          bounds != null && typeof bounds.x === "number" && typeof bounds.w === "number");
+        check("Window.getBounds() has non-zero size", bounds.w > 0 && bounds.h > 0);
+      }
+
+      var active = await robot.Window.getActive();
+      check("Window.getActive() returns Window", active != null);
+      if (active) {
+        var activeHandle = active.getHandle();
+        check("Active window has non-zero handle",
+          (typeof activeHandle === "number" && activeHandle !== 0) ||
+          (typeof activeHandle === "bigint" && activeHandle !== 0n));
+      }
+
+      var axEnabled = await robot.Window.isAxEnabled();
+      check("Window.isAxEnabled() returns boolean", typeof axEnabled === "boolean");
+      if (process.platform !== "darwin") {
+        check("Window.isAxEnabled() is true on " + process.platform, axEnabled === true);
+      }
+    } catch (e) {
+      failed++;
+      console.error("  FAIL: Window behavioral (threw: " + e.message + ")");
+    }
+  } else {
+    skipped += 10;
+  }
+
+  // -- Screen --
+  if (hasNative) {
+    try {
+      var synced = await robot.Screen.synchronize();
+      check("Screen.synchronize() returns true", synced === true);
+      var screens = robot.Screen.getList();
+      check("Screen.getList() is non-empty", screens.length > 0);
+      var main = robot.Screen.getMain();
+      check("Screen.getMain() returns Screen", main != null);
+      if (main) {
+        var sb = main.getBounds();
+        check("Main screen has non-zero bounds", sb.w > 0 && sb.h > 0);
+      }
+    } catch (e) {
+      failed++;
+      console.error("  FAIL: Screen behavioral (threw: " + e.message + ")");
+    }
+  } else {
+    skipped += 4;
+  }
+
+  // -- Process --
+  if (hasNative) {
+    try {
+      var current = await robot.Process.getCurrent();
+      check("Process.getCurrent() is valid", await current.isValid());
+      var cpid = current.getPID();
+      check("Current process PID > 0", cpid > 0);
+      var pname = await current.getName();
+      check("Current process has name", typeof pname === "string" && pname.length > 0);
+      var plist = await robot.Process.getList();
+      check("Process.getList() is non-empty", plist.length > 0);
+    } catch (e) {
+      failed++;
+      console.error("  FAIL: Process behavioral (threw: " + e.message + ")");
+    }
+  } else {
+    skipped += 4;
+  }
+
+  // -- Clipboard --
+  if (hasNative) {
+    try {
+      await robot.Clipboard.setText("mechatron-conformance-test");
+      var hasText = await robot.Clipboard.hasText();
+      check("Clipboard.hasText() after setText", hasText === true);
+      var text = await robot.Clipboard.getText();
+      check("Clipboard.getText() round-trip", text === "mechatron-conformance-test");
+      await robot.Clipboard.clear();
+    } catch (e) {
+      failed++;
+      console.error("  FAIL: Clipboard behavioral (threw: " + e.message + ")");
+    }
+  } else {
+    skipped += 2;
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Summary (after async tests complete)
+////////////////////////////////////////////////////////////////////////////////
+
+asyncBehavioral().then(function () {
+  console.log("\n==============================");
+  console.log("  Passed:  " + passed);
+  console.log("  Failed:  " + failed);
+  if (skipped > 0)
+    console.log("  Skipped: " + skipped + " (no native backend)");
+  console.log("  Total:   " + (passed + failed + skipped));
+  console.log("==============================\n");
+
+  process.exitCode = (failed > 0) ? 1 : 0;
+}).catch(function (e) {
+  console.error("FATAL: " + e.message);
+  process.exitCode = 1;
+});
