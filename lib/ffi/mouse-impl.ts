@@ -23,9 +23,11 @@ import {
   kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
   kCGEventLeftMouseDown, kCGEventLeftMouseUp,
   kCGEventRightMouseDown, kCGEventRightMouseUp,
+  kCGEventLeftMouseDragged, kCGEventRightMouseDragged,
   kCGEventOtherMouseDown, kCGEventOtherMouseUp,
   kCGMouseButtonLeft, kCGMouseButtonRight, kCGMouseButtonCenter,
   kCGScrollEventUnitPixel,
+  kCGMouseEventClickState,
 } from "./mac";
 import { BUTTON_LEFT, BUTTON_MID, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 } from "../mouse/constants";
 
@@ -136,6 +138,19 @@ function macMouseSource(): bigint {
 
 let _macLastPos = { x: 0, y: 0 };
 
+let _macLastClickTime = 0;
+const DOUBLE_CLICK_MS = 500;
+
+function mac_getClickCount(): bigint {
+  const now = Date.now();
+  if (now - _macLastClickTime < DOUBLE_CLICK_MS) {
+    _macLastClickTime = 0;
+    return 2n;
+  }
+  _macLastClickTime = now;
+  return 1n;
+}
+
 function mac_mouse_press(button: number): void {
   const C = cg();
   const F = cf();
@@ -145,6 +160,7 @@ function mac_mouse_press(button: number): void {
   if (!src) return;
   const evt = C.CGEventCreateMouseEvent(src, spec.type_down, _macLastPos.x, _macLastPos.y, spec.cg_btn);
   if (!evt) return;
+  C.CGEventSetIntegerValueField(evt, kCGMouseEventClickState, mac_getClickCount());
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -158,6 +174,7 @@ function mac_mouse_release(button: number): void {
   if (!src) return;
   const evt = C.CGEventCreateMouseEvent(src, spec.type_up, _macLastPos.x, _macLastPos.y, spec.cg_btn);
   if (!evt) return;
+  C.CGEventSetIntegerValueField(evt, kCGMouseEventClickState, mac_getClickCount());
   C.CGEventPost(kCGHIDEventTap, evt);
   F.CFRelease(evt);
 }
@@ -188,9 +205,27 @@ function mac_mouse_getPos(): { x: number; y: number } {
 
 function mac_mouse_setPos(x: number, y: number): void {
   const C = cg();
+  const F = cf();
   if (!C) return;
-  C.CGWarpMouseCursorPosition(x, y);
-  C.CGAssociateMouseAndMouseCursorPosition(true);
+
+  const leftDown = C.CGEventSourceButtonState(kCGEventSourceStateHIDSystemState, kCGMouseButtonLeft);
+  const rightDown = C.CGEventSourceButtonState(kCGEventSourceStateHIDSystemState, kCGMouseButtonRight);
+
+  if ((leftDown || rightDown) && F) {
+    const src = macMouseSource();
+    if (!src) return;
+    const [dragType, dragBtn] = leftDown
+      ? [kCGEventLeftMouseDragged, kCGMouseButtonLeft]
+      : [kCGEventRightMouseDragged, kCGMouseButtonRight];
+    const evt = C.CGEventCreateMouseEvent(src, dragType, x, y, dragBtn);
+    if (evt) {
+      C.CGEventPost(kCGHIDEventTap, evt);
+      F.CFRelease(evt);
+    }
+  } else {
+    C.CGWarpMouseCursorPosition(x, y);
+    C.CGAssociateMouseAndMouseCursorPosition(true);
+  }
   _macLastPos = { x, y };
 }
 

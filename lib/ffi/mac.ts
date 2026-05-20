@@ -336,12 +336,14 @@ export function hasAppKit(): boolean { tryDlopen(); return _appkitLoaded; }
 export const kCGEventSourceStateHIDSystemState = 1;
 export const kCGHIDEventTap = 0;
 
-export const kCGEventLeftMouseDown  = 1;
-export const kCGEventLeftMouseUp    = 2;
-export const kCGEventRightMouseDown = 3;
-export const kCGEventRightMouseUp   = 4;
-export const kCGEventOtherMouseDown = 25;
-export const kCGEventOtherMouseUp   = 26;
+export const kCGEventLeftMouseDown    = 1;
+export const kCGEventLeftMouseUp      = 2;
+export const kCGEventRightMouseDown   = 3;
+export const kCGEventRightMouseUp     = 4;
+export const kCGEventLeftMouseDragged = 6;
+export const kCGEventRightMouseDragged = 7;
+export const kCGEventOtherMouseDown   = 25;
+export const kCGEventOtherMouseUp     = 26;
 
 export const kCGMouseButtonLeft   = 0;
 export const kCGMouseButtonRight  = 1;
@@ -352,6 +354,7 @@ export const kCGScrollEventUnitPixel = 1;
 // CGEvent integer-field keys used by mac_mouse_press/release to inject
 // button presses without having to supply a cursor position (since we
 // can't read CGEventGetLocation — struct-by-value return is unsupported).
+export const kCGMouseEventClickState    = 1;
 export const kCGMouseEventButtonNumber = 3;
 
 // CGWindowListCopyWindowInfo option flags
