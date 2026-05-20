@@ -47,6 +47,7 @@ mod mac {
     pub type CGEventSourceStateID = u32;
     pub type CGEventTapLocation = u32;
     pub type CGScrollEventUnit = u32;
+    pub type CGEventField = u32;
 
     #[repr(C)]
     #[derive(Copy, Clone)]
@@ -62,6 +63,8 @@ mod mac {
     pub const kCGEventLeftMouseUp: CGEventType = 2;
     pub const kCGEventRightMouseDown: CGEventType = 3;
     pub const kCGEventRightMouseUp: CGEventType = 4;
+    pub const kCGEventLeftMouseDragged: CGEventType = 6;
+    pub const kCGEventRightMouseDragged: CGEventType = 7;
     pub const kCGEventOtherMouseDown: CGEventType = 25;
     pub const kCGEventOtherMouseUp: CGEventType = 26;
 
@@ -70,6 +73,8 @@ mod mac {
     pub const kCGMouseButtonCenter: CGMouseButton = 2;
 
     pub const kCGScrollEventUnitPixel: CGScrollEventUnit = 1;
+
+    pub const kCGMouseEventClickState: CGEventField = 1;
 
     extern "C" {
         pub fn CGEventSourceCreate(stateID: CGEventSourceStateID) -> CGEventSourceRef;
@@ -89,6 +94,11 @@ mod mac {
             ...
         ) -> CGEventRef;
         pub fn CGEventPost(tap: CGEventTapLocation, event: CGEventRef);
+        pub fn CGEventSetIntegerValueField(
+            event: CGEventRef,
+            field: CGEventField,
+            value: i64,
+        );
         pub fn CGEventSourceButtonState(
             stateID: CGEventSourceStateID,
             button: CGMouseButton,
@@ -109,6 +119,31 @@ fn mac_get_cursor_pos() -> mac::CGPoint {
         let pt = mac::CGEventGetLocation(evt);
         mac::CFRelease(evt);
         pt
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod click_state {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static LAST_CLICK: Mutex<Option<Instant>> = Mutex::new(None);
+    const DOUBLE_CLICK_MS: u128 = 500;
+
+    pub fn get_click_count() -> i64 {
+        let mut last = LAST_CLICK.lock().unwrap();
+        let now = Instant::now();
+        let count = match *last {
+            Some(t) if now.duration_since(t).as_millis() < DOUBLE_CLICK_MS => {
+                *last = None;
+                2
+            }
+            _ => {
+                *last = Some(now);
+                1
+            }
+        };
+        count
     }
 }
 
@@ -134,6 +169,8 @@ fn do_press(button: i32) {
             let pt = mac_get_cursor_pos();
             let evt = mac::CGEventCreateMouseEvent(src, evt_type, pt, cg_button);
             if !evt.is_null() {
+                let count = click_state::get_click_count();
+                mac::CGEventSetIntegerValueField(evt, mac::kCGMouseEventClickState, count);
                 mac::CGEventPost(mac::kCGHIDEventTap, evt);
                 mac::CFRelease(evt);
             }
@@ -151,6 +188,8 @@ fn do_release(button: i32) {
             let pt = mac_get_cursor_pos();
             let evt = mac::CGEventCreateMouseEvent(src, evt_type, pt, cg_button);
             if !evt.is_null() {
+                let count = click_state::get_click_count();
+                mac::CGEventSetIntegerValueField(evt, mac::kCGMouseEventClickState, count);
                 mac::CGEventPost(mac::kCGHIDEventTap, evt);
                 mac::CFRelease(evt);
             }
@@ -209,10 +248,35 @@ fn platform_get_pos() -> (i32, i32) {
 
 #[cfg(target_os = "macos")]
 fn platform_set_pos(x: i32, y: i32) {
+    let pt = mac::CGPoint { x: x as f64, y: y as f64 };
     unsafe {
-        let pt = mac::CGPoint { x: x as f64, y: y as f64 };
-        mac::CGWarpMouseCursorPosition(pt);
-        mac::CGAssociateMouseAndMouseCursorPosition(true);
+        let left_down = mac::CGEventSourceButtonState(
+            mac::kCGEventSourceStateHIDSystemState,
+            mac::kCGMouseButtonLeft,
+        );
+        let right_down = mac::CGEventSourceButtonState(
+            mac::kCGEventSourceStateHIDSystemState,
+            mac::kCGMouseButtonRight,
+        );
+
+        if left_down || right_down {
+            let src = mac::CGEventSourceCreate(mac::kCGEventSourceStateHIDSystemState);
+            if src.is_null() { return; }
+            let (drag_type, drag_button) = if left_down {
+                (mac::kCGEventLeftMouseDragged, mac::kCGMouseButtonLeft)
+            } else {
+                (mac::kCGEventRightMouseDragged, mac::kCGMouseButtonRight)
+            };
+            let evt = mac::CGEventCreateMouseEvent(src, drag_type, pt, drag_button);
+            if !evt.is_null() {
+                mac::CGEventPost(mac::kCGHIDEventTap, evt);
+                mac::CFRelease(evt);
+            }
+            mac::CFRelease(src);
+        } else {
+            mac::CGWarpMouseCursorPosition(pt);
+            mac::CGAssociateMouseAndMouseCursorPosition(true);
+        }
     }
 }
 
