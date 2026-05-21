@@ -1,43 +1,24 @@
+// Non-Linux keyboard implementation.
+//
+// macOS uses Quartz Event Services (CGEventCreateKeyboardEvent +
+// CGEventPost / CGEventSourceKeyState).  Windows uses SendInput with
+// INPUT_KEYBOARD events and GetAsyncKeyState for state queries.  Both
+// platforms expose a single OS-native input API with no variant fan-out,
+// so this file is the only keyboard implementation on those platforms.
+//
+// On Linux, see ../keyboard_x11.rs (XTest) and ../keyboard_portal.rs
+// (libei via xdg-desktop-portal RemoteDesktop) — the build system selects
+// one of those crates per backend variant rather than runtime-dispatching
+// at the language level.
+
+// Pulled in only by the cfg-gated macOS/Windows export blocks below.
+// On Linux this file is intentionally empty (the per-variant crates
+// `mechatron-keyboard-x11` and `mechatron-keyboard-portal` carry the
+// keyboard implementation instead).
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use napi::bindgen_prelude::*;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi_derive::napi;
-
-#[cfg(target_os = "linux")]
-use crate::x11::*;
-
-// ==================== Linux ====================
-
-#[cfg(target_os = "linux")]
-fn do_press(keycode: u32) {
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
-        XTestFakeKeyEvent(display, xkeycode as u32, True_, CurrentTime);
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn do_release(keycode: u32) {
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
-        XTestFakeKeyEvent(display, xkeycode as u32, False_, CurrentTime);
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_key_state(keycode: i32) -> bool {
-    unsafe {
-        if !is_xtest_available() { return false; }
-        let display = get_display();
-        let mut keys = [0i8; 32];
-        XQueryKeymap(display, &mut keys as *mut [i8; 32] as *mut [std::ffi::c_char; 32]);
-        let xkeycode = XKeysymToKeycode(display, keycode as KeySym);
-        (keys[(xkeycode / 8) as usize] & (1 << (xkeycode % 8))) != 0
-    }
-}
 
 // ==================== macOS ====================
 
@@ -150,17 +131,52 @@ fn platform_get_key_state(keycode: i32) -> bool {
     }
 }
 
+// ==================== AsyncTask wrappers ====================
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct PressTask(u32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for PressTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { do_press(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct ReleaseTask(u32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for ReleaseTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { do_release(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct GetKeyStateTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for GetKeyStateTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_get_key_state(self.0)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "keyboard_press")]
-pub fn keyboard_press(keycode: i32) {
-    do_press(keycode as u32);
+pub fn keyboard_press(keycode: i32) -> AsyncTask<PressTask> {
+    AsyncTask::new(PressTask(keycode as u32))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "keyboard_release")]
-pub fn keyboard_release(keycode: i32) {
-    do_release(keycode as u32);
+pub fn keyboard_release(keycode: i32) -> AsyncTask<ReleaseTask> {
+    AsyncTask::new(ReleaseTask(keycode as u32))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "keyboard_getKeyState")]
-pub fn keyboard_get_key_state(keycode: i32) -> bool {
-    platform_get_key_state(keycode)
+pub fn keyboard_get_key_state(keycode: i32) -> AsyncTask<GetKeyStateTask> {
+    AsyncTask::new(GetKeyStateTask(keycode))
 }

@@ -1,162 +1,38 @@
+// Non-Linux screen implementation.
+//
+// macOS uses NSScreen (display geometry) and CGDisplay::screenshot
+// (pixel capture).  Windows uses EnumDisplayMonitors / GetMonitorInfoW
+// for geometry and BitBlt + GetDIBits for capture.  Both platforms
+// expose a single OS-native screen-capture API with no variant
+// fan-out, so this file is the only screen implementation on those
+// platforms.
+//
+// On Linux, see ../screen_x11.rs (XRandR + XGetImage) and
+// ../screen_portal.rs (xdg-desktop-portal ScreenCast + PipeWire) — the
+// build system selects one of those crates per backend variant rather
+// than runtime-dispatching at the language level.
+
+// Pulled in only by the cfg-gated macOS/Windows code below.  On Linux
+// this file is intentionally empty (the per-variant crates
+// `mechatron-screen-x11` and `mechatron-screen-portal` carry the screen
+// implementation instead).
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi::bindgen_prelude::*;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi_derive::napi;
 
-#[cfg(target_os = "linux")]
-use std::ffi::{c_int, c_long, c_ulong, c_void};
-#[cfg(target_os = "linux")]
-use std::ptr;
-
-#[cfg(target_os = "linux")]
-use crate::x11::*;
-
-type Rect = (i32, i32, i32, i32);
-
-#[cfg(target_os = "linux")]
-fn intersects(a: Rect, b: Rect) -> bool {
-    a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.3 && a.1 + a.3 > b.1
-}
-
-#[cfg(target_os = "linux")]
-fn intersect_bounds(a: Rect, b: Rect) -> Rect {
-    let l = a.0.max(b.0);
-    let t = a.1.max(b.1);
-    let r = (a.0 + a.2).min(b.0 + b.2);
-    let bot = (a.1 + a.3).min(b.1 + b.3);
-    if r > l && bot > t { (l, t, r - l, bot - t) } else { (0, 0, 0, 0) }
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct RawScreenData {
+    bx: i32, by: i32, bw: i32, bh: i32,
+    ux: i32, uy: i32, uw: i32, uh: i32,
 }
 
 // =============================================================================
-// screen_synchronize
+// platform_synchronize
 // =============================================================================
-
-#[cfg(target_os = "linux")]
-#[napi(js_name = "screen_synchronize")]
-pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
-    let mut screens: Vec<(Rect, Rect)> = Vec::new();
-
-    unsafe {
-        let display = get_display();
-        if display.is_null() {
-            return Ok(Either::B(env.get_null()?));
-        }
-
-        let _xe = XDismissErrors::new();
-
-        let net_workarea = XInternAtom(display, b"_NET_WORKAREA\0".as_ptr() as _, True_);
-        let count = XScreenCount(display);
-        let mut used_xrandr = false;
-
-        // XRandR (RandR 1.5 XRRGetMonitors) replaces the older Xinerama
-        // query.  Unlike Xinerama, it returns a primary-monitor flag and
-        // per-monitor name atom; we only consume the geometry here but
-        // the richer data is available for future callers.  get_active=1
-        // filters out disabled outputs so we don't enumerate monitors
-        // that aren't currently driving a display.
-        if is_xrandr_available() {
-            let root = XDefaultRootWindow(display);
-            let mut n: c_int = 0;
-            let info = XRRGetMonitors(display, root, True_, &mut n);
-            if !info.is_null() && n > 0 {
-                // XRandR reports primary via a flag; place it at index 0 to
-                // match the Windows/macOS convention and the legacy
-                // Xinerama+XDefaultScreen behaviour.
-                let mut primary_seen = false;
-                for i in 0..n as usize {
-                    let mi = &*info.add(i);
-                    let bounds = (mi.x, mi.y, mi.width, mi.height);
-                    if mi.primary != 0 && !primary_seen {
-                        screens.insert(0, (bounds, bounds));
-                        primary_seen = true;
-                    } else {
-                        screens.push((bounds, bounds));
-                    }
-                }
-                XRRFreeMonitors(info);
-                used_xrandr = true;
-            }
-        }
-
-        if screens.is_empty() {
-            let primary = XDefaultScreen(display);
-            for i in 0..count {
-                let screen = XScreenOfDisplay(display, i);
-                let w = XWidthOfScreen(screen);
-                let h = XHeightOfScreen(screen);
-                let bounds = (0, 0, w, h);
-                if i == primary {
-                    screens.insert(0, (bounds, bounds));
-                } else {
-                    screens.push((bounds, bounds));
-                }
-            }
-        }
-
-        if net_workarea != None_ {
-            // Under XRandR every monitor shares the single X screen returned
-            // by XDefaultScreen; no point calling it once per iteration.
-            let default_screen = if used_xrandr { XDefaultScreen(display) } else { -1 };
-            for i in 0..screens.len() {
-                let root_screen = if used_xrandr { default_screen } else { i as c_int };
-                let win = XRootWindow(display, root_screen);
-
-                let mut type_: Atom = 0;
-                let mut format: c_int = 0;
-                let mut n_items: c_ulong = 0;
-                let mut bytes_after: c_ulong = 0;
-                let mut result: *mut u8 = ptr::null_mut();
-
-                let status = XGetWindowProperty(
-                    display, win, net_workarea, 0, 4, False_, AnyPropertyType,
-                    &mut type_, &mut format, &mut n_items, &mut bytes_after, &mut result,
-                );
-
-                if status == 0 && !result.is_null() && type_ == XA_CARDINAL && format == 32 && n_items == 4 {
-                    let usable = result as *const c_long;
-                    let u = (
-                        *usable.add(0) as i32,
-                        *usable.add(1) as i32,
-                        *usable.add(2) as i32,
-                        *usable.add(3) as i32,
-                    );
-                    screens[i].1 = if used_xrandr {
-                        intersect_bounds(u, screens[i].0)
-                    } else {
-                        u
-                    };
-                }
-                if !result.is_null() { XFree(result as *mut c_void); }
-            }
-        }
-    }
-
-    if screens.is_empty() {
-        return Ok(Either::B(env.get_null()?));
-    }
-
-    let mut arr = env.create_array(screens.len() as u32)?;
-    for (i, &(bounds, usable)) in screens.iter().enumerate() {
-        let mut obj = env.create_object()?;
-        let mut bo = env.create_object()?;
-        bo.set("x", bounds.0)?;
-        bo.set("y", bounds.1)?;
-        bo.set("w", bounds.2)?;
-        bo.set("h", bounds.3)?;
-        let mut uo = env.create_object()?;
-        uo.set("x", usable.0)?;
-        uo.set("y", usable.1)?;
-        uo.set("w", usable.2)?;
-        uo.set("h", usable.3)?;
-        obj.set("bounds", bo)?;
-        obj.set("usable", uo)?;
-        arr.set(i as u32, obj)?;
-    }
-
-    Ok(Either::A(arr.coerce_to_object()?))
-}
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "screen_synchronize")]
-pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
+fn platform_synchronize() -> Option<Vec<RawScreenData>> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Foundation::*;
 
@@ -193,7 +69,7 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     }
 
     if raw.is_empty() {
-        return Ok(Either::B(env.get_null()?));
+        return None;
     }
 
     // Put primary monitor first (origin at 0,0)
@@ -203,30 +79,13 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
         b_primary.cmp(&a_primary)
     });
 
-    let mut arr = env.create_array(raw.len() as u32)?;
-    for (i, &(bx, by, bw, bh, ux, uy, uw, uh)) in raw.iter().enumerate() {
-        let mut obj = env.create_object()?;
-        let mut bo = env.create_object()?;
-        bo.set("x", bx)?;
-        bo.set("y", by)?;
-        bo.set("w", bw)?;
-        bo.set("h", bh)?;
-        let mut uo = env.create_object()?;
-        uo.set("x", ux)?;
-        uo.set("y", uy)?;
-        uo.set("w", uw)?;
-        uo.set("h", uh)?;
-        obj.set("bounds", bo)?;
-        obj.set("usable", uo)?;
-        arr.set(i as u32, obj)?;
-    }
-
-    Ok(Either::A(arr.coerce_to_object()?))
+    Some(raw.iter().map(|&(bx, by, bw, bh, ux, uy, uw, uh)| {
+        RawScreenData { bx, by, bw, bh, ux, uy, uw, uh }
+    }).collect())
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "screen_synchronize")]
-pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNull>> {
+fn platform_synchronize() -> Option<Vec<RawScreenData>> {
     use objc2_app_kit::NSScreen;
     use objc2::MainThreadMarker;
 
@@ -234,114 +93,42 @@ pub fn screen_synchronize(env: Env) -> Result<Either<napi::JsObject, napi::JsNul
     let ns_screens = NSScreen::screens(mtm);
     let count = ns_screens.count();
     if count == 0 {
-        return Ok(Either::B(env.get_null()?));
+        return None;
     }
 
-    let mut arr = env.create_array(count as u32)?;
+    let mut data = Vec::with_capacity(count);
 
     for i in 0..count {
         let screen = ns_screens.objectAtIndex(i);
         let frame = screen.frame();
         let visible = screen.visibleFrame();
 
-        let fx = frame.origin.x as i32;
-        let fy = frame.origin.y as i32;
-        let fw = frame.size.width as i32;
-        let fh = frame.size.height as i32;
-        let vx = visible.origin.x as i32;
-        let vy = visible.origin.y as i32;
-        let vw = visible.size.width as i32;
-        let vh = visible.size.height as i32;
-
-        let mut bo = env.create_object()?;
-        bo.set("x", fx)?;
-        bo.set("y", fy)?;
-        bo.set("w", fw)?;
-        bo.set("h", fh)?;
-
-        let mut uo = env.create_object()?;
-        uo.set("x", vx)?;
-        uo.set("y", vy)?;
-        uo.set("w", vw)?;
-        uo.set("h", vh)?;
-
-        let mut obj = env.create_object()?;
-        obj.set("bounds", bo)?;
-        obj.set("usable", uo)?;
-        arr.set(i as u32, obj)?;
+        data.push(RawScreenData {
+            bx: frame.origin.x as i32,
+            by: frame.origin.y as i32,
+            bw: frame.size.width as i32,
+            bh: frame.size.height as i32,
+            ux: visible.origin.x as i32,
+            uy: visible.origin.y as i32,
+            uw: visible.size.width as i32,
+            uh: visible.size.height as i32,
+        });
     }
 
-    Ok(Either::A(arr.coerce_to_object()?))
+    Some(data)
 }
 
 // =============================================================================
-// screen_grabScreen
+// platform_grab_screen
 // =============================================================================
-
-#[cfg(target_os = "linux")]
-#[napi(js_name = "screen_grabScreen")]
-pub fn screen_grab_screen(
-    env: Env,
-    x: i32, y: i32, w: i32, h: i32,
-    window_handle: Option<f64>,
-) -> Result<Either<Uint32Array, napi::JsNull>> {
-    unsafe {
-        let display = get_display();
-        if display.is_null() || w <= 0 || h <= 0 {
-            return Ok(Either::B(env.get_null()?));
-        }
-        let _xe = XDismissErrors::new();
-
-        let win = match window_handle {
-            Some(h) if h != 0.0 => h as Window,
-            _ => XDefaultRootWindow(display),
-        };
-
-        let img = XGetImage(display, win, x, y, w as u32, h as u32, AllPlanes, ZPixmap);
-        if img.is_null() {
-            return Ok(Either::B(env.get_null()?));
-        }
-
-        let iw = (*img).width;
-        let ih = (*img).height;
-        if iw <= 0 || ih <= 0 {
-            XDestroyImage(img);
-            return Ok(Either::B(env.get_null()?));
-        }
-
-        let len = (iw * ih) as usize;
-        let mut pixels = vec![0u32; len];
-        let red_mask = (*img).red_mask;
-        let green_mask = (*img).green_mask;
-        let blue_mask = (*img).blue_mask;
-
-        for yy in 0..ih {
-            for xx in 0..iw {
-                let pixel = XGetPixel(img, xx, yy);
-                let r = ((pixel & red_mask) >> 16) as u8;
-                let g = ((pixel & green_mask) >> 8) as u8;
-                let b = (pixel & blue_mask) as u8;
-                pixels[(yy * iw + xx) as usize] = 0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
-            }
-        }
-        XDestroyImage(img);
-
-        Ok(Either::A(Uint32Array::new(pixels)))
-    }
-}
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "screen_grabScreen")]
-pub fn screen_grab_screen(
-    env: Env,
-    x: i32, y: i32, w: i32, h: i32,
-    window_handle: Option<f64>,
-) -> Result<Either<Uint32Array, napi::JsNull>> {
+fn platform_grab_screen(x: i32, y: i32, w: i32, h: i32, window_handle: Option<f64>) -> Option<Vec<u32>> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Foundation::*;
 
     if w <= 0 || h <= 0 {
-        return Ok(Either::B(env.get_null()?));
+        return None;
     }
 
     unsafe {
@@ -351,7 +138,7 @@ pub fn screen_grab_screen(
         };
         let hdc_screen = GetDC(hwnd);
         if hdc_screen.is_invalid() {
-            return Ok(Either::B(env.get_null()?));
+            return None;
         }
 
         let hdc_mem = CreateCompatibleDC(hdc_screen);
@@ -390,17 +177,12 @@ pub fn screen_grab_screen(
         let _ = DeleteDC(hdc_mem);
         ReleaseDC(hwnd, hdc_screen);
 
-        Ok(Either::A(Uint32Array::new(buf)))
+        Some(buf)
     }
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "screen_grabScreen")]
-pub fn screen_grab_screen(
-    env: Env,
-    x: i32, y: i32, w: i32, h: i32,
-    window_handle: Option<f64>,
-) -> Result<Either<Uint32Array, napi::JsNull>> {
+fn platform_grab_screen(x: i32, y: i32, w: i32, h: i32, window_handle: Option<f64>) -> Option<Vec<u32>> {
     use core_graphics::display::*;
     use core_graphics::geometry::{CGPoint, CGSize, CGRect};
 
@@ -432,7 +214,7 @@ pub fn screen_grab_screen(
     const BITMAP_INFO: u32 = (4 << 12) | 2;
 
     if w <= 0 || h <= 0 {
-        return Ok(Either::B(env.get_null()?));
+        return None;
     }
 
     let rect = CGRect::new(
@@ -460,13 +242,13 @@ pub fn screen_grab_screen(
 
     let image = match image {
         Some(img) => img,
-        None => return Ok(Either::B(env.get_null()?)),
+        None => return None,
     };
 
     let iw = image.width();
     let ih = image.height();
     if iw == 0 || ih == 0 {
-        return Ok(Either::B(env.get_null()?));
+        return None;
     }
 
     let len = iw * ih;
@@ -486,7 +268,7 @@ pub fn screen_grab_screen(
         CGColorSpaceRelease(color_space);
 
         if context.is_null() {
-            return Ok(Either::B(env.get_null()?));
+            return None;
         }
 
         let draw_rect = CGRect::new(
@@ -502,5 +284,131 @@ pub fn screen_grab_screen(
         CGContextRelease(context);
     }
 
-    Ok(Either::A(Uint32Array::new(pixels)))
+    Some(pixels)
+}
+
+// =============================================================================
+// AsyncTask wrappers
+// =============================================================================
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct SynchronizeTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for SynchronizeTask {
+    type Output = Option<Vec<RawScreenData>>;
+    type JsValue = Either<napi::JsObject, napi::JsNull>;
+    fn compute(&mut self) -> Result<Self::Output> {
+        Ok(platform_synchronize())
+    }
+    fn resolve(&mut self, env: Env, data: Self::Output) -> Result<Self::JsValue> {
+        match data {
+            None => Ok(Either::B(env.get_null()?)),
+            Some(screens) => {
+                let mut arr = env.create_array(screens.len() as u32)?;
+                for (i, s) in screens.iter().enumerate() {
+                    let mut obj = env.create_object()?;
+                    let mut bo = env.create_object()?;
+                    bo.set("x", s.bx)?;
+                    bo.set("y", s.by)?;
+                    bo.set("w", s.bw)?;
+                    bo.set("h", s.bh)?;
+                    let mut uo = env.create_object()?;
+                    uo.set("x", s.ux)?;
+                    uo.set("y", s.uy)?;
+                    uo.set("w", s.uw)?;
+                    uo.set("h", s.uh)?;
+                    obj.set("bounds", bo)?;
+                    obj.set("usable", uo)?;
+                    arr.set(i as u32, obj)?;
+                }
+                Ok(Either::A(arr.coerce_to_object()?))
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct GrabScreenTask {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    window_handle: Option<f64>,
+}
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for GrabScreenTask {
+    type Output = Option<Vec<u32>>;
+    type JsValue = Either<Uint32Array, napi::JsNull>;
+    fn compute(&mut self) -> Result<Self::Output> {
+        Ok(platform_grab_screen(self.x, self.y, self.w, self.h, self.window_handle))
+    }
+    fn resolve(&mut self, env: Env, data: Self::Output) -> Result<Self::JsValue> {
+        match data {
+            None => Ok(Either::B(env.get_null()?)),
+            Some(pixels) => Ok(Either::A(Uint32Array::new(pixels))),
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct GetPortalTokenTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for GetPortalTokenTask {
+    type Output = Option<String>;
+    type JsValue = Option<String>;
+    fn compute(&mut self) -> Result<Self::Output> {
+        // Portal token persistence is portal-only — no-op on macOS/Windows.
+        Ok(None)
+    }
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Self::JsValue> {
+        Ok(out)
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct SetPortalTokenTask {
+    _token: Option<String>,
+}
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for SetPortalTokenTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<Self::Output> {
+        // Portal token persistence is portal-only — no-op on macOS/Windows.
+        Ok(())
+    }
+    fn resolve(&mut self, _env: Env, _: Self::Output) -> Result<Self::JsValue> {
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Exported napi functions
+// =============================================================================
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[napi(js_name = "screen_synchronize")]
+pub fn screen_synchronize() -> AsyncTask<SynchronizeTask> {
+    AsyncTask::new(SynchronizeTask)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[napi(js_name = "screen_grabScreen")]
+pub fn screen_grab_screen(
+    x: i32, y: i32, w: i32, h: i32,
+    window_handle: Option<f64>,
+) -> AsyncTask<GrabScreenTask> {
+    AsyncTask::new(GrabScreenTask { x, y, w, h, window_handle })
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[napi(js_name = "screen_getPortalToken")]
+pub fn screen_get_portal_token() -> AsyncTask<GetPortalTokenTask> {
+    AsyncTask::new(GetPortalTokenTask)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[napi(js_name = "screen_setPortalToken")]
+pub fn screen_set_portal_token(token: Option<String>) -> AsyncTask<SetPortalTokenTask> {
+    AsyncTask::new(SetPortalTokenTask { _token: token })
 }

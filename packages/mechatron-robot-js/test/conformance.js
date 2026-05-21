@@ -330,6 +330,8 @@ check("Window.prototype.getClient", typeof robot.Window.prototype.getClient === 
 check("Window.prototype.setClient", typeof robot.Window.prototype.setClient === "function");
 check("Window.prototype.mapToClient", typeof robot.Window.prototype.mapToClient === "function");
 check("Window.prototype.mapToScreen", typeof robot.Window.prototype.mapToScreen === "function");
+check("Window.prototype.eq",    typeof robot.Window.prototype.eq === "function");
+check("Window.prototype.ne",    typeof robot.Window.prototype.ne === "function");
 check("Window.prototype.clone",  typeof robot.Window.prototype.clone === "function");
 check("Window.getList",          typeof robot.Window.getList === "function");
 check("Window.getActive",        typeof robot.Window.getActive === "function");
@@ -360,6 +362,8 @@ check("Process.prototype.kill",  typeof robot.Process.prototype.kill === "functi
 check("Process.prototype.hasExited", typeof robot.Process.prototype.hasExited === "function");
 check("Process.prototype.getModules", typeof robot.Process.prototype.getModules === "function");
 check("Process.prototype.getWindows", typeof robot.Process.prototype.getWindows === "function");
+check("Process.prototype.eq",   typeof robot.Process.prototype.eq === "function");
+check("Process.prototype.ne",   typeof robot.Process.prototype.ne === "function");
 check("Process.prototype.clone", typeof robot.Process.prototype.clone === "function");
 check("Process.getList",         typeof robot.Process.getList === "function");
 check("Process.getCurrent",      typeof robot.Process.getCurrent === "function");
@@ -427,6 +431,8 @@ check("Stats.systemWrites === 0", stats.systemWrites === 0);
 check("Stats.accessWrites === 0", stats.accessWrites === 0);
 check("Stats.readErrors === 0",   stats.readErrors === 0);
 check("Stats.writeErrors === 0",  stats.writeErrors === 0);
+check("Stats.prototype.eq",      typeof robot.Memory.Stats.prototype.eq === "function");
+check("Stats.prototype.ne",      typeof robot.Memory.Stats.prototype.ne === "function");
 check("Stats.prototype.clone",   typeof robot.Memory.Stats.prototype.clone === "function");
 
 // Memory.Region
@@ -435,6 +441,12 @@ var region = robot.Memory.Region();
 check("Region.valid === false",   region.valid === false);
 check("Region.start === 0",      region.start === 0);
 check("Region.prototype.contains", typeof robot.Memory.Region.prototype.contains === "function");
+check("Region.prototype.lt",    typeof robot.Memory.Region.prototype.lt === "function");
+check("Region.prototype.gt",    typeof robot.Memory.Region.prototype.gt === "function");
+check("Region.prototype.le",    typeof robot.Memory.Region.prototype.le === "function");
+check("Region.prototype.ge",    typeof robot.Memory.Region.prototype.ge === "function");
+check("Region.prototype.eq",    typeof robot.Memory.Region.prototype.eq === "function");
+check("Region.prototype.ne",    typeof robot.Memory.Region.prototype.ne === "function");
 check("Region.prototype.clone",  typeof robot.Memory.Region.prototype.clone === "function");
 check("Region.compare",          typeof robot.Memory.Region.compare === "function");
 
@@ -455,12 +467,24 @@ check("Module.prototype.getSize", typeof robot.Module.prototype.getSize === "fun
 check("Module.prototype.getProcess", typeof robot.Module.prototype.getProcess === "function");
 check("Module.prototype.contains", typeof robot.Module.prototype.contains === "function");
 check("Module.prototype.getSegments", typeof robot.Module.prototype.getSegments === "function");
+check("Module.prototype.lt",    typeof robot.Module.prototype.lt === "function");
+check("Module.prototype.gt",    typeof robot.Module.prototype.gt === "function");
+check("Module.prototype.le",    typeof robot.Module.prototype.le === "function");
+check("Module.prototype.ge",    typeof robot.Module.prototype.ge === "function");
+check("Module.prototype.eq",    typeof robot.Module.prototype.eq === "function");
+check("Module.prototype.ne",    typeof robot.Module.prototype.ne === "function");
 check("Module.prototype.clone",  typeof robot.Module.prototype.clone === "function");
 check("Module.compare",          typeof robot.Module.compare === "function");
 
 // Module.Segment
 check("Segment() without new",   robot.Module.Segment() != null);
 check("Segment.prototype.contains", typeof robot.Module.Segment.prototype.contains === "function");
+check("Segment.prototype.lt",   typeof robot.Module.Segment.prototype.lt === "function");
+check("Segment.prototype.gt",   typeof robot.Module.Segment.prototype.gt === "function");
+check("Segment.prototype.le",   typeof robot.Module.Segment.prototype.le === "function");
+check("Segment.prototype.ge",   typeof robot.Module.Segment.prototype.ge === "function");
+check("Segment.prototype.eq",   typeof robot.Module.Segment.prototype.eq === "function");
+check("Segment.prototype.ne",   typeof robot.Module.Segment.prototype.ne === "function");
 check("Segment.prototype.clone", typeof robot.Module.Segment.prototype.clone === "function");
 check("Segment.compare",         typeof robot.Module.Segment.compare === "function");
 
@@ -591,6 +615,193 @@ check("Timer.getElapsed >= 0", t.getElapsed() >= 0);
 var keys = robot.Keyboard.compile("{ESCAPE}");
 check("Keyboard.compile('{ESCAPE}') produces events",
   Array.isArray(keys) && keys.length >= 2);
+
+////////////////////////////////////////////////////////////////////////////////
+// Native behavioral smoke tests — synchronous API contract
+//
+// robot-js 2.x was fully synchronous: every method blocked until it completed
+// and returned the result directly.  The compat layer must preserve this
+// contract.  These tests call each method WITHOUT await and verify the return
+// value is the expected type (not a Promise).
+////////////////////////////////////////////////////////////////////////////////
+
+function isPromise(v) { return v != null && typeof v.then === "function"; }
+
+function checkSync(description, fn) {
+  if (!hasNative) { skipped++; return; }
+  try {
+    var result = fn();
+    if (isPromise(result)) {
+      failed++;
+      console.error("  FAIL: " + description + " (returned Promise — expected sync)");
+    } else {
+      check(description, true);
+    }
+  } catch (e) {
+    failed++;
+    console.error("  FAIL: " + description + " (threw: " + e.message + ")");
+  }
+}
+
+function checkSyncValue(description, fn, predicate) {
+  if (!hasNative) { skipped++; return; }
+  try {
+    var result = fn();
+    if (isPromise(result)) {
+      failed++;
+      console.error("  FAIL: " + description + " (returned Promise — expected sync)");
+    } else {
+      check(description, predicate(result));
+    }
+  } catch (e) {
+    failed++;
+    console.error("  FAIL: " + description + " (threw: " + e.message + ")");
+  }
+}
+
+section("Sync API Contract — Window");
+
+checkSyncValue("Window.getList() returns array synchronously",
+  function () { return robot.Window.getList(); },
+  function (v) { return Array.isArray(v); });
+
+checkSyncValue("Window.getList() is non-empty",
+  function () { return robot.Window.getList(); },
+  function (v) { return Array.isArray(v) && v.length > 0; });
+
+checkSyncValue("Window.isAxEnabled() returns boolean synchronously",
+  function () { return robot.Window.isAxEnabled(); },
+  function (v) { return typeof v === "boolean"; });
+
+if (hasNative && process.platform !== "darwin") {
+  checkSyncValue("Window.isAxEnabled() is true on " + process.platform,
+    function () { return robot.Window.isAxEnabled(); },
+    function (v) { return v === true; });
+}
+
+checkSyncValue("Window.getActive() returns Window synchronously",
+  function () { return robot.Window.getActive(); },
+  function (v) { return v != null; });
+
+// Instance method tests — only run if getList returns a real array
+var windowList = null;
+if (hasNative) {
+  try {
+    windowList = robot.Window.getList();
+    if (isPromise(windowList)) windowList = null;
+  } catch (_) {}
+}
+
+if (windowList && windowList.length > 0) {
+  var testWin = windowList[0];
+
+  checkSyncValue("Window.isValid() returns boolean synchronously",
+    function () { return testWin.isValid(); },
+    function (v) { return typeof v === "boolean"; });
+
+  checkSyncValue("Window.getTitle() returns string synchronously",
+    function () { return testWin.getTitle(); },
+    function (v) { return typeof v === "string"; });
+
+  checkSyncValue("Window.getPID() returns number synchronously",
+    function () { return testWin.getPID(); },
+    function (v) { return typeof v === "number" && v >= 0; });
+
+  checkSync("Window.getHandle() returns synchronously",
+    function () { return testWin.getHandle(); });
+
+  checkSyncValue("Window.getBounds() returns Bounds synchronously",
+    function () { return testWin.getBounds(); },
+    function (v) { return v != null && typeof v.x === "number" && typeof v.w === "number"; });
+
+  checkSyncValue("Window.getClient() returns Bounds synchronously",
+    function () { return testWin.getClient(); },
+    function (v) { return v != null && typeof v.x === "number" && typeof v.w === "number"; });
+} else if (hasNative) {
+  skipped += 6;
+  console.log("  (skipped Window instance tests — getList not sync or empty)");
+}
+
+section("Sync API Contract — Screen");
+
+checkSyncValue("Screen.synchronize() returns boolean synchronously",
+  function () { return robot.Screen.synchronize(); },
+  function (v) { return typeof v === "boolean"; });
+
+checkSyncValue("Screen.getList() returns non-empty array",
+  function () { return robot.Screen.getList(); },
+  function (v) { return Array.isArray(v) && v.length > 0; });
+
+checkSyncValue("Screen.getMain() returns Screen synchronously",
+  function () { return robot.Screen.getMain(); },
+  function (v) { return v != null; });
+
+var mainScreen = null;
+if (hasNative) {
+  try {
+    mainScreen = robot.Screen.getMain();
+    if (isPromise(mainScreen)) mainScreen = null;
+  } catch (_) {}
+}
+
+if (mainScreen) {
+  checkSyncValue("Screen.getBounds() returns Bounds synchronously",
+    function () { return mainScreen.getBounds(); },
+    function (v) { return v != null && typeof v.w === "number" && v.w > 0; });
+} else if (hasNative) {
+  skipped += 1;
+}
+
+section("Sync API Contract — Process");
+
+checkSyncValue("Process.getCurrent() returns Process synchronously",
+  function () { return robot.Process.getCurrent(); },
+  function (v) { return v != null; });
+
+var currentProc = null;
+if (hasNative) {
+  try {
+    currentProc = robot.Process.getCurrent();
+    if (isPromise(currentProc)) currentProc = null;
+  } catch (_) {}
+}
+
+if (currentProc) {
+  checkSyncValue("Process.isValid() returns boolean synchronously",
+    function () { return currentProc.isValid(); },
+    function (v) { return typeof v === "boolean"; });
+
+  checkSyncValue("Process.getPID() returns number > 0",
+    function () { return currentProc.getPID(); },
+    function (v) { return typeof v === "number" && v > 0; });
+
+  checkSyncValue("Process.getName() returns string synchronously",
+    function () { return currentProc.getName(); },
+    function (v) { return typeof v === "string" && v.length > 0; });
+} else if (hasNative) {
+  skipped += 3;
+  console.log("  (skipped Process instance tests — getCurrent not sync)");
+}
+
+checkSyncValue("Process.getList() returns non-empty array synchronously",
+  function () { return robot.Process.getList(); },
+  function (v) { return Array.isArray(v) && v.length > 0; });
+
+section("Sync API Contract — Clipboard");
+
+checkSync("Clipboard.setText() returns synchronously",
+  function () { return robot.Clipboard.setText("mechatron-conformance-test"); });
+
+checkSyncValue("Clipboard.hasText() returns boolean synchronously",
+  function () { return robot.Clipboard.hasText(); },
+  function (v) { return typeof v === "boolean"; });
+
+checkSyncValue("Clipboard.getText() returns string synchronously",
+  function () { return robot.Clipboard.getText(); },
+  function (v) { return typeof v === "string" && v === "mechatron-conformance-test"; });
+
+checkSync("Clipboard.clear() returns synchronously",
+  function () { return robot.Clipboard.clear(); });
 
 ////////////////////////////////////////////////////////////////////////////////
 // Summary

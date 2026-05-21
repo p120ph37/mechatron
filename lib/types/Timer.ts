@@ -119,6 +119,22 @@ export class Timer {
     sleepSync(delay);
   }
 
+  static delay(range: Range): Promise<void>;
+  static delay(min: number, max?: number): Promise<void>;
+  static delay(a: Range | number, b?: number): Promise<void> {
+    if (typeof a !== "number" && !(a instanceof Range)) throw new TypeError("Invalid arguments");
+    let ms: number;
+    if (a instanceof Range) {
+      ms = a.getRandom();
+    } else if (b !== undefined) {
+      ms = new Range(a, b).getRandom();
+    } else {
+      ms = a;
+    }
+    if (ms <= 0) return Promise.resolve();
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   static getCpuTime(): number {
     return getCpuTimeMs();
   }

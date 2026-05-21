@@ -1,6 +1,6 @@
 import { Range } from "../types";
 import { Timer } from "../types";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import { getKeyNames, getAllKeys } from "./constants";
 
 function resolveKeyName(name: Uppercase<string>): number | undefined {
@@ -122,33 +122,33 @@ export class Keyboard {
     }
   }
 
-  click(key: number | string): void {
+  async click(key: number | string): Promise<void> {
     if (typeof key === "string") {
       const compiled = Keyboard.compile(key);
       for (const entry of compiled) {
         if (entry.down) {
-          this._native.keyboard_press(entry.key);
+          await this._native.keyboard_press(entry.key);
         } else {
-          this._native.keyboard_release(entry.key);
+          await this._native.keyboard_release(entry.key);
         }
-        Timer.sleep(this.autoDelay);
+        await Timer.delay(this.autoDelay);
       }
       return;
     }
-    this._native.keyboard_press(key);
-    Timer.sleep(this.autoDelay);
-    this._native.keyboard_release(key);
-    Timer.sleep(this.autoDelay);
+    await this._native.keyboard_press(key);
+    await Timer.delay(this.autoDelay);
+    await this._native.keyboard_release(key);
+    await Timer.delay(this.autoDelay);
   }
 
-  press(key: number): void {
-    this._native.keyboard_press(key);
-    Timer.sleep(this.autoDelay);
+  async press(key: number): Promise<void> {
+    await this._native.keyboard_press(key);
+    await Timer.delay(this.autoDelay);
   }
 
-  release(key: number): void {
-    this._native.keyboard_release(key);
-    Timer.sleep(this.autoDelay);
+  async release(key: number): Promise<void> {
+    await this._native.keyboard_release(key);
+    await Timer.delay(this.autoDelay);
   }
 
   clone(): Keyboard {
@@ -161,14 +161,14 @@ export class Keyboard {
     return compileKeys(keys) || [];
   }
 
-  static getState(keycode?: number): Record<number, boolean> | boolean {
+  static async getState(keycode?: number): Promise<Record<number, boolean> | boolean> {
     const native = getNative("keyboard");
     if (keycode !== undefined) {
-      return native.keyboard_getKeyState(keycode);
+      return await native.keyboard_getKeyState(keycode);
     }
     const state: Record<number, boolean> = {};
     for (const key of getAllKeys()) {
-      state[key] = native.keyboard_getKeyState(key);
+      state[key] = await native.keyboard_getKeyState(key);
     }
     return state;
   }

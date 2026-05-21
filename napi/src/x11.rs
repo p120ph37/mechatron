@@ -122,6 +122,9 @@ pub struct XRRMonitorInfo {
 }
 
 extern "C" {
+    // Thread safety — must be called before any other Xlib function
+    pub fn XInitThreads() -> c_int;
+
     // Core Xlib
     pub fn XOpenDisplay(name: *const c_char) -> *mut Display;
     pub fn XSync(display: *mut Display, discard: Bool) -> c_int;
@@ -263,6 +266,7 @@ static mut DISPLAY: *mut Display = ptr::null_mut();
 pub fn get_display() -> *mut Display {
     unsafe {
         DISPLAY_INIT.call_once(|| {
+            XInitThreads();
             DISPLAY = XOpenDisplay(ptr::null());
         });
         DISPLAY

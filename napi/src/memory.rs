@@ -3,7 +3,12 @@ use napi_derive::napi;
 
 // ── Shared types (all platforms) ────────────────────────────────────────────
 
-struct RegionInfo {
+#[napi(js_name = "memory_bufferAddress")]
+pub fn memory_buffer_address(buf: Buffer) -> BigInt {
+    u64_to_bi(buf.as_ptr() as u64)
+}
+
+pub struct RegionInfo {
     valid: bool,
     bound: bool,
     start: u64,
@@ -27,20 +32,48 @@ impl Default for RegionInfo {
     }
 }
 
-fn region_to_obj(env: &Env, r: &RegionInfo) -> Result<napi::JsObject> {
-    let mut o = env.create_object()?;
-    o.set("valid", r.valid)?;
-    o.set("bound", r.bound)?;
-    o.set("start", r.start as f64)?;
-    o.set("stop", r.stop as f64)?;
-    o.set("size", r.size as f64)?;
-    o.set("readable", r.readable)?;
-    o.set("writable", r.writable)?;
-    o.set("executable", r.executable)?;
-    o.set("access", r.access)?;
-    o.set("private", r.private)?;
-    o.set("guarded", r.guarded)?;
-    Ok(o)
+fn bi_to_u64(bi: &BigInt) -> u64 {
+    let (sign, val, _) = bi.get_u64();
+    if sign { 0 } else { val }
+}
+
+fn u64_to_bi(val: u64) -> BigInt {
+    BigInt { sign_bit: false, words: vec![val] }
+}
+
+fn opt_bi_to_u64(bi: &Option<BigInt>, default: u64) -> u64 {
+    bi.as_ref().map(|b| bi_to_u64(b)).unwrap_or(default)
+}
+
+#[napi(object)]
+pub struct NapiRegion {
+    pub valid: bool,
+    pub bound: bool,
+    pub start: BigInt,
+    pub stop: BigInt,
+    pub size: BigInt,
+    pub readable: bool,
+    pub writable: bool,
+    pub executable: bool,
+    pub access: u32,
+    pub private: bool,
+    pub guarded: bool,
+}
+
+fn region_to_napi(r: &RegionInfo) -> NapiRegion {
+    NapiRegion {
+        valid: r.valid,
+        bound: r.bound,
+        start: u64_to_bi(r.start),
+        stop: u64_to_bi(r.stop),
+        size: u64_to_bi(r.size),
+        readable: r.readable,
+        writable: r.writable,
+        executable: r.executable,
+        access: r.access,
+        private: r.private,
+        guarded: r.guarded,
+    }
 }
 
 // ── Linux internals ─────────────────────────────────────────────────────
@@ -152,6 +185,24 @@ fn win_protect_to_flags(protect: PAGE_PROTECTION_FLAGS) -> (bool, bool, bool, bo
 }
 
 #[cfg(target_os = "windows")]
+fn win_bitmask_to_page_protect(flags: u32) -> PAGE_PROTECTION_FLAGS {
+    let r = (flags & 1) != 0;
+    let w = (flags & 2) != 0;
+    let x = (flags & 4) != 0;
+    PAGE_PROTECTION_FLAGS(if x {
+        if w { PAGE_EXECUTE_READWRITE.0 }
+        else if r { PAGE_EXECUTE_READ.0 }
+        else { PAGE_EXECUTE.0 }
+    } else if w {
+        PAGE_READWRITE.0
+    } else if r {
+        PAGE_READONLY.0
+    } else {
+        PAGE_NOACCESS.0
+    })
+}
+
+#[cfg(target_os = "windows")]
 fn win_query_regions(pid: i32, start: u64, stop: u64) -> Vec<RegionInfo> {
     let mut regions = Vec::new();
     let h = match win_open_proc(pid, PROCESS_QUERY_INFORMATION) {
@@ -159,11 +210,11 @@ fn win_query_regions(pid: i32, start: u64, stop: u64) -> Vec<RegionInfo> {
         None => return regions,
     };
     unsafe {
-        let mut addr = start as usize;
+        let mut addr: u64 = start;
         loop {
-            if addr as u64 >= stop { break; }
+            if addr >= stop { break; }
             let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
-            let ret = VirtualQueryEx(h, Some(addr as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
+            let ret = VirtualQueryEx(h, Some(addr as usize as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
             if ret == 0 { break; }
             let region_start = mbi.BaseAddress as u64;
             let region_size = mbi.RegionSize as u64;
@@ -177,8 +228,8 @@ fn win_query_regions(pid: i32, start: u64, stop: u64) -> Vec<RegionInfo> {
                     private: mbi.Type == MEM_PRIVATE, guarded,
                 });
             }
-            addr = region_end as usize;
-            if addr <= mbi.BaseAddress as usize { break; }
+            if region_end <= addr { break; }
+            addr = region_end;
         }
         let _ = CloseHandle(h);
     }
@@ -193,7 +244,7 @@ fn win_read_memory(pid: i32, address: u64, buf: &mut [u8]) -> usize {
     };
     unsafe {
         let mut bytes_read: usize = 0;
-        let result = ReadProcessMemory(h, address as *const _, buf.as_mut_ptr() as *mut _, buf.len(), Some(&mut bytes_read));
+        let result = ReadProcessMemory(h, address as usize as *const _, buf.as_mut_ptr() as *mut _, buf.len(), Some(&mut bytes_read));
         let _ = CloseHandle(h);
         if result.is_ok() { bytes_read } else { 0 }
     }
@@ -207,7 +258,7 @@ fn win_write_memory(pid: i32, address: u64, buf: &[u8]) -> usize {
     };
     unsafe {
         let mut bytes_written: usize = 0;
-        let result = WriteProcessMemory(h, address as *const _, buf.as_ptr() as *const _, buf.len(), Some(&mut bytes_written));
+        let result = WriteProcessMemory(h, address as usize as *const _, buf.as_ptr() as *const _, buf.len(), Some(&mut bytes_written));
         let _ = CloseHandle(h);
         if result.is_ok() { bytes_written } else { 0 }
     }
@@ -354,96 +405,67 @@ fn mac_write_memory(task: u32, address: u64, buf: &[u8]) -> usize {
     }
 }
 
-// ── memory_isValid ──────────────────────────────────────────────────────
+// ── Platform dispatch functions ─────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_isValid")]
-pub fn memory_is_valid(pid: i32) -> bool { is_proc_valid(pid) }
-
+fn platform_is_valid(pid: i32) -> bool { is_proc_valid(pid) }
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_isValid")]
-pub fn memory_is_valid(pid: i32) -> bool { win_is_valid(pid) }
-
+fn platform_is_valid(pid: i32) -> bool { win_is_valid(pid) }
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_isValid")]
-pub fn memory_is_valid(pid: i32) -> bool { mach::process_exists(pid) }
-
-// ── memory_getRegion ────────────────────────────────────────────────────
+fn platform_is_valid(pid: i32) -> bool { mach::process_exists(pid) }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_getRegion")]
-pub fn memory_get_region(env: Env, pid: i32, address: f64) -> Result<napi::JsObject> {
-    let addr = address as u64;
+fn platform_get_region(pid: i32, addr: u64) -> RegionInfo {
     let regions = parse_maps(pid);
     for r in &regions {
-        if addr >= r.start && addr < r.stop { return region_to_obj(&env, r); }
+        if addr >= r.start && addr < r.stop { return RegionInfo { valid: r.valid, bound: r.bound, start: r.start, stop: r.stop, size: r.size, readable: r.readable, writable: r.writable, executable: r.executable, access: r.access, private: r.private, guarded: r.guarded }; }
     }
-    region_to_obj(&env, &RegionInfo::default())
+    RegionInfo::default()
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_getRegion")]
-pub fn memory_get_region(env: Env, pid: i32, address: f64) -> Result<napi::JsObject> {
+fn platform_get_region(pid: i32, addr: u64) -> RegionInfo {
     let h = match win_open_proc(pid, PROCESS_QUERY_INFORMATION) {
         Some(h) => h,
-        None => return region_to_obj(&env, &RegionInfo::default()),
+        None => return RegionInfo::default(),
     };
     unsafe {
         let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
-        let ret = VirtualQueryEx(h, Some(address as u64 as usize as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
+        let ret = VirtualQueryEx(h, Some(addr as usize as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
         let _ = CloseHandle(h);
-        if ret == 0 { return region_to_obj(&env, &RegionInfo::default()); }
+        if ret == 0 { return RegionInfo::default(); }
         if mbi.State != MEM_COMMIT {
-            return region_to_obj(&env, &RegionInfo { valid: true, start: mbi.BaseAddress as u64, stop: mbi.BaseAddress as u64 + mbi.RegionSize as u64, size: mbi.RegionSize as u64, ..Default::default() });
+            return RegionInfo { valid: true, start: mbi.BaseAddress as u64, stop: mbi.BaseAddress as u64 + mbi.RegionSize as u64, size: mbi.RegionSize as u64, ..Default::default() };
         }
         let (readable, writable, executable, guarded, access) = win_protect_to_flags(mbi.Protect);
-        region_to_obj(&env, &RegionInfo {
+        RegionInfo {
             valid: true, bound: true,
             start: mbi.BaseAddress as u64, stop: mbi.BaseAddress as u64 + mbi.RegionSize as u64, size: mbi.RegionSize as u64,
             readable, writable, executable, access, private: mbi.Type == MEM_PRIVATE, guarded,
-        })
+        }
     }
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_getRegion")]
-pub fn memory_get_region(env: Env, pid: i32, address: f64) -> Result<napi::JsObject> {
+fn platform_get_region(pid: i32, addr: u64) -> RegionInfo {
     let task = mach::get_task(pid);
-    if task == 0 { return region_to_obj(&env, &RegionInfo::default()); }
-    let region = mac_get_region(task, address as u64);
-    region_to_obj(&env, &region)
+    if task == 0 { return RegionInfo::default(); }
+    mac_get_region(task, addr)
 }
 
-// ── memory_getRegions ───────────────────────────────────────────────────
-
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_getRegions")]
-pub fn memory_get_regions(env: Env, pid: i32, start: Option<f64>, stop: Option<f64>) -> Result<napi::JsObject> {
-    let start_addr = start.unwrap_or(0.0) as u64;
-    let stop_addr = stop.unwrap_or(u64::MAX as f64) as u64;
+fn platform_get_regions(pid: i32, start_addr: u64, stop_addr: u64) -> Vec<RegionInfo> {
     let regions = parse_maps(pid);
-    let filtered: Vec<&RegionInfo> = regions.iter().filter(|r| r.stop > start_addr && r.start < stop_addr).collect();
-    let mut arr = env.create_array(filtered.len() as u32)?;
-    for (i, r) in filtered.iter().enumerate() { arr.set(i as u32, region_to_obj(&env, r)?)?; }
-    Ok(arr.coerce_to_object()?)
+    regions.into_iter().filter(|r| r.stop > start_addr && r.start < stop_addr).collect()
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_getRegions")]
-pub fn memory_get_regions(env: Env, pid: i32, start: Option<f64>, stop: Option<f64>) -> Result<napi::JsObject> {
-    let start_addr = start.unwrap_or(0.0) as u64;
-    let stop_addr = stop.unwrap_or(u64::MAX as f64) as u64;
-    let regions = win_query_regions(pid, start_addr, stop_addr);
-    let mut arr = env.create_array(regions.len() as u32)?;
-    for (i, r) in regions.iter().enumerate() { arr.set(i as u32, region_to_obj(&env, r)?)?; }
-    Ok(arr.coerce_to_object()?)
+fn platform_get_regions(pid: i32, start_addr: u64, stop_addr: u64) -> Vec<RegionInfo> {
+    win_query_regions(pid, start_addr, stop_addr)
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_getRegions")]
-pub fn memory_get_regions(env: Env, pid: i32, start: Option<f64>, stop: Option<f64>) -> Result<napi::JsObject> {
-    let start_addr = start.unwrap_or(0.0) as u64;
-    let stop_addr = stop.unwrap_or(MAC_MAX_VM_64 as f64) as u64;
+fn platform_get_regions(pid: i32, start_addr: u64, stop_addr: u64) -> Vec<RegionInfo> {
     let task = mach::get_task(pid);
     let mut regions = Vec::new();
     if task != 0 {
@@ -452,30 +474,38 @@ pub fn memory_get_regions(env: Env, pid: i32, start: Option<f64>, stop: Option<f
             if addr >= stop_addr { break; }
             let region = mac_get_region(task, addr);
             if !region.valid { break; }
+            let next = region.stop;
             regions.push(region);
-            addr = regions.last().unwrap().stop;
+            addr = next;
             if addr == 0 { break; } // overflow protection
         }
     }
-    let mut arr = env.create_array(regions.len() as u32)?;
-    for (i, r) in regions.iter().enumerate() { arr.set(i as u32, region_to_obj(&env, r)?)?; }
-    Ok(arr.coerce_to_object()?)
+    regions
 }
 
-// ── memory_setAccess / setAccessFlags ───────────────────────────────────
+#[cfg(target_os = "linux")]
+fn linux_mprotect(pid: i32, region_start: u64, prot: i32) -> bool {
+    // mprotect only works on the calling process's own address space
+    let self_pid = unsafe { libc::getpid() };
+    if pid != self_pid { return false; }
+    let region = platform_get_region(pid, region_start);
+    if !region.valid || !region.bound { return false; }
+    unsafe {
+        libc::mprotect(region.start as *mut libc::c_void, region.size as usize, prot) == 0
+    }
+}
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_setAccess")]
-pub fn memory_set_access(_pid: i32, _region_start: f64, _readable: bool, _writable: bool, _executable: bool) -> bool { false }
-
-#[cfg(target_os = "linux")]
-#[napi(js_name = "memory_setAccessFlags")]
-pub fn memory_set_access_flags(_pid: i32, _region_start: f64, _flags: u32) -> bool { false }
+fn platform_set_access(pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool) -> bool {
+    let mut prot = libc::PROT_NONE;
+    if readable { prot |= libc::PROT_READ; }
+    if writable { prot |= libc::PROT_WRITE; }
+    if executable { prot |= libc::PROT_EXEC; }
+    linux_mprotect(pid, region_start, prot)
+}
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_setAccess")]
-pub fn memory_set_access(pid: i32, region_start: f64, readable: bool, writable: bool, executable: bool) -> bool {
-    // Convert bool flags to PAGE_* constants matching C++
+fn platform_set_access(pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool) -> bool {
     let access: u32 = if executable {
         if writable {
             PAGE_EXECUTE_READWRITE.0
@@ -491,20 +521,46 @@ pub fn memory_set_access(pid: i32, region_start: f64, readable: bool, writable: 
     } else {
         PAGE_NOACCESS.0
     };
-    memory_set_access_flags(pid, region_start, access)
+    win_set_access_flags_impl(pid, region_start, PAGE_PROTECTION_FLAGS(access))
+}
+
+#[cfg(target_os = "macos")]
+fn platform_set_access(pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool) -> bool {
+    let mut access = VM_PROT_NONE;
+    if readable { access |= VM_PROT_READ; }
+    if writable { access |= VM_PROT_WRITE; }
+    if executable { access |= VM_PROT_EXECUTE; }
+    mac_set_access_flags_impl(pid, region_start, access)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_set_access_flags(pid: i32, region_start: u64, flags: u32) -> bool {
+    let mut prot = libc::PROT_NONE;
+    if flags & 1 != 0 { prot |= libc::PROT_READ; }
+    if flags & 2 != 0 { prot |= libc::PROT_WRITE; }
+    if flags & 4 != 0 { prot |= libc::PROT_EXEC; }
+    linux_mprotect(pid, region_start, prot)
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_setAccessFlags")]
-pub fn memory_set_access_flags(pid: i32, region_start: f64, flags: u32) -> bool {
+fn platform_set_access_flags(pid: i32, region_start: u64, flags: u32) -> bool {
+    win_set_access_flags_impl(pid, region_start, win_bitmask_to_page_protect(flags))
+}
+
+#[cfg(target_os = "macos")]
+fn platform_set_access_flags(pid: i32, region_start: u64, flags: u32) -> bool {
+    mac_set_access_flags_impl(pid, region_start, flags as i32)
+}
+
+#[cfg(target_os = "windows")]
+fn win_set_access_flags_impl(pid: i32, addr: u64, protect: PAGE_PROTECTION_FLAGS) -> bool {
     let h = match win_open_proc(pid, PROCESS_VM_OPERATION) {
         Some(h) => h,
         None => return false,
     };
-    // Get region info to know the size
     unsafe {
         let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
-        let ret = VirtualQueryEx(h, Some(region_start as u64 as usize as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
+        let ret = VirtualQueryEx(h, Some(addr as usize as *const _), &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
         if ret == 0 || mbi.State != MEM_COMMIT {
             let _ = CloseHandle(h);
             return false;
@@ -514,7 +570,7 @@ pub fn memory_set_access_flags(pid: i32, region_start: f64, flags: u32) -> bool 
             h,
             mbi.BaseAddress as *const _,
             mbi.RegionSize,
-            PAGE_PROTECTION_FLAGS(flags),
+            protect,
             &mut old_protect,
         );
         let _ = CloseHandle(h);
@@ -523,32 +579,18 @@ pub fn memory_set_access_flags(pid: i32, region_start: f64, flags: u32) -> bool 
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_setAccess")]
-pub fn memory_set_access(pid: i32, region_start: f64, readable: bool, writable: bool, executable: bool) -> bool {
-    let mut access = VM_PROT_NONE;
-    if readable { access |= VM_PROT_READ; }
-    if writable { access |= VM_PROT_WRITE; }
-    if executable { access |= VM_PROT_EXECUTE; }
-    memory_set_access_flags(pid, region_start, access as u32)
-}
-
-#[cfg(target_os = "macos")]
-#[napi(js_name = "memory_setAccessFlags")]
-pub fn memory_set_access_flags(pid: i32, region_start: f64, flags: u32) -> bool {
+fn mac_set_access_flags_impl(pid: i32, addr: u64, prot: i32) -> bool {
     let task = mach::get_task(pid);
     if task == 0 { return false; }
-    let region = mac_get_region(task, region_start as u64);
+    let region = mac_get_region(task, addr);
     if !region.valid || !region.bound { return false; }
     unsafe {
-        mach_vm_protect(task, region.start, region.size, 0, flags as i32) == 0
+        mach_vm_protect(task, region.start, region.size, 0, prot) == 0
     }
 }
 
-// ── memory_getPtrSize ───────────────────────────────────────────────────
-
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_getPtrSize")]
-pub fn memory_get_ptr_size(pid: i32) -> f64 {
+fn platform_get_ptr_size(pid: i32) -> f64 {
     if !is_proc_valid(pid) { return 0.0; }
     let exe_path = format!("/proc/{}/exe", pid);
     if let Ok(data) = fs::read(&exe_path) { if data.len() > 4 { return if data[4] == 2 { 8.0 } else { 4.0 }; } }
@@ -556,8 +598,7 @@ pub fn memory_get_ptr_size(pid: i32) -> f64 {
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_getPtrSize")]
-pub fn memory_get_ptr_size(pid: i32) -> f64 {
+fn platform_get_ptr_size(pid: i32) -> f64 {
     if let Some(h) = win_open_proc(pid, PROCESS_QUERY_LIMITED_INFORMATION) {
         unsafe {
             let mut wow64: BOOL = BOOL(0);
@@ -572,10 +613,7 @@ pub fn memory_get_ptr_size(pid: i32) -> f64 {
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_getPtrSize")]
-pub fn memory_get_ptr_size(pid: i32) -> f64 {
-    // Match C++: Proc.Is64Bit() ? 8 : 4
-    // We use proc_pidinfo to check
+fn platform_get_ptr_size(pid: i32) -> f64 {
     if pid <= 0 { return 0.0; }
     unsafe {
         #[repr(C)]
@@ -592,63 +630,46 @@ pub fn memory_get_ptr_size(pid: i32) -> f64 {
         if ret > 0 {
             if (info.pbsi_flags & 0x04) != 0 { 8.0 } else { 4.0 }
         } else {
-            // Default to pointer size of current process
             std::mem::size_of::<usize>() as f64
         }
     }
 }
 
-// ── memory_getMinAddress / getMaxAddress ─────────────────────────────────
-
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_getMinAddress")]
-pub fn memory_get_min_address(pid: i32) -> f64 { parse_maps(pid).first().map(|r| r.start as f64).unwrap_or(0.0) }
-
-#[cfg(target_os = "linux")]
-#[napi(js_name = "memory_getMaxAddress")]
-pub fn memory_get_max_address(pid: i32) -> f64 { parse_maps(pid).last().map(|r| r.stop as f64).unwrap_or(0.0) }
+fn platform_get_min_address(pid: i32) -> u64 { parse_maps(pid).first().map(|r| r.start).unwrap_or(0) }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_getMinAddress")]
-pub fn memory_get_min_address(_pid: i32) -> f64 {
+fn platform_get_min_address(_pid: i32) -> u64 {
     unsafe {
         let mut info: windows::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
         windows::Win32::System::SystemInformation::GetSystemInfo(&mut info);
-        info.lpMinimumApplicationAddress as u64 as f64
-    }
-}
-
-#[cfg(target_os = "windows")]
-#[napi(js_name = "memory_getMaxAddress")]
-pub fn memory_get_max_address(_pid: i32) -> f64 {
-    unsafe {
-        let mut info: windows::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
-        windows::Win32::System::SystemInformation::GetSystemInfo(&mut info);
-        info.lpMaximumApplicationAddress as u64 as f64
+        info.lpMinimumApplicationAddress as u64
     }
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_getMinAddress")]
-pub fn memory_get_min_address(_pid: i32) -> f64 { MAC_MIN_VM as f64 }
-
-#[cfg(target_os = "macos")]
-#[napi(js_name = "memory_getMaxAddress")]
-pub fn memory_get_max_address(_pid: i32) -> f64 {
-    // C++: Is64Bit ? gMaxVM_64 : gMaxVM_32
-    // For simplicity, return 64-bit max (modern macOS is always 64-bit)
-    MAC_MAX_VM_64 as f64
-}
-
-// ── memory_getPageSize ──────────────────────────────────────────────────
+fn platform_get_min_address(_pid: i32) -> u64 { MAC_MIN_VM }
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_getPageSize")]
-pub fn memory_get_page_size(_pid: i32) -> f64 { unsafe { libc::sysconf(libc::_SC_PAGESIZE) as f64 } }
+fn platform_get_max_address(pid: i32) -> u64 { parse_maps(pid).last().map(|r| r.stop).unwrap_or(0) }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_getPageSize")]
-pub fn memory_get_page_size(_pid: i32) -> f64 {
+fn platform_get_max_address(_pid: i32) -> u64 {
+    unsafe {
+        let mut info: windows::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
+        windows::Win32::System::SystemInformation::GetSystemInfo(&mut info);
+        info.lpMaximumApplicationAddress as u64
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn platform_get_max_address(_pid: i32) -> u64 { MAC_MAX_VM_64 }
+
+#[cfg(target_os = "linux")]
+fn platform_get_page_size(_pid: i32) -> f64 { unsafe { libc::sysconf(libc::_SC_PAGESIZE) as f64 } }
+
+#[cfg(target_os = "windows")]
+fn platform_get_page_size(_pid: i32) -> f64 {
     unsafe {
         let mut info: windows::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
         windows::Win32::System::SystemInformation::GetSystemInfo(&mut info);
@@ -657,28 +678,25 @@ pub fn memory_get_page_size(_pid: i32) -> f64 {
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_getPageSize")]
-pub fn memory_get_page_size(_pid: i32) -> f64 {
+fn platform_get_page_size(_pid: i32) -> f64 {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as f64 }
 }
 
-// ── memory_find ─────────────────────────────────────────────────────────
+// ── Flags constants ────────────────────────────────────────────────────
+
+#[allow(dead_code)]
+const FLAG_DEFAULT: i32 = 0;
+#[allow(dead_code)]
+const FLAG_SKIP_ERRORS: i32 = 1;
+#[allow(dead_code)]
+const FLAG_AUTO_ACCESS: i32 = 2;
+
+// ── memory_find platform dispatch ──────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_find")]
-pub fn memory_find(
-    env: Env, pid: i32, pattern: String,
-    start: Option<f64>, stop: Option<f64>,
-    limit: Option<f64>, _flags: Option<String>,
-) -> Result<napi::JsObject> {
-    let start_addr = start.unwrap_or(0.0) as u64;
-    let stop_addr = stop.unwrap_or(u64::MAX as f64) as u64;
-    let max_results = if limit.unwrap_or(0.0) > 0.0 { limit.unwrap() as usize } else { usize::MAX };
+fn platform_find(pid: i32, pattern_bytes: &[Option<u8>], start_addr: u64, stop_addr: u64, max_results: usize) -> Vec<u64> {
     let regions = parse_maps(pid);
-    let mut addresses = Vec::new();
-    let pattern_bytes: Vec<Option<u8>> = pattern.split_whitespace()
-        .filter_map(|s| { if s == "??" || s == "?" { Some(None) } else { u8::from_str_radix(s, 16).ok().map(Some) } }).collect();
-    if pattern_bytes.is_empty() { return Ok(env.create_array(0)?.coerce_to_object()?); }
+    let mut addresses: Vec<u64> = Vec::new();
     for region in &regions {
         if !region.readable || region.stop <= start_addr || region.start >= stop_addr { continue; }
         if addresses.len() >= max_results { break; }
@@ -697,29 +715,16 @@ pub fn memory_find(
             for (j, &pb) in pattern_bytes.iter().enumerate() {
                 if let Some(expected) = pb { if buf[i + j] != expected { matched = false; break; } }
             }
-            if matched { addresses.push((read_start + i as u64) as f64); }
+            if matched { addresses.push(read_start + i as u64); }
         }
     }
-    let mut arr = env.create_array(addresses.len() as u32)?;
-    for (i, &addr) in addresses.iter().enumerate() { arr.set(i as u32, addr)?; }
-    Ok(arr.coerce_to_object()?)
+    addresses
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_find")]
-pub fn memory_find(
-    env: Env, pid: i32, pattern: String,
-    start: Option<f64>, stop: Option<f64>,
-    limit: Option<f64>, _flags: Option<String>,
-) -> Result<napi::JsObject> {
-    let start_addr = start.unwrap_or(0.0) as u64;
-    let stop_addr = stop.unwrap_or(u64::MAX as f64) as u64;
-    let max_results = if limit.unwrap_or(0.0) > 0.0 { limit.unwrap() as usize } else { usize::MAX };
+fn platform_find(pid: i32, pattern_bytes: &[Option<u8>], start_addr: u64, stop_addr: u64, max_results: usize) -> Vec<u64> {
     let regions = win_query_regions(pid, start_addr, stop_addr);
-    let mut addresses = Vec::new();
-    let pattern_bytes: Vec<Option<u8>> = pattern.split_whitespace()
-        .filter_map(|s| { if s == "??" || s == "?" { Some(None) } else { u8::from_str_radix(s, 16).ok().map(Some) } }).collect();
-    if pattern_bytes.is_empty() { return Ok(env.create_array(0)?.coerce_to_object()?); }
+    let mut addresses: Vec<u64> = Vec::new();
     for region in &regions {
         if !region.readable || region.stop <= start_addr || region.start >= stop_addr { continue; }
         if addresses.len() >= max_results { break; }
@@ -738,31 +743,18 @@ pub fn memory_find(
             for (j, &pb) in pattern_bytes.iter().enumerate() {
                 if let Some(expected) = pb { if buf[i + j] != expected { matched = false; break; } }
             }
-            if matched { addresses.push((read_start + i as u64) as f64); }
+            if matched { addresses.push(read_start + i as u64); }
         }
     }
-    let mut arr = env.create_array(addresses.len() as u32)?;
-    for (i, &addr) in addresses.iter().enumerate() { arr.set(i as u32, addr)?; }
-    Ok(arr.coerce_to_object()?)
+    addresses
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_find")]
-pub fn memory_find(
-    env: Env, pid: i32, pattern: String,
-    start: Option<f64>, stop: Option<f64>,
-    limit: Option<f64>, _flags: Option<String>,
-) -> Result<napi::JsObject> {
-    let start_addr = start.unwrap_or(0.0) as u64;
-    let stop_addr = stop.unwrap_or(MAC_MAX_VM_64 as f64) as u64;
-    let max_results = if limit.unwrap_or(0.0) > 0.0 { limit.unwrap() as usize } else { usize::MAX };
+fn platform_find(pid: i32, pattern_bytes: &[Option<u8>], start_addr: u64, stop_addr: u64, max_results: usize) -> Vec<u64> {
     let task = mach::get_task(pid);
-    let mut addresses = Vec::new();
-    let pattern_bytes: Vec<Option<u8>> = pattern.split_whitespace()
-        .filter_map(|s| { if s == "??" || s == "?" { Some(None) } else { u8::from_str_radix(s, 16).ok().map(Some) } }).collect();
-    if pattern_bytes.is_empty() || task == 0 { return Ok(env.create_array(0)?.coerce_to_object()?); }
+    let mut addresses: Vec<u64> = Vec::new();
+    if task == 0 { return addresses; }
 
-    // Iterate regions
     let mut addr = start_addr;
     loop {
         if addr >= stop_addr || addresses.len() >= max_results { break; }
@@ -784,7 +776,7 @@ pub fn memory_find(
                             for (j, &pb) in pattern_bytes.iter().enumerate() {
                                 if let Some(expected) = pb { if buf[i + j] != expected { matched = false; break; } }
                             }
-                            if matched { addresses.push((read_start + i as u64) as f64); }
+                            if matched { addresses.push(read_start + i as u64); }
                         }
                     }
                 }
@@ -793,38 +785,21 @@ pub fn memory_find(
         addr = region.stop;
         if addr == 0 { break; }
     }
-
-    let mut arr = env.create_array(addresses.len() as u32)?;
-    for (i, &a) in addresses.iter().enumerate() { arr.set(i as u32, a)?; }
-    Ok(arr.coerce_to_object()?)
+    addresses
 }
 
-// ── Flags constants ────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-const FLAG_DEFAULT: i32 = 0;
-#[allow(dead_code)]
-const FLAG_SKIP_ERRORS: i32 = 1;
-#[allow(dead_code)]
-const FLAG_AUTO_ACCESS: i32 = 2;
-
-// ── memory_readData ─────────────────────────────────────────────────────
+// ── memory_readData platform dispatch ──────────────────────────────────
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_readData")]
-pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
-    let addr = address as u64;
-    let len = length as usize;
-    let f = flags.unwrap_or(FLAG_DEFAULT);
-
+fn platform_read_data(pid: i32, addr: u64, len: usize, f: i32) -> Option<Vec<u8>> {
     if f == FLAG_DEFAULT {
         let mut buf = vec![0u8; len];
         let read = read_process_memory(pid, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+        return if read > 0 { Some(buf) } else { None };
     }
 
     // SkipErrors or AutoAccess: iterate region by region
-    let mut buf = vec![0u8; len];
+    let mut data = vec![0u8; len];
     let stop = addr + len as u64;
     let regions = parse_maps(pid);
     let mut bytes: usize = 0;
@@ -832,12 +807,10 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
     let mut a = addr;
 
     while a < stop && region_idx < regions.len() {
-        // Find region containing address a
         while region_idx < regions.len() && regions[region_idx].stop <= a { region_idx += 1; }
         if region_idx >= regions.len() { break; }
         let region = &regions[region_idx];
         if region.start > a {
-            // Gap: fill with zeros (already zeroed), advance to region start
             let gap_end = region.start.min(stop);
             bytes += (gap_end - a) as usize;
             a = gap_end;
@@ -848,37 +821,28 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
         let offset = (a - addr) as usize;
         let readable = region.readable;
 
-        // AutoAccess: no protection change available on Linux
         if readable {
-            let _ = read_process_memory(pid, a, &mut buf[offset..offset + region_len]);
+            let _ = read_process_memory(pid, a, &mut data[offset..offset + region_len]);
         }
-        // else: already zeroed
 
         bytes += region_len;
         a = region.stop.min(stop);
         region_idx += 1;
     }
-    // Fill remaining gap
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Some(data) } else { None }
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_readData")]
-pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
-    let addr = address as u64;
-    let len = length as usize;
-    let f = flags.unwrap_or(FLAG_DEFAULT);
-
+fn platform_read_data(pid: i32, addr: u64, len: usize, f: i32) -> Option<Vec<u8>> {
     if f == FLAG_DEFAULT {
         let mut buf = vec![0u8; len];
         let read = win_read_memory(pid, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+        return if read > 0 { Some(buf) } else { None };
     }
 
-    // SkipErrors or AutoAccess: iterate region by region
-    let mut buf = vec![0u8; len];
+    let mut data = vec![0u8; len];
     let stop = addr + len as u64;
     let regions = win_query_regions(pid, addr, stop);
     let mut bytes: usize = 0;
@@ -886,7 +850,6 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
 
     for region in &regions {
         if a >= stop { break; }
-        // Fill gap before this region
         if region.start > a {
             let gap_end = region.start.min(stop);
             bytes += (gap_end - a) as usize;
@@ -898,7 +861,6 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
         let offset = (a - addr) as usize;
         let mut readable = region.readable;
 
-        // AutoAccess: temporarily make readable
         if !readable && f == FLAG_AUTO_ACCESS {
             let h = win_open_proc(pid, PROCESS_VM_OPERATION);
             if let Some(h) = h {
@@ -906,7 +868,7 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
                     let mut old = PAGE_PROTECTION_FLAGS(0);
                     if VirtualProtectEx(h, a as usize as *const _, region_len, PAGE_READONLY, &mut old).is_ok() {
                         readable = true;
-                        let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+                        let _ = win_read_memory(pid, a, &mut data[offset..offset + region_len]);
                         let _ = VirtualProtectEx(h, a as usize as *const _, region_len, old, &mut old);
                     }
                     let _ = CloseHandle(h);
@@ -915,40 +877,32 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
         }
 
         if readable && f != FLAG_AUTO_ACCESS {
-            let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+            let _ = win_read_memory(pid, a, &mut data[offset..offset + region_len]);
         }
-        // For AutoAccess with readable regions, just read normally
         if readable && f == FLAG_AUTO_ACCESS && region.readable {
-            let _ = win_read_memory(pid, a, &mut buf[offset..offset + region_len]);
+            let _ = win_read_memory(pid, a, &mut data[offset..offset + region_len]);
         }
-        // else: already zeroed for SkipErrors
 
         bytes += region_len;
         a = region.stop.min(stop);
     }
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Some(data) } else { None }
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_readData")]
-pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Option<i32>) -> Result<Either<Buffer, napi::JsNull>> {
+fn platform_read_data(pid: i32, addr: u64, len: usize, f: i32) -> Option<Vec<u8>> {
     let task = mach::get_task(pid);
-    if task == 0 { return Ok(Either::B(env.get_null()?)); }
-
-    let addr = address as u64;
-    let len = length as usize;
-    let f = flags.unwrap_or(FLAG_DEFAULT);
+    if task == 0 { return None; }
 
     if f == FLAG_DEFAULT {
         let mut buf = vec![0u8; len];
         let read = mac_read_memory(task, addr, &mut buf);
-        return if read > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) };
+        return if read > 0 { Some(buf) } else { None };
     }
 
-    // SkipErrors or AutoAccess: iterate region by region
-    let mut buf = vec![0u8; len];
+    let mut data = vec![0u8; len];
     let stop = addr + len as u64;
     let mut bytes: usize = 0;
     let mut a = addr;
@@ -959,7 +913,6 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
         if !region.valid { break; }
 
         if !region.bound {
-            // Gap: fill with zeros, advance
             let gap_end = region.stop.min(stop);
             bytes += (gap_end - a) as usize;
             a = gap_end;
@@ -970,22 +923,19 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
         let offset = (a - addr) as usize;
         let mut readable = region.readable;
 
-        // AutoAccess: temporarily make readable via mach_vm_protect
         if !readable && f == FLAG_AUTO_ACCESS {
             unsafe {
                 if mach_vm_protect(task, region.start, region.size, 0, VM_PROT_READ) == 0 {
                     readable = true;
-                    let _ = mac_read_memory(task, a, &mut buf[offset..offset + region_len]);
-                    // Restore original access
+                    let _ = mac_read_memory(task, a, &mut data[offset..offset + region_len]);
                     let _ = mach_vm_protect(task, region.start, region.size, 0, region.access as i32);
                 }
             }
         }
 
         if readable && !(f == FLAG_AUTO_ACCESS && !region.readable) {
-            let _ = mac_read_memory(task, a, &mut buf[offset..offset + region_len]);
+            let _ = mac_read_memory(task, a, &mut data[offset..offset + region_len]);
         }
-        // else: already zeroed for SkipErrors
 
         bytes += region_len;
         a = region.stop.min(stop);
@@ -993,21 +943,17 @@ pub fn memory_read_data(env: Env, pid: i32, address: f64, length: f64, flags: Op
     }
     bytes += (stop.saturating_sub(a)) as usize;
 
-    if bytes > 0 { Ok(Either::A(Buffer::from(buf))) } else { Ok(Either::B(env.get_null()?)) }
+    if bytes > 0 { Some(data) } else { None }
 }
 
-// ── memory_writeData ────────────────────────────────────────────────────
+// ── memory_writeData platform dispatch ─────────────────────────────────
 
 #[cfg(target_os = "linux")]
-#[napi(js_name = "memory_writeData")]
-pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32>) -> f64 {
-    let f = flags.unwrap_or(FLAG_DEFAULT);
+fn platform_write_data(pid: i32, addr: u64, data: &[u8], f: i32) -> f64 {
     if f == FLAG_DEFAULT {
-        return write_process_memory(pid, address as u64, &data) as f64;
+        return write_process_memory(pid, addr, data) as f64;
     }
 
-    // SkipErrors or AutoAccess: iterate region by region
-    let addr = address as u64;
     let len = data.len();
     let stop = addr + len as u64;
     let regions = parse_maps(pid);
@@ -1025,7 +971,6 @@ pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32
         if a >= stop { break; }
         let region_len = (region.stop.min(stop) - a) as usize;
         let offset = (a - addr) as usize;
-        // Linux: no SetAccess available, just write if writable
         if region.writable {
             let _ = write_process_memory(pid, a, &data[offset..offset + region_len]);
         }
@@ -1037,14 +982,11 @@ pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32
 }
 
 #[cfg(target_os = "windows")]
-#[napi(js_name = "memory_writeData")]
-pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32>) -> f64 {
-    let f = flags.unwrap_or(FLAG_DEFAULT);
+fn platform_write_data(pid: i32, addr: u64, data: &[u8], f: i32) -> f64 {
     if f == FLAG_DEFAULT {
-        return win_write_memory(pid, address as u64, &data) as f64;
+        return win_write_memory(pid, addr, data) as f64;
     }
 
-    let addr = address as u64;
     let len = data.len();
     let stop = addr + len as u64;
     let regions = win_query_regions(pid, addr, stop);
@@ -1090,17 +1032,14 @@ pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32
 }
 
 #[cfg(target_os = "macos")]
-#[napi(js_name = "memory_writeData")]
-pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32>) -> f64 {
+fn platform_write_data(pid: i32, addr: u64, data: &[u8], f: i32) -> f64 {
     let task = mach::get_task(pid);
     if task == 0 { return 0.0; }
-    let f = flags.unwrap_or(FLAG_DEFAULT);
 
     if f == FLAG_DEFAULT {
-        return mac_write_memory(task, address as u64, &data) as f64;
+        return mac_write_memory(task, addr, data) as f64;
     }
 
-    let addr = address as u64;
     let len = data.len();
     let stop = addr + len as u64;
     let mut bytes: usize = 0;
@@ -1145,19 +1084,197 @@ pub fn memory_write_data(pid: i32, address: f64, data: Buffer, flags: Option<i32
     bytes as f64
 }
 
-// ── Cache operations (stubs on all platforms) ───────────────────────────
+// ── AsyncTask structs ──────────────────────────────────────────────────
 
-#[napi(js_name = "memory_createCache")]
-pub fn memory_create_cache(_pid: i32, _address: f64, _size: f64, _block_size: f64, _max_blocks: Option<f64>, _flags: Option<f64>) -> bool { false }
+pub struct IsValidTask { pid: i32 }
+impl Task for IsValidTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_is_valid(self.pid)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
 
-#[napi(js_name = "memory_clearCache")]
-pub fn memory_clear_cache(_pid: i32) {}
+pub struct GetRegionTask { pid: i32, addr: u64 }
+impl Task for GetRegionTask {
+    type Output = RegionInfo;
+    type JsValue = NapiRegion;
+    fn compute(&mut self) -> Result<RegionInfo> { Ok(platform_get_region(self.pid, self.addr)) }
+    fn resolve(&mut self, _env: Env, out: RegionInfo) -> Result<NapiRegion> { Ok(region_to_napi(&out)) }
+}
 
-#[napi(js_name = "memory_deleteCache")]
-pub fn memory_delete_cache(_pid: i32) {}
+pub struct GetRegionsTask { pid: i32, start: u64, stop: u64 }
+impl Task for GetRegionsTask {
+    type Output = Vec<RegionInfo>;
+    type JsValue = Vec<NapiRegion>;
+    fn compute(&mut self) -> Result<Vec<RegionInfo>> { Ok(platform_get_regions(self.pid, self.start, self.stop)) }
+    fn resolve(&mut self, _env: Env, out: Vec<RegionInfo>) -> Result<Vec<NapiRegion>> { Ok(out.iter().map(|r| region_to_napi(r)).collect()) }
+}
 
-#[napi(js_name = "memory_isCaching")]
-pub fn memory_is_caching(_pid: i32) -> bool { false }
+pub struct SetAccessTask { pid: i32, region_start: u64, readable: bool, writable: bool, executable: bool }
+impl Task for SetAccessTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_set_access(self.pid, self.region_start, self.readable, self.writable, self.executable)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
 
-#[napi(js_name = "memory_getCacheSize")]
-pub fn memory_get_cache_size(_pid: i32) -> f64 { 0.0 }
+pub struct SetAccessFlagsTask { pid: i32, region_start: u64, flags: u32 }
+impl Task for SetAccessFlagsTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_set_access_flags(self.pid, self.region_start, self.flags)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+pub struct GetPtrSizeTask { pid: i32 }
+impl Task for GetPtrSizeTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_get_ptr_size(self.pid)) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+pub struct GetMinAddressTask { pid: i32 }
+impl Task for GetMinAddressTask {
+    type Output = u64;
+    type JsValue = BigInt;
+    fn compute(&mut self) -> Result<u64> { Ok(platform_get_min_address(self.pid)) }
+    fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
+}
+
+pub struct GetMaxAddressTask { pid: i32 }
+impl Task for GetMaxAddressTask {
+    type Output = u64;
+    type JsValue = BigInt;
+    fn compute(&mut self) -> Result<u64> { Ok(platform_get_max_address(self.pid)) }
+    fn resolve(&mut self, _env: Env, out: u64) -> Result<BigInt> { Ok(u64_to_bi(out)) }
+}
+
+pub struct GetPageSizeTask { pid: i32 }
+impl Task for GetPageSizeTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_get_page_size(self.pid)) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+pub struct FindTask { pid: i32, pattern_bytes: Vec<Option<u8>>, start: u64, stop: u64, max_results: usize }
+impl Task for FindTask {
+    type Output = Vec<u64>;
+    type JsValue = Vec<BigInt>;
+    fn compute(&mut self) -> Result<Vec<u64>> {
+        if self.pattern_bytes.is_empty() { return Ok(Vec::new()); }
+        Ok(platform_find(self.pid, &self.pattern_bytes, self.start, self.stop, self.max_results))
+    }
+    fn resolve(&mut self, _env: Env, out: Vec<u64>) -> Result<Vec<BigInt>> {
+        Ok(out.into_iter().map(u64_to_bi).collect())
+    }
+}
+
+pub struct ReadDataTask { pid: i32, addr: u64, len: usize, flags: i32 }
+impl Task for ReadDataTask {
+    type Output = Option<Vec<u8>>;
+    type JsValue = Either<Buffer, ()>;
+    fn compute(&mut self) -> Result<Option<Vec<u8>>> { Ok(platform_read_data(self.pid, self.addr, self.len, self.flags)) }
+    fn resolve(&mut self, _env: Env, out: Option<Vec<u8>>) -> Result<Either<Buffer, ()>> {
+        match out {
+            Some(data) => Ok(Either::A(Buffer::from(data))),
+            None => Ok(Either::B(())),
+        }
+    }
+}
+
+pub struct WriteDataTask { pid: i32, addr: u64, data: Vec<u8>, flags: i32 }
+impl Task for WriteDataTask {
+    type Output = f64;
+    type JsValue = f64;
+    fn compute(&mut self) -> Result<f64> { Ok(platform_write_data(self.pid, self.addr, &self.data, self.flags)) }
+    fn resolve(&mut self, _env: Env, out: f64) -> Result<f64> { Ok(out) }
+}
+
+// ── Exported #[napi] functions ─────────────────────────────────────────
+
+#[napi(js_name = "memory_isValid")]
+pub fn memory_is_valid(pid: i32) -> AsyncTask<IsValidTask> {
+    AsyncTask::new(IsValidTask { pid })
+}
+
+#[napi(js_name = "memory_getRegion")]
+pub fn memory_get_region(pid: i32, address: BigInt) -> AsyncTask<GetRegionTask> {
+    let addr = bi_to_u64(&address);
+    AsyncTask::new(GetRegionTask { pid, addr })
+}
+
+#[napi(js_name = "memory_getRegions")]
+pub fn memory_get_regions(pid: i32, start: Option<BigInt>, stop: Option<BigInt>) -> AsyncTask<GetRegionsTask> {
+    let start_addr = opt_bi_to_u64(&start, 0);
+    #[cfg(target_os = "macos")]
+    let stop_addr = opt_bi_to_u64(&stop, MAC_MAX_VM_64);
+    #[cfg(not(target_os = "macos"))]
+    let stop_addr = opt_bi_to_u64(&stop, u64::MAX);
+    AsyncTask::new(GetRegionsTask { pid, start: start_addr, stop: stop_addr })
+}
+
+#[napi(js_name = "memory_setAccess")]
+pub fn memory_set_access(pid: i32, region_start: BigInt, readable: bool, writable: bool, executable: bool) -> AsyncTask<SetAccessTask> {
+    let addr = bi_to_u64(&region_start);
+    AsyncTask::new(SetAccessTask { pid, region_start: addr, readable, writable, executable })
+}
+
+#[napi(js_name = "memory_setAccessFlags")]
+pub fn memory_set_access_flags(pid: i32, region_start: BigInt, flags: u32) -> AsyncTask<SetAccessFlagsTask> {
+    let addr = bi_to_u64(&region_start);
+    AsyncTask::new(SetAccessFlagsTask { pid, region_start: addr, flags })
+}
+
+#[napi(js_name = "memory_getPtrSize")]
+pub fn memory_get_ptr_size(pid: i32) -> AsyncTask<GetPtrSizeTask> {
+    AsyncTask::new(GetPtrSizeTask { pid })
+}
+
+#[napi(js_name = "memory_getMinAddress")]
+pub fn memory_get_min_address(pid: i32) -> AsyncTask<GetMinAddressTask> {
+    AsyncTask::new(GetMinAddressTask { pid })
+}
+
+#[napi(js_name = "memory_getMaxAddress")]
+pub fn memory_get_max_address(pid: i32) -> AsyncTask<GetMaxAddressTask> {
+    AsyncTask::new(GetMaxAddressTask { pid })
+}
+
+#[napi(js_name = "memory_getPageSize")]
+pub fn memory_get_page_size(pid: i32) -> AsyncTask<GetPageSizeTask> {
+    AsyncTask::new(GetPageSizeTask { pid })
+}
+
+#[napi(js_name = "memory_find")]
+pub fn memory_find(
+    pid: i32, pattern: String,
+    start: Option<BigInt>, stop: Option<BigInt>,
+    limit: Option<f64>, _flags: Option<String>,
+) -> AsyncTask<FindTask> {
+    let start_addr = opt_bi_to_u64(&start, 0);
+    #[cfg(target_os = "macos")]
+    let stop_addr = opt_bi_to_u64(&stop, MAC_MAX_VM_64);
+    #[cfg(not(target_os = "macos"))]
+    let stop_addr = opt_bi_to_u64(&stop, u64::MAX);
+    let max_results = if limit.unwrap_or(0.0) > 0.0 { limit.unwrap() as usize } else { usize::MAX };
+    let pattern_bytes: Vec<Option<u8>> = pattern.split_whitespace()
+        .filter_map(|s| { if s == "??" || s == "?" { Some(None) } else { u8::from_str_radix(s, 16).ok().map(Some) } }).collect();
+    AsyncTask::new(FindTask { pid, pattern_bytes, start: start_addr, stop: stop_addr, max_results })
+}
+
+#[napi(js_name = "memory_readData")]
+pub fn memory_read_data(pid: i32, address: BigInt, length: f64, flags: Option<i32>) -> AsyncTask<ReadDataTask> {
+    let addr = bi_to_u64(&address);
+    let len = length as usize;
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+    AsyncTask::new(ReadDataTask { pid, addr, len, flags: f })
+}
+
+#[napi(js_name = "memory_writeData")]
+pub fn memory_write_data(pid: i32, address: BigInt, data: Buffer, flags: Option<i32>) -> AsyncTask<WriteDataTask> {
+    let addr = bi_to_u64(&address);
+    let f = flags.unwrap_or(FLAG_DEFAULT);
+    AsyncTask::new(WriteDataTask { pid, addr, data: data.to_vec(), flags: f })
+}

@@ -322,6 +322,306 @@ appropriately.  All subsystems run under all three engines.
 
 ---
 
+---
+
+## Phase 6: Linux / Wayland Platform Compatibility Enhancements
+
+Mechatron's Linux support has historically assumed a classic X11 session with
+`libXtst` + `libXrandr` available and accepting synthetic events.  That
+assumption breaks in three increasingly common environments:
+
+- **X11 without XTest** — minimal server builds, Xephyr, some remote-access
+  servers, and security-hardened hosts often ship Xlib only.  Our mouse /
+  keyboard subsystems silently no-op.
+- **Wayland sessions** — XWayland provides an X11 compatibility surface but
+  most compositors disable synthetic input through it, and screen capture
+  through XWayland only sees the single XWayland root, not the real
+  compositor output.
+- **Headless / container** — a bare framebuffer (`/dev/fb0`, KMS dumb
+  buffers) with no display server at all.
+
+Phase 6 adds layered fallback mechanisms, explicit mechanism selection, and
+runtime introspection so callers can discover what's in use and why.
+
+### 6a. Platform Mechanism Introspection API (COMPLETE — scaffolding)
+
+A new `Platform` module exports three functions per subsystem that can have
+multiple mechanisms (currently `input` — shared by keyboard + mouse — and
+`screen`; `clipboard` follows the same shape):
+
+```ts
+import { Platform } from "mechatron";
+
+Platform.listMechanisms("input");    // ["xtest", "uinput", "xproto", "libei"]
+Platform.getMechanism("input");      // "xtest"   — whichever was probed/picked
+Platform.setMechanism("input", "uinput");  // force-select; throws if unavailable
+Platform.getCapabilities("screen");  // { offScreenCapture: true, requiresUserApproval: false, … }
+```
+
+Selection priority for each capability is:
+
+1. Explicit `Platform.setMechanism(capability, "xclip")` or
+   `Platform.setMechanism(capability, ["wl-clipboard", "xclip"])` call at
+   runtime.  A list pins the allowed set: runtime fallback never escapes
+   into mechanisms the caller excluded, which is useful both for tests
+   (force-select a specific implementation) and for production
+   deployments that need to exclude a path for security/audit reasons.
+2. Environment variable: `MECHATRON_INPUT_MECHANISM`,
+   `MECHATRON_SCREEN_MECHANISM`, `MECHATRON_CLIPBOARD_MECHANISM`
+   (comma-separated priority list accepted, same semantics as the
+   `setMechanism` list form).
+3. Auto-detection — probe each mechanism in a defined priority order and
+   pick the first that self-reports available.
+
+Query the current selection and pinned preference list with
+`Platform.getMechanism(capability)` and
+`Platform.getPreferredMechanisms(capability)` respectively.
+
+Each mechanism exposes a `probe()` that returns a `MechanismInfo`:
+
+```ts
+interface MechanismInfo {
+  name: string;                      // "xtest", "uinput", …
+  available: boolean;
+  requiresElevatedPrivileges: boolean;
+  requiresUserApproval: boolean;     // runtime prompt required?
+  supportsOffScreen: boolean;        // virtual displays / off-screen windows
+  description: string;
+  reason?: string;                   // why unavailable, if applicable
+}
+```
+
+This gives app authors a principled way to decide (e.g.) whether to prompt
+the user for elevated privileges up front, or to skip Wayland's portal
+dialog by pre-caching a permission handle.
+
+### 6b. Linux Clipboard Support (COMPLETE — subprocess bridge)
+
+X11 has no clipboard manager; content only persists while the owning client
+is alive.  The in-process alternatives all have caveats that make them
+unattractive as the *default* path:
+
+- **libX11 + libXfixes + background thread** works on X11 but requires
+  process-lifetime thread management and fights short-lived CLI scripts.
+- **Wayland `wlr-data-control`** works on wlroots + KWin but not on
+  GNOME/Mutter — currently the biggest Wayland installed base.
+- **`org.freedesktop.portal.Clipboard`** (part of xdg-desktop-portal)
+  requires a RemoteDesktop session and full D-Bus integration; it's new
+  enough (2024+) to still have implementation gaps.
+
+Instead we shell out to a small set of well-established helpers that
+already handle the per-compositor protocol quirks and maintain their own
+persistent owner processes:
+
+| Mechanism | Backing tool(s) | Notes |
+|-----------|-----------------|-------|
+| `wl-clipboard` | `wl-copy`, `wl-paste` | Wayland (wlroots + KWin) |
+| `xclip` | `xclip` | Classic X11 (also reaches GNOME via XWayland) |
+| `xsel` | `xsel` | X11 alternative |
+
+Auto-selection considers session type + `$XDG_CURRENT_DESKTOP`:
+GNOME-Wayland specifically is routed to `xclip` / `xsel` via XWayland
+because `wl-copy` exits 0 but silently no-ops against Mutter.  Override
+via `MECHATRON_CLIPBOARD_MECHANISM=wl-clipboard|xclip|xsel|none`.  At
+call time, if the active mechanism *throws*, the dispatcher falls
+through to the next available one and promotes it to active for the
+rest of the process's life; an empty read, by contrast, is treated as
+a legitimate "clipboard is empty" signal and not a failure.
+
+Implementation lives in TypeScript (`lib/clipboard/linux.ts`) so it works
+for both the napi and ffi backends unchanged — the napi stubs still live
+as a last-resort when no tool is installed.
+
+**Image support** (both read and write) requires a small PNG
+encoder/decoder to round-trip ARGB through `--type image/png`.  Deferred
+but tracked; the text path works today and covers the overwhelming
+majority of clipboard use.
+
+**Portal-based clipboard (future work)**: once
+`org.freedesktop.portal.Clipboard` reaches universal support across
+GNOME, KDE, and wlroots (likely 2026+), a `portal-clipboard` mechanism
+can be added that shares session-creation, D-Bus wiring, and
+permission-handle caching with the `portal-pipewire` screen-capture
+mechanism (6f).  Both use the same `RemoteDesktop` session, so the
+heavy lifting — D-Bus method-call scaffolding, `restore_token`
+persistence via `Platform.saveScreenPermission` / `loadScreenPermission`,
+`CreateSession` request plumbing — is already on the roadmap and will
+be re-used rather than re-implemented.
+
+### 6c. uinput Virtual Input Device Fallback (COMPLETE)
+
+When XTest is unavailable or the session is Wayland, input can still be
+synthesised by creating a virtual keyboard/mouse via `/dev/uinput`:
+
+- Opens `/dev/uinput`, sets `UI_SET_EVBIT` / `UI_SET_KEYBIT` / `UI_SET_RELBIT`
+  for the keys and axes we emit, writes `uinput_user_dev`, ioctl
+  `UI_DEV_CREATE`.
+- Emits `EV_KEY` / `EV_REL` / `EV_SYN` structs to generate presses,
+  releases, motions, and scroll events.
+- Requires `CAP_SYS_ADMIN` or a udev rule (`KERNEL=="uinput", MODE="0660", GROUP="input"`).
+
+Detection checks read access on `/dev/uinput`; if unavailable, reports
+`requiresElevatedPrivileges: true` so callers know to prompt.  Because
+uinput works at the evdev layer, it works equally well under X11, Wayland,
+and headless sessions — but it cannot report *current* pointer/key state
+(that's a session-level concept), so `Mouse.getPos()` / `Keyboard.getState()`
+still transparently delegate to the X11 backend if one is also available.
+
+### 6d. Direct X Protocol Implementation (COMPLETE)
+
+An intermediate fallback that speaks the X11 wire protocol directly over
+`$DISPLAY` (Unix socket or TCP), with no dependency on `libX11` /
+`libXtst` / `libXrandr`.  Landed across seven sub-parts under
+`lib/x11proto/` (`wire.ts` — display parsing + Xauthority + connection
+setup encode/decode; `request.ts` — per-request encoders and reply/error
+parsers; `conn.ts` — socket lifecycle, sequence-correlated dispatch,
+chunk-queue reader with lazy peek/consume to avoid O(n²) on multi-MB
+replies).  Exposed mechanisms:
+
+- **Connection setup**: parse `$DISPLAY`, read Xauthority cookie,
+  send `X_ConnSetup` (byte-order + protocol version + auth), parse the
+  server's reply (screen/visual info lives right in the connection
+  setup response).
+- **Key/pointer events**: `WarpPointer` is a core X request; synthesised
+  input via `XTestFakeInput` is a single extension opcode that we can
+  send directly.  We can still probe for the XTEST extension without
+  libXtst via `X_QueryExtension`.
+- **Screen capture**: `GetImage` is core X; we already decode its reply
+  ourselves in the `XGetPixel` path.  XRandR monitor enumeration uses
+  opcode 42 of the RandR extension, which decodes to a straightforward
+  byte-layout reply.
+
+Benefits: no libX11/libXtst/libXrandr soname dependency (Alpine/musl
+distros that don't bundle them; containers that strip shared libraries);
+identical behaviour between the napi and ffi backends; easier to thread
+or background than libX11 which holds a global display lock.
+
+Live smoke test (`test/xproto.js`) exercises FakeKey + FakeButton +
+WarpPointer + GetImage + RANDR against a real Xvfb; CI on Linux runners
+runs it as part of the standard matrix.  Mechanism-registry probe is
+wired through `getMechanism("input")` / `getMechanism("screen")`, so
+setting `MECHATRON_INPUT_MECHANISM=xproto` selects it for introspection.
+FFI-backend keyboard/mouse dispatch still routes through libXtst or
+uinput — sync→async glue to route through XConnection is deferred until
+there's a compelling case (Alpine containers that ship no libX11).
+
+### 6e. Framebuffer / KMS Screen Capture (COMPLETE — skeleton)
+
+For headless / TTY / container contexts with no X server, mechatron can
+read pixels directly from:
+
+- **`/dev/fb0`** (legacy framebuffer device) — mmap the device, read
+  `FBIOGET_VSCREENINFO` + `FBIOGET_FSCREENINFO` for geometry, decode
+  the pixel format (usually 32-bit ARGB or 16-bit RGB565) and convert
+  to our canonical ARGB.
+- **`/dev/dri/card0`** with DRM dumb buffers — required for most
+  modern Linux systems where `/dev/fb0` is deprecated and the actual
+  scanout lives in KMS planes.  Uses `DRM_IOCTL_MODE_GETCRTC` +
+  `DRM_IOCTL_MODE_MAP_DUMB` + `mmap`.
+
+Both paths require `CAP_SYS_ADMIN` or `video` group membership;
+`Platform.getCapabilities("screen")` reports `requiresElevatedPrivileges: true`
+when only the framebuffer mechanism is available.
+
+### 6f. Wayland / PipeWire Screen Capture (PLANNED)
+
+Wayland compositors expose screen capture via the `org.freedesktop.portal.ScreenCast`
+portal over D-Bus.  The flow is:
+
+1. Call `CreateSession` on `org.freedesktop.portal.ScreenCast` → returns a
+   session handle.
+2. `SelectSources` (optionally with `persist_mode=2` to get a reusable
+   permission handle).
+3. `Start` — this is where the user sees the permission prompt.  The
+   return includes a `restore_token` string we can persist to disk.
+4. `OpenPipeWireRemote` → returns a PipeWire fd we consume frames from.
+
+Permission-caching flow:
+
+- `Platform.saveScreenPermission("./my-app.tok")` — writes the restore
+  token from the current session.
+- `Platform.loadScreenPermission("./my-app.tok")` — on next run, pass
+  the cached token; the portal may either skip the prompt or fall back
+  to prompting if the token is no longer valid.
+
+If the process is run as root or started via a systemd unit with the
+`CAP_SYS_ADMIN` capability, we can bypass the portal entirely via the
+DRM scanout path (6e).  The screen mechanism selector is:
+
+```
+root / CAP_SYS_ADMIN         → drm  (no prompt)
+Wayland session              → portal-pipewire (prompt, cache token)
+X11 session                  → xrandr+XGetImage  (the classic path)
+last resort                  → framebuffer  (works everywhere, needs perms)
+```
+
+### 6g. libei / Remote Desktop Portal Input (PLANNED)
+
+A Wayland-native analogue of uinput for input synthesis:
+`org.freedesktop.portal.RemoteDesktop` exposes a libei (Emulated Input)
+session that bypasses uinput's root/udev requirement by routing through
+the same portal infrastructure as screen capture.  Similar permission-
+caching semantics; same `restore_token` idea.
+
+### 6h. CI matrix expansion (PLANNED)
+
+- Add a Wayland runner (Sway + Weston) job to CI.
+- Add an XTest-stripped runner that dlopen-blocks libXtst to validate
+  the uinput/xproto fallbacks run real workloads.
+- Add a framebuffer-only job (no X server) exercising DRM capture.
+
+### 6i. Phase 6 Implementation Status
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Platform mechanism introspection (6a) | **Complete** | `getMechanism`, `listMechanisms`, `setMechanism`, `getCapabilities` |
+| Linux clipboard via wl-clipboard/xclip/xsel (6b) | **Complete** | TS bridge with tool auto-detection |
+| uinput fallback (6c) | Complete | Pure-TS encoding + bun:ffi ioctl layer + Keyboard/Mouse dispatch routing + CI coverage via `MECHATRON_INPUT_MECHANISM=uinput` on Linux runners |
+| Pure X protocol (6d) | **Complete** | lib/x11proto: wire + request + conn; mechanism probe wired; live smoke test against Xvfb in CI |
+| Framebuffer / DRM capture (6e) | **Skeleton** | /dev/fb0 probe + mmap path; DRM TBD |
+| Portal+PipeWire screen capture (6f) | **Complete** | napi: ScreenCast portal + PipeWire single-frame capture (pw.rs, pw_capture.rs, screencast_portal.rs, screencast.rs); token persistence via screen_getPortalToken/screen_setPortalToken |
+| Portal+libei input (6g) | **Complete** | napi: RemoteDesktop portal + libei dlopen (ei.rs, ei_input.rs, dbus_portal.rs); keyboard + mouse press/release/scroll |
+| napi clipboard X11+portal (6g′) | **Complete** | Rust X11 selection protocol + wl-clipboard subprocess fallback in napi/src/clipboard.rs |
+| nolib memory (6g″) | **Complete** | Pure-TS /proc/pid/mem + /proc/pid/maps; pattern search with wildcards; AT_PAGESZ from auxv |
+| nolib window[portal] (6g‴) | **Complete** | GNOME Shell extension D-Bus bridge + AT-SPI2 read-only fallback; installExtension helper |
+| CI expansion (6h) | **Planned** | Job definitions TBD |
+
+### Future: GNOME Shell Extension for No-Prompt Screen Capture
+
+**Status: Noted — do NOT implement yet.**
+
+The same GNOME Shell extension mechanism used for window management could also
+provide no-prompt screen capture by using Mutter's internal `Shell.Screenshot`
+API or `Meta.CursorTracker` + `Clutter.Stage.paint_to_buffer_rect()`.  This
+would bypass the portal permission dialog entirely for apps running on GNOME
+with the extension installed.  Worth exploring once the window management
+extension is battle-tested and user adoption is validated.
+
+### Future: Per-Window Image Grab
+
+**Status: Noted — do NOT implement yet.**
+
+A `Window.grabImage()` (or `Screen.grabWindow(handle)`) method that captures
+pixels from a specific window rather than the full screen.  On platforms that
+support it, this can return content for non-topmost or partially-occluded
+windows:
+
+- **Windows**: `PrintWindow` or `BitBlt` from the window's own DC — works
+  even if the window is behind another.
+- **macOS**: `CGWindowListCreateImage` with a specific `windowID` — captures
+  the window's backing store regardless of z-order.
+- **Linux/X11**: `XGetImage` on the window's drawable — works for unobscured
+  regions; occluded pixels return stale data unless the WM uses compositing.
+- **Linux/GNOME extension**: Mutter's `Shell.Screenshot.screenshot_window()`
+  or `meta_window.get_compositor_private().paint_to_content()` — could
+  capture composited window content including off-screen windows.
+
+This would be useful for automation scenarios that need to inspect a
+background window without bringing it to the front (e.g. monitoring a
+game window while interacting with a tool overlay).
+
+---
+
 ## Roadmap Summary
 
 | Phase | Status | Description |
@@ -332,3 +632,4 @@ appropriately.  All subsystems run under all three engines.
 | 4a | **Complete** | Segmented native packages (`@mechatronic/napi-*` as optionalDependencies) |
 | 4b | **Complete** | API modernization (async variants, typed named exports, drop `callableClass`) |
 | 5 | **Complete** | Bun FFI backend: pure-TS `bun:ffi` to system libs, no native binary needed under Bun (Linux + Windows) |
+| 6 | **In progress** | Linux/Wayland compat — mechanism introspection, clipboard, uinput/DRM/portal fallbacks |

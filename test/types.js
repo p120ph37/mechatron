@@ -11,7 +11,7 @@
 
 "use strict";
 
-module.exports = function (mechatron, log, assert) {
+module.exports = function (mechatron, log, assert, waitFor) {
 
 	function testTypes() {
 		log("  Types... ");
@@ -707,8 +707,236 @@ module.exports = function (mechatron, log, assert) {
 		return true;
 	}
 
-	return {
-		testTypes: testTypes,
-		testTimer: testTimer,
-	};
+	return [
+		{ name: "types", functions: [], unit: true, test: testTypes },
+		{ name: "timer", functions: [], unit: true, test: testTimer },
+		{
+			name: "timer delay (async)",
+			functions: [], unit: true,
+			test: async function () {
+				var Timer = mechatron.Timer;
+				var Range = mechatron.Range;
+
+				var p1 = Timer.delay(1);
+				assert(p1 instanceof Promise, "delay(ms) returns Promise");
+				await p1;
+
+				var p2 = Timer.delay(new Range(1, 5));
+				assert(p2 instanceof Promise, "delay(Range) returns Promise");
+				await p2;
+
+				var p3 = Timer.delay(1, 5);
+				assert(p3 instanceof Promise, "delay(min,max) returns Promise");
+				await p3;
+
+				var p4 = Timer.delay(0);
+				assert(p4 instanceof Promise, "delay(0) returns Promise");
+				await p4;
+
+				var p5 = Timer.delay(-1);
+				assert(p5 instanceof Promise, "delay(-1) returns Promise");
+				await p5;
+
+				var threw = false;
+				try { Timer.delay("bad"); } catch(e) { threw = true; }
+				assert(threw, "delay invalid throws");
+			}
+		},
+		{
+			name: "backend parseEntries",
+			functions: [], unit: true,
+			test: function () {
+				var IS_BUN = typeof globalThis.Bun !== "undefined";
+				if (!IS_BUN) return true;
+				var parse = require("../lib/backend")._parseEntriesForTests;
+
+				// Empty / invalid
+				var e0 = parse("");
+				assert(e0.length === 0, "empty string → 0 entries");
+				var e1 = parse("bogus");
+				assert(e1.length === 0, "invalid backend → 0 entries");
+
+				// Bracket variants: napi[x11]
+				var e2 = parse("napi[x11]");
+				assert(e2.length === 1, "napi[x11] → 1 entry");
+				assert(e2[0].backend === "napi", "napi[x11] backend");
+				assert(e2[0].variant === "x11", "napi[x11] variant");
+
+				// Bracket: napi[portal]
+				var e3 = parse("napi[portal]");
+				assert(e3.length === 1, "napi[portal] → 1 entry");
+				assert(e3[0].variant === "portal", "napi[portal] variant");
+
+				// Bracket with invalid variant
+				var e4 = parse("napi[bogus]");
+				assert(e4.length === 0, "napi[bogus] → 0 entries");
+
+				// ffi has no Linux variants; ffi[x11] should be silently dropped
+				var eFfi = parse("ffi[x11]");
+				assert(eFfi.length === 0, "ffi[x11] → 0 entries (no ffi variants)");
+
+				// Multiple bracket entries: nolib[x11],nolib[portal]
+				var e5 = parse("nolib[x11],nolib[portal]");
+				assert(e5.length === 2, "nolib[x11],nolib[portal] → 2 entries");
+				assert(e5[0].variant === "x11", "first variant x11");
+				assert(e5[1].variant === "portal", "second variant portal");
+
+				// Comma-separated backends
+				var e6 = parse("napi,nolib");
+				assert(e6.length >= 2, "napi,nolib → ≥2 entries");
+				assert(e6[0].backend === "napi", "first backend napi");
+
+				// Mixed: bracket + plain
+				var e7 = parse("napi[x11],nolib");
+				assert(e7.length >= 2, "napi[x11],nolib → ≥2 entries");
+				assert(e7[0].backend === "napi" && e7[0].variant === "x11", "first is napi[x11]");
+
+				// defaultOrder: returns a non-empty preference list
+				var defOrder = require("../lib/backend")._defaultOrderForTests;
+				var order = defOrder();
+				assert(Array.isArray(order) && order.length > 0, "defaultOrder non-empty");
+				assert(order[0].backend === "napi", "defaultOrder starts with napi");
+				// On Linux, entries should have variants
+				if (process.platform === "linux") {
+					assert(order[0].variant !== undefined, "Linux defaultOrder has variants");
+					var hasNolib = order.some(function(e) { return e.backend === "nolib"; });
+					assert(hasNolib, "defaultOrder includes nolib");
+				}
+
+				// _resetBackend: clears cached backend and reloads
+				var backend = require("../lib/backend");
+				var origBe = backend.getBackend("process");
+				backend._resetBackend("process");
+				var afterReset = backend.getBackend("process");
+				assert(afterReset === origBe, "resetBackend re-resolves same backend");
+
+				// getNative: returns module for available subsystem
+				var mod = backend.getNative("process");
+				assert(mod !== null && typeof mod === "object", "getNative returns module");
+
+				// isAvailable: true for a known-good subsystem
+				assert(backend.isAvailable("process") === true, "isAvailable process");
+			}
+		},
+		{
+			name: "Platform mechanism API",
+			functions: [], unit: true,
+			test: function () {
+				// listMechanisms, getMechanism, setMechanism, resetMechanism,
+				// getPreferredMechanisms, getCapabilities
+				var list = mechatron.listMechanisms("input");
+				assert(Array.isArray(list), "listMechanisms returns array");
+				for (var i = 0; i < list.length; i++) {
+					assert(typeof list[i].name === "string", "mechanism has name");
+					assert(typeof list[i].available === "boolean", "mechanism has available");
+				}
+
+				// getPreferredMechanisms: null by default (auto-detection)
+				var pref = mechatron.getPreferredMechanisms("input");
+				assert(pref === null || Array.isArray(pref), "getPreferredMechanisms type");
+
+				// setMechanism with "none" → getMechanism returns "none"
+				mechatron.setMechanism("input", "none");
+				assert(mechatron.getMechanism("input") === "none", "setMechanism none");
+				var prefNow = mechatron.getPreferredMechanisms("input");
+				assert(prefNow !== null && prefNow[0] === "none", "preferred after set is ['none']");
+
+				// getCapabilities after "none"
+				var caps = mechatron.getCapabilities("input");
+				assert(caps.active === "none", "capabilities active = none");
+				assert(Array.isArray(caps.mechanisms), "capabilities mechanisms array");
+
+				// setMechanism with a known-available mechanism name
+				var avail = list.find(function(m) { return m.available; });
+				if (avail) {
+					mechatron.resetMechanism("input");
+					mechatron.setMechanism("input", avail.name);
+					var active = mechatron.getMechanism("input");
+					assert(active === avail.name, "getMechanism returns available name");
+				}
+				// setMechanism with a known-unavailable mechanism
+				var unavail = list.find(function(m) { return !m.available; });
+				if (unavail) {
+					mechatron.resetMechanism("input");
+					mechatron.setMechanism("input", unavail.name);
+					var active2 = mechatron.getMechanism("input");
+					assert(active2 === unavail.name, "getMechanism returns pinned unavailable name");
+				}
+
+				// setMechanism with unknown name → throws
+				var threw = false;
+				try { mechatron.setMechanism("input", "nonexistent_xyz"); } catch(e) { threw = true; }
+				assert(threw, "setMechanism unknown throws");
+
+				// resetMechanism restores auto-detection
+				mechatron.resetMechanism("input");
+				var prefAfter = mechatron.getPreferredMechanisms("input");
+				assert(prefAfter === null || Array.isArray(prefAfter), "pref after reset");
+
+				// Env-var mechanism preference (covers envForCapability parsing)
+				mechatron.resetMechanism("screen");
+				var origEnv = process.env.MECHATRON_SCREEN_MECHANISM;
+				process.env.MECHATRON_SCREEN_MECHANISM = "framebuffer,xrandr";
+				mechatron.resetMechanism("screen");
+				var envPref = mechatron.getPreferredMechanisms("screen");
+				assert(envPref !== null && envPref.length === 2, "env pref parsed 2 entries");
+				assert(envPref[0] === "framebuffer", "env pref[0] = framebuffer");
+				assert(envPref[1] === "xrandr", "env pref[1] = xrandr");
+				if (origEnv === undefined) delete process.env.MECHATRON_SCREEN_MECHANISM;
+				else process.env.MECHATRON_SCREEN_MECHANISM = origEnv;
+				mechatron.resetMechanism("screen");
+
+				// Clipboard and screen capabilities
+				var clipMechs = mechatron.listMechanisms("clipboard");
+				assert(Array.isArray(clipMechs), "clipboard mechanisms array");
+				var screenMechs = mechatron.listMechanisms("screen");
+				assert(Array.isArray(screenMechs), "screen mechanisms array");
+
+				// getCapabilities for screen
+				var screenCaps = mechatron.getCapabilities("screen");
+				assert(typeof screenCaps.active === "string" || screenCaps.active === null, "screen active type");
+				assert(typeof screenCaps.requiresElevatedPrivileges === "boolean", "screen requiresElevatedPrivileges");
+				assert(typeof screenCaps.requiresUserApproval === "boolean", "screen requiresUserApproval");
+				assert(typeof screenCaps.supportsOffScreen === "boolean", "screen supportsOffScreen");
+			}
+		},
+
+		{
+			name: "Platform screen permission save/load",
+			functions: [], unit: true,
+			test: async function () {
+				var Platform = mechatron.Platform;
+				var path = require("path");
+				var os = require("os");
+				var tmpFile = path.join(os.tmpdir(), "mechatron-perm-test-" + process.pid + ".json");
+
+				// save with no handle → false
+				var saved = await Platform.saveScreenPermission(tmpFile);
+				assert(saved === false, "save with no handle returns false");
+
+				// Set a handle, save, then load
+				var platformMod;
+				try { platformMod = require("../lib/platform"); }
+				catch (_) { platformMod = require("../dist/platform"); }
+				platformMod._setSavedScreenHandle({ token: "test123", stream: 42 });
+				saved = await Platform.saveScreenPermission(tmpFile);
+				assert(saved === true, "save with handle returns true");
+
+				// Clear handle, load from file
+				platformMod._setSavedScreenHandle(null);
+				var loaded = await Platform.loadScreenPermission(tmpFile);
+				assert(loaded === true, "load returns true");
+				var handle = platformMod._getSavedScreenHandle();
+				assert(handle && handle.token === "test123", "loaded handle token");
+
+				// Load from nonexistent file → false
+				loaded = await Platform.loadScreenPermission("/tmp/nonexistent-" + process.pid);
+				assert(loaded === false, "load nonexistent returns false");
+
+				// Cleanup
+				platformMod._setSavedScreenHandle(null);
+				try { require("fs").unlinkSync(tmpFile); } catch(e) {}
+			}
+		},
+	];
 };

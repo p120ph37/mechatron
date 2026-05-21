@@ -4,223 +4,586 @@
 //                    Mechatron Window Test Module                             //
 //                                                                            //
 //  Exercises Window class using the modern mechatron API.                    //
+//  Returns an array of annotated test entries for the matrix runner.         //
 //                                                                            //
 // -------------------------------------------------------------------------- //
 ////////////////////////////////////////////////////////////////////////////////
 
 "use strict";
 
-module.exports = function (mechatron, log, assert, waitFor, expectOrSkip) {
+module.exports = function (mechatron, log, assert, waitFor, waitForAsync) {
 
-	function testWindow() {
-		log("  Window... ");
+	var Window = mechatron.Window;
+	var Bounds = mechatron.Bounds;
+	var Point  = mechatron.Point;
 
-		var Window = mechatron.Window;
-		var Bounds = mechatron.Bounds;
-		var Point  = mechatron.Point;
-
-		// --- Invalid window ---
-		var w1 = new Window();
-		var w2 = new Window();
-		assert(!w1.isValid(), "empty invalid");
-		assert(w1.getHandle() === 0, "empty handle=0");
-		assert(w1.getTitle() === "", "empty title empty");
-		assert(w1.getPID() === 0, "empty pid=0");
-
-		assert(w1.setHandle(0), "setHandle 0");
-		assert(!w1.setHandle(8888), "setHandle 8888 fails");
-
-		assert(!w1.isTopMost(), "empty !topmost");
-		assert(!w1.isBorderless(), "empty !borderless");
-		assert(!w1.isMinimized(), "empty !minimized");
-		assert(!w1.isMaximized(), "empty !maximized");
-
-		// Exercise setters on invalid window (no-op, no crash)
-		w1.setTopMost(false);
-		w1.setBorderless(false);
-		w1.setMinimized(false);
-		w1.setMaximized(false);
-		w1.setTitle("");
-		w1.close();
-
-		var b = w1.getBounds();
-		assert(b instanceof Bounds, "getBounds returns Bounds");
-		assert(b.eq(0), "empty bounds eq 0");
-
-		var c = w1.getClient();
-		assert(c instanceof Bounds, "getClient returns Bounds");
-
-		var mp = w1.mapToClient(20, 20);
-		assert(mp instanceof Point, "mapToClient returns Point");
-		var ms = w1.mapToScreen(20, 20);
-		assert(ms instanceof Point, "mapToScreen returns Point");
-
-		// Equality
-		assert(w1.eq(w2), "empty eq empty");
-		assert(!w1.ne(w2), "empty !ne empty");
-		assert(w1.eq(0), "empty eq 0");
-		assert(w1.ne(8888), "empty ne 8888");
-
-		// --- Window clone ---
-		var wc = w1.clone();
-		assert(wc.eq(w1), "clone eq original");
-
-		// --- getProcess ---
-		var wp = w1.getProcess();
-		assert(typeof wp === "object", "getProcess returns object");
-
-		// --- getList ---
-		var list = Window.getList();
-		assert(list instanceof Array, "getList is array");
-
-		// --- getActive ---
-		var active = Window.getActive();
-		assert(active instanceof Window, "getActive returns Window");
-
-		// mapToClient/mapToScreen overloads (no args, Point obj)
-		var mp0 = w1.mapToClient();
-		assert(mp0 instanceof Point, "mapToClient() no args");
-		var ms0 = w1.mapToScreen();
-		assert(ms0 instanceof Point, "mapToScreen() no args");
-		var mpPt = w1.mapToClient(new Point(10, 20));
-		assert(mpPt instanceof Point, "mapToClient(Point)");
-		var msPt = w1.mapToScreen(new Point(10, 20));
-		assert(msPt instanceof Point, "mapToScreen(Point)");
-		var mpObj = w1.mapToClient({ x: 5, y: 5 });
-		assert(mpObj instanceof Point, "mapToClient(obj)");
-		var msObj = w1.mapToScreen({ x: 5, y: 5 });
-		assert(msObj instanceof Point, "mapToScreen(obj)");
-
-		// setBounds/setClient overloads (no-crash on invalid window)
-		w1.setBounds();
-		w1.setBounds(0, 0, 100, 100);
-		w1.setBounds({ x: 0, y: 0, w: 100, h: 100 });
-		w1.setClient();
-		w1.setClient(0, 0, 100, 100);
-		w1.setClient({ x: 0, y: 0, w: 100, h: 100 });
-
-		// Window copy constructor
-		var wCopy = new Window(w1);
-		assert(wCopy.eq(w1), "Window copy ctor eq");
-
-		// Test window setters/getters on a valid window if one exists
-		if (list.length > 0) {
-			var vw = list[0];
-			// setBounds/getBounds round-trip
-			var origBounds = vw.getBounds();
-			assert(origBounds instanceof Bounds, "valid getBounds");
-
-			// setTopMost/setBorderless/setMinimized/setMaximized (just exercise them)
-			vw.setTopMost(false);
-			vw.setBorderless(false);
-
-			// setTitle (no-crash test)
-			var origTitle = vw.getTitle();
-			if (origTitle) {
-				vw.setTitle(origTitle);
+	return [
+		// ── Invalid window: core invalid-handle path ──
+		{
+			name: "invalid window basics",
+			functions: ["window_isValid"],
+			test: async function () {
+				var w1 = new Window();
+				assert(!await w1.isValid(), "empty invalid");
+				assert(w1.getHandle() === 0n, "empty handle=0");
+				assert(await w1.getTitle() === "", "empty title empty");
+				assert(await w1.getPID() === 0, "empty pid=0");
 			}
+		},
+		{
+			name: "invalid window isTopMost",
+			functions: ["window_isTopMost"],
+			test: async function () {
+				var w = new Window();
+				assert(!await w.isTopMost(), "empty !topmost");
+			}
+		},
+		{
+			name: "invalid window isBorderless",
+			functions: ["window_isBorderless"],
+			test: async function () {
+				var w = new Window();
+				assert(!await w.isBorderless(), "empty !borderless");
+			}
+		},
+		{
+			name: "invalid window isMinimized",
+			functions: ["window_isMinimized"],
+			test: async function () {
+				var w = new Window();
+				assert(!await w.isMinimized(), "empty !minimized");
+			}
+		},
+		{
+			name: "invalid window isMaximized",
+			functions: ["window_isMaximized"],
+			test: async function () {
+				var w = new Window();
+				assert(!await w.isMaximized(), "empty !maximized");
+			}
+		},
+		// ── Setters on invalid window (no-crash) ──
+		{
+			name: "invalid window setTopMost",
+			functions: ["window_setTopMost"],
+			test: async function () {
+				var w = new Window();
+				await w.setTopMost(false);
+			}
+		},
+		{
+			name: "invalid window setBorderless",
+			functions: ["window_setBorderless"],
+			test: async function () {
+				var w = new Window();
+				await w.setBorderless(false);
+			}
+		},
+		{
+			name: "invalid window setMinimized",
+			functions: ["window_setMinimized"],
+			test: async function () {
+				var w = new Window();
+				await w.setMinimized(false);
+			}
+		},
+		{
+			name: "invalid window setMaximized",
+			functions: ["window_setMaximized"],
+			test: async function () {
+				var w = new Window();
+				await w.setMaximized(false);
+			}
+		},
+		{
+			name: "invalid window setTitle",
+			functions: ["window_setTitle"],
+			test: async function () {
+				var w = new Window();
+				await w.setTitle("");
+			}
+		},
+		{
+			name: "invalid window close",
+			functions: ["window_close"],
+			test: async function () {
+				var w = new Window();
+				await w.close();
+			}
+		},
+		// ── getTitle on invalid window ──
+		{
+			name: "invalid window getTitle",
+			functions: ["window_getTitle"],
+			test: async function () {
+				var w = new Window();
+				assert(await w.getTitle() === "", "empty title empty");
+			}
+		},
+		// ── getBounds / getClient on invalid window ──
+		{
+			name: "invalid window getBounds",
+			functions: ["window_getBounds"],
+			test: async function () {
+				var w = new Window();
+				var b = await w.getBounds();
+				assert(b instanceof Bounds, "getBounds returns Bounds");
+				assert(b.eq(0), "empty bounds eq 0");
+			}
+		},
+		{
+			name: "invalid window getClient",
+			functions: ["window_getClient"],
+			test: async function () {
+				var w = new Window();
+				var c = await w.getClient();
+				assert(c instanceof Bounds, "getClient returns Bounds");
+			}
+		},
+		// ── mapToClient / mapToScreen ──
+		{
+			name: "invalid window mapToClient",
+			functions: ["window_mapToClient"],
+			test: async function () {
+				var w = new Window();
+				var mp = await w.mapToClient(20, 20);
+				assert(mp instanceof Point, "mapToClient returns Point");
+			}
+		},
+		{
+			name: "invalid window mapToScreen",
+			functions: ["window_mapToScreen"],
+			test: async function () {
+				var w = new Window();
+				var ms = await w.mapToScreen(20, 20);
+				assert(ms instanceof Point, "mapToScreen returns Point");
+			}
+		},
+		// ── Clone / copy / equality (pure JS) ──
+		{
+			name: "window equality",
+			functions: ["window_ctor"],
+			test: async function () {
+				var w1 = new Window();
+				var w2 = new Window();
+				assert(w1.eq(w2), "empty eq empty");
+				assert(!w1.ne(w2), "empty !ne empty");
+				assert(w1.eq(0), "empty eq 0");
+				assert(w1.eq(0n), "empty eq 0n");
+				assert(w1.ne(8888), "empty ne 8888");
+				assert(w1.ne(8888n), "empty ne 8888n");
+			}
+		},
+		{
+			name: "window clone",
+			functions: ["window_ctor"],
+			test: async function () {
+				var w = new Window();
+				var wc = w.clone();
+				assert(wc.eq(w), "clone eq original");
+			}
+		},
+		{
+			name: "window copy constructor",
+			functions: ["window_ctor"],
+			test: async function () {
+				var w = new Window();
+				var wCopy = new Window(w);
+				assert(wCopy.eq(w), "Window copy ctor eq");
+			}
+		},
+		// ── setHandle ──
+		{
+			name: "setHandle",
+			functions: ["window_setHandle"],
+			test: async function () {
+				var w = new Window();
+				assert(await w.setHandle(0), "setHandle 0");
+				assert(!await w.setHandle(8888), "setHandle 8888 fails");
+			}
+		},
+		// ── getProcess on invalid ──
+		{
+			name: "invalid window getProcess",
+			functions: ["window_getProcess"],
+			test: async function () {
+				var w = new Window();
+				var wp = await w.getProcess();
+				assert(typeof wp === "object", "getProcess returns object");
+			}
+		},
+		// ── getList ──
+		{
+			name: "Window.getList",
+			functions: ["window_getList"],
+			test: async function () {
+				var list = await Window.getList();
+				assert(list instanceof Array, "getList is array");
+				var pa1 = Window.getList();
+				assert(pa1 instanceof Promise, "getList returns Promise");
+			}
+		},
+		// ── getActive ──
+		{
+			name: "Window.getActive",
+			functions: ["window_getActive"],
+			test: async function () {
+				var active = await Window.getActive();
+				assert(active instanceof Window, "getActive returns Window");
+			}
+		},
+		// ── mapToClient overloads ──
+		{
+			name: "mapToClient overloads",
+			functions: ["window_mapToClient"],
+			test: async function () {
+				var w = new Window();
+				var mp0 = await w.mapToClient();
+				assert(mp0 instanceof Point, "mapToClient() no args");
+				var mpPt = await w.mapToClient(new Point(10, 20));
+				assert(mpPt instanceof Point, "mapToClient(Point)");
+				var mpObj = await w.mapToClient({ x: 5, y: 5 });
+				assert(mpObj instanceof Point, "mapToClient(obj)");
+			}
+		},
+		// ── mapToScreen overloads ──
+		{
+			name: "mapToScreen overloads",
+			functions: ["window_mapToScreen"],
+			test: async function () {
+				var w = new Window();
+				var ms0 = await w.mapToScreen();
+				assert(ms0 instanceof Point, "mapToScreen() no args");
+				var msPt = await w.mapToScreen(new Point(10, 20));
+				assert(msPt instanceof Point, "mapToScreen(Point)");
+				var msObj = await w.mapToScreen({ x: 5, y: 5 });
+				assert(msObj instanceof Point, "mapToScreen(obj)");
+			}
+		},
+		// ── setBounds overloads on invalid window ──
+		{
+			name: "setBounds overloads on invalid window",
+			functions: ["window_setBounds"],
+			test: async function () {
+				var w = new Window();
+				await w.setBounds();
+				await w.setBounds(0, 0, 100, 100);
+				await w.setBounds({ x: 0, y: 0, w: 100, h: 100 });
+			}
+		},
+		// ── setClient overloads on invalid window ──
+		{
+			name: "setClient overloads on invalid window",
+			functions: ["window_setClient"],
+			test: async function () {
+				var w = new Window();
+				await w.setClient();
+				await w.setClient(0, 0, 100, 100);
+				await w.setClient({ x: 0, y: 0, w: 100, h: 100 });
+			}
+		},
+		// ── Valid window tests (require getList to find a window) ──
+		{
+			name: "valid window getHandle",
+			functions: ["window_getList", "window_getHandle"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				assert(typeof list[0].getHandle() === "bigint", "valid getHandle returns bigint");
+			}
+		},
+		{
+			name: "valid window getters",
+			functions: ["window_getList", "window_isValid", "window_getBounds", "window_isTopMost", "window_isMinimized", "window_isMaximized", "window_getPID", "window_getHandle", "window_getProcess", "window_getClient"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var origBounds = await vw.getBounds();
+				assert(origBounds instanceof Bounds, "valid getBounds");
+				assert(typeof await vw.isValid() === "boolean", "valid isValid");
+				assert(typeof await vw.isTopMost() === "boolean", "valid isTopMost");
+				assert(typeof await vw.isMinimized() === "boolean", "valid isMinimized");
+				assert(typeof await vw.isMaximized() === "boolean", "valid isMaximized");
+				assert(typeof await vw.getPID() === "number", "valid getPID");
+				assert(typeof vw.getHandle() === "bigint", "valid getHandle");
+				var vwProc = await vw.getProcess();
+				assert(typeof vwProc === "object", "valid getProcess");
+				var vwClient = await vw.getClient();
+				assert(vwClient instanceof Bounds, "valid getClient");
+			}
+		},
+		{
+			name: "valid window isBorderless",
+			functions: ["window_getList", "window_isBorderless"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				assert(typeof await list[0].isBorderless() === "boolean", "valid isBorderless");
+			}
+		},
+		{
+			name: "valid window setters",
+			functions: ["window_getList", "window_isValid", "window_setTopMost", "window_setMinimized", "window_setMaximized"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await vw.setTopMost(false);
+				await vw.setMinimized(false);
+				await vw.setMaximized(false);
+			}
+		},
+		{
+			name: "valid window maximize round-trip",
+			functions: ["window_getList", "window_isValid", "window_setMaximized", "window_isMaximized"],
+			test: async function () {
+				// Use a named window to avoid picking up orphaned frames
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await vw.setMaximized(true);
+				await waitForAsync(function () { return vw.isMaximized(); }, 2000);
+				var maxed = await vw.isMaximized();
+				await vw.setMaximized(false);
+				await waitForAsync(async function () { return !(await vw.isMaximized()); }, 2000);
+				assert(typeof maxed === "boolean", "isMaximized returns boolean after set");
+			}
+		},
+		{
+			name: "valid window minimize round-trip",
+			functions: ["window_getList", "window_isValid", "window_setMinimized", "window_isMinimized"],
+			test: async function () {
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await vw.setMinimized(true);
+				await waitForAsync(function () { return vw.isMinimized(); }, 2000);
+				var mined = await vw.isMinimized();
+				await vw.setMinimized(false);
+				await waitForAsync(async function () { return !(await vw.isMinimized()); }, 2000);
+				assert(typeof mined === "boolean", "isMinimized returns boolean after set");
+			}
+		},
+		{
+			name: "valid window setBounds + getBounds round-trip",
+			functions: ["window_getList", "window_isValid", "window_setBounds", "window_getBounds"],
+			test: async function () {
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var orig = await vw.getBounds();
+				await vw.setBounds(10, 10, 200, 150);
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var b = await vw.getBounds();
+				assert(b.w > 0, "setBounds width applied");
+				assert(b.h > 0, "setBounds height applied");
+				await vw.setBounds(orig.x, orig.y, orig.w, orig.h);
+			}
+		},
+		{
+			name: "valid window setClient + getClient round-trip",
+			functions: ["window_getList", "window_isValid", "window_setClient", "window_getClient"],
+			test: async function () {
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var orig = await vw.getClient();
+				await vw.setClient(5, 5, 180, 120);
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var c = await vw.getClient();
+				assert(c.w > 0, "setClient width applied");
+				assert(c.h > 0, "setClient height applied");
+				await vw.setClient(orig.x, orig.y, orig.w, orig.h);
+			}
+		},
+		{
+			name: "valid window mapToClient + mapToScreen",
+			functions: ["window_getList", "window_isValid", "window_mapToClient", "window_mapToScreen"],
+			test: async function () {
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var cp = await vw.mapToClient(100, 100);
+				assert(cp instanceof Point, "mapToClient on valid window");
+				var sp = await vw.mapToScreen(10, 10);
+				assert(sp instanceof Point, "mapToScreen on valid window");
+			}
+		},
+		{
+			name: "valid window setActive",
+			functions: ["window_getList", "window_isValid", "window_setActive", "window_getActive"],
+			test: async function () {
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await Window.setActive(vw);
+				await new Promise(function (r) { setTimeout(r, 100); });
+				var active = await Window.getActive();
+				assert(active instanceof Window, "getActive after setActive");
+			}
+		},
+		{
+			name: "valid window setTitle + getTitle round-trip",
+			functions: ["window_getList", "window_isValid", "window_setTitle", "window_getTitle"],
+			test: async function () {
+				var list = await Window.getList("MechatronTestWindow");
+				if (list.length === 0) list = await Window.getList();
+				if (list.length === 0) return;
+				// Pick the first window whose title is actually observable.
+				// On macOS, CGWindowListCopyWindowInfo can return system
+				// windows without a kCGWindowName entry (e.g. background
+				// surfaces, the Rosetta translator's own windows); calling
+				// getTitle on those returns "" regardless of what setTitle
+				// does, which makes the round-trip unobservable. The same
+				// guard is harmless on Linux/Windows where every visible
+				// top-level has a title.
+				var vw = null, orig = "";
+				for (var idx = 0; idx < list.length; idx++) {
+					var t = await list[idx].getTitle();
+					if (t) { vw = list[idx]; orig = t; break; }
+				}
+				if (!vw) return;
+				var newTitle = "mechatron_test_title";
+				await vw.setTitle(newTitle);
+				// Title propagation is asynchronous on Windows (DWM redraw
+				// queue) and Linux (some compositors keep their own copy
+				// of _NET_WM_NAME and repaint it back over our XChangeProperty);
+				// poll for up to ~2s.
+				var observed = "";
+				for (var i = 0; i < 40; i++) {
+					await new Promise(function (r) { setTimeout(r, 50); });
+					observed = await vw.getTitle();
+					if (observed === newTitle) break;
+				}
+				assert(observed === newTitle,
+					"getTitle returns set title (got: " + JSON.stringify(observed) + ")");
+				if (orig) await vw.setTitle(orig);
+			}
+		},
+		{
+			name: "valid window setBorderless + setTitle",
+			functions: ["window_getList", "window_setBorderless", "window_setTitle"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				await vw.setBorderless(false);
+				var origTitle = await vw.getTitle();
+				if (origTitle) {
+					await vw.setTitle(origTitle);
+				}
+			}
+		},
+		{
+			name: "valid window clone",
+			functions: ["window_getList", "window_isValid"],
+			test: async function () {
+				var list = await Window.getList();
+				if (list.length === 0) return;
+				var vw = list[0];
+				var vwClone = vw.clone();
+				assert(vwClone.eq(vw), "valid clone eq");
+			}
+		},
+		// ── setActive ──
+		{
+			name: "Window.setActive",
+			functions: ["window_setActive"],
+			test: async function () {
+				var w = new Window();
+				await Window.setActive(w);
+				var activeW = await Window.getActive();
+				if (await activeW.isValid()) {
+					await Window.setActive(activeW);
+				}
+			}
+		},
+		// ── Stale-handle probe — verify a window-handle is detected as
+		// invalid once its backing process exits.  Exercised on Linux
+		// (xmessage), Windows (notepad.exe), and macOS (TextEdit).
+		{
+			name: "stale-handle probe",
+			functions: ["window_isValid_proc", "window_getList", "window_isValid", "window_close", "window_setHandle"],
+			test: async function () {
+				var _cpw = require("child_process");
+				var _tag = "MechatronStaleProbe_" + process.pid;
+				var _xm = null;
 
-			// Exercise more methods on valid windows
-			assert(typeof vw.isValid() === "boolean", "valid isValid");
-			assert(typeof vw.isTopMost() === "boolean", "valid isTopMost");
-			assert(typeof vw.isBorderless() === "boolean", "valid isBorderless");
-			assert(typeof vw.isMinimized() === "boolean", "valid isMinimized");
-			assert(typeof vw.isMaximized() === "boolean", "valid isMaximized");
-			assert(typeof vw.getPID() === "number", "valid getPID");
-			assert(typeof vw.getHandle() === "number", "valid getHandle");
-			var vwProc = vw.getProcess();
-			assert(typeof vwProc === "object", "valid getProcess");
-			var vwClient = vw.getClient();
-			assert(vwClient instanceof Bounds, "valid getClient");
+				if (process.platform === "linux") {
+					try {
+						_xm = _cpw.spawn("xmessage",
+							["-name", _tag, "-timeout", "10", _tag],
+							{ stdio: "ignore" });
+					} catch (_) { _xm = null; }
+				} else if (process.platform === "win32") {
+					try {
+						_xm = _cpw.spawn("notepad.exe", [], { stdio: "ignore" });
+						// notepad's default title; used to locate the window
+						_tag = "Untitled - Notepad";
+					} catch (_) { _xm = null; }
+				} else if (process.platform === "darwin") {
+					try {
+						// open -n launches a new TextEdit instance; --args
+						// with no file means an untitled document.
+						_xm = _cpw.spawn("open",
+							["-n", "-W", "-a", "TextEdit", "--args"],
+							{ stdio: "ignore" });
+						_tag = "Untitled";
+					} catch (_) { _xm = null; }
+				}
 
-			// setMinimized/setMaximized
-			vw.setMinimized(false);
-			vw.setMaximized(false);
-
-			// close (on a cloned handle to avoid disrupting test)
-			var vwClone = vw.clone();
-			assert(vwClone.eq(vw), "valid clone eq");
-		}
-
-		// Window.setActive (exercise on both invalid and valid)
-		Window.setActive(w1);
-		var activeW = Window.getActive();
-		if (activeW.isValid()) {
-			Window.setActive(activeW);
-		}
-
-		// --- Stale-handle probe (Linux FFI): exercise the
-		//     XGetWindowProperty-on-destroyed-window error arm inside
-		//     winIsValid (lib/ffi/window.ts:34).  Spawn a throwaway
-		//     xmessage, confirm its handle, destroy the window via
-		//     mechatron (XDestroyWindow), then reuse the now-stale
-		//     handle in setHandle() — winIsValid issues
-		//     XGetWindowProperty(_NET_WM_PID, staleHandle), which the
-		//     X server answers with BadWindow.  The silent X error
-		//     handler installed in lib/ffi/x11.ts returns 0 so Xlib's
-		//     default exit(1) handler never fires; getWindowProperty
-		//     sees a non-zero status and returns null; winIsValid
-		//     returns false; setHandle returns false.  Timeouts are
-		//     kept short (bun test default per-test timeout is 5s)
-		//     and any step that can't complete falls through to the
-		//     skip path — the primary test here is the stale-handle
-		//     check after a successful destroy; xmessage-not-listed
-		//     hosts simply skip without failing the suite.
-		if (process.platform === "linux" &&
-			mechatron.getBackend("window") === "ffi") {
-			var _cpw = require("child_process");
-			var _tag = "MechatronStaleProbe_" + process.pid;
-			var _xm = null;
-			try {
-				_xm = _cpw.spawn("xmessage",
-					["-name", _tag, "-timeout", "10", _tag],
-					{ stdio: "ignore" });
-			} catch (_) { _xm = null; }
-			var _stale = 0;
-			if (_xm) {
-				waitFor(function () {
-					var f = Window.getList(_tag);
-					if (f.length > 0 && f[0].isValid()) {
-						_stale = f[0].getHandle();
-						return true;
+				var _stale = 0n;
+				if (_xm) {
+					await waitForAsync(async function () {
+						var f = await Window.getList(_tag);
+						if (f.length > 0 && await f[0].isValid()) {
+							_stale = f[0].getHandle();
+							return true;
+						}
+						return false;
+					}, 3000);
+				}
+				if (_stale !== 0n) {
+					var _live = new Window();
+					if (await _live.setHandle(_stale)) {
+						await _live.close();
+						var _gone = await waitForAsync(async function () {
+							return (await Window.getList(_tag)).length === 0;
+						}, 3000);
+						if (_gone) {
+							var _stalew = new Window();
+							assert(await _stalew.setHandle(_stale) === false,
+								"stale handle setHandle false (BadWindow swallowed)");
+						}
 					}
-					return false;
-				}, 1500);
-			}
-			if (_stale !== 0) {
-				// Destroy via mechatron (XDestroyWindow + XFlush).
-				var _live = new Window();
-				if (_live.setHandle(_stale)) {
-					_live.close();
-					var _gone = waitFor(function () {
-						return Window.getList(_tag).length === 0;
-					}, 1500);
-					if (_gone) {
-						// Stale handle: setHandle -> winIsValid ->
-						// getWindowProperty -> XGetWindowProperty
-						// (BadWindow, swallowed) -> status != 0 ->
-						// null -> false.
-						var _stalew = new Window();
-						assert(_stalew.setHandle(_stale) === false,
-							"stale handle setHandle false (BadWindow swallowed)");
+				}
+				if (_xm) {
+					try { _xm.kill(); } catch (_) {}
+					// On Windows taskkill is needed for notepad's child tree
+					if (process.platform === "win32" && _xm.pid) {
+						try {
+							_cpw.spawnSync("taskkill.exe",
+								["/F", "/PID", String(_xm.pid)],
+								{ stdio: "ignore" });
+						} catch (_) {}
 					}
 				}
 			}
-			if (_xm) { try { _xm.kill(); } catch (_) {} }
-		}
-
-		// --- isAxEnabled ---
-		assert(typeof Window.isAxEnabled() === "boolean", "isAxEnabled bool");
-
-		// --- Async variants ---
-		var pa1 = Window.getListAsync();
-		assert(pa1 instanceof Promise, "getListAsync returns Promise");
-
-		log("OK\n");
-		return true;
-	}
-
-	return {
-		testWindow: testWindow,
-	};
+		},
+		// ── isAxEnabled ──
+		{
+			name: "Window.isAxEnabled",
+			functions: ["window_isAxEnabled"],
+			test: async function () {
+				assert(typeof await Window.isAxEnabled() === "boolean", "isAxEnabled bool");
+			}
+		},
+	];
 };

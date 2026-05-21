@@ -16,7 +16,7 @@ timeout = 60000
 # named without `.test.` so Bun doesn't load them directly.  Add an explicit
 # path-glob exclusion so they're also excluded from coverage instrumentation.
 coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["test/**"]
+coveragePathIgnorePatterns = ["test/**", "dist/**"]
 # We use require()/process.execPath for spawning helpers; preloading is unused.
 
 # Don't run bun's package-lifecycle scripts when installing dev tooling — the

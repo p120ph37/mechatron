@@ -106,6 +106,8 @@ let _kernel32: Kernel32 | null = null;
 let _psapi: Psapi | null = null;
 let _gdi32: Gdi32 | null = null;
 
+const _dlopenHandles: any[] = [];
+
 function tryDlopen(): void {
   if (_opened) return;
   _opened = true;
@@ -122,7 +124,7 @@ function tryDlopen(): void {
       SetCursorPos:     { args: [T.i32, T.i32], returns: T.i32 },
       GetSystemMetrics: { args: [T.i32], returns: T.i32 },
       MapVirtualKeyW:   { args: [T.u32, T.u32], returns: T.u32 },
-      EnumWindows:               { args: [T.ptr, T.u64], returns: T.i32 },
+      EnumWindows:               { args: [T.ptr, T.i64], returns: T.i32 },
       IsWindow:                  { args: [T.u64], returns: T.i32 },
       IsWindowVisible:           { args: [T.u64], returns: T.i32 },
       IsIconic:                  { args: [T.u64], returns: T.i32 },
@@ -137,14 +139,14 @@ function tryDlopen(): void {
       ScreenToClient:            { args: [T.u64, T.ptr], returns: T.i32 },
       MoveWindow:                { args: [T.u64, T.i32, T.i32, T.i32, T.i32, T.i32], returns: T.i32 },
       ShowWindow:                { args: [T.u64, T.i32], returns: T.i32 },
-      PostMessageW:              { args: [T.u64, T.u32, T.u64, T.u64], returns: T.i32 },
+      PostMessageW:              { args: [T.u64, T.u32, T.u64, T.i64], returns: T.i32 },
       SetForegroundWindow:       { args: [T.u64], returns: T.i32 },
       GetForegroundWindow:       { args: [], returns: T.u64 },
       SetWindowPos:              { args: [T.u64, T.u64, T.i32, T.i32, T.i32, T.i32, T.u32], returns: T.i32 },
       GetWindowLongW:            { args: [T.u64, T.i32], returns: T.i32 },
       SetWindowLongW:            { args: [T.u64, T.i32, T.i32], returns: T.i32 },
       AdjustWindowRectEx:        { args: [T.ptr, T.u32, T.i32, T.u32], returns: T.i32 },
-      EnumDisplayMonitors:       { args: [T.u64, T.ptr, T.ptr, T.u64], returns: T.i32 },
+      EnumDisplayMonitors:       { args: [T.u64, T.ptr, T.ptr, T.i64], returns: T.i32 },
       GetMonitorInfoW:           { args: [T.u64, T.ptr], returns: T.i32 },
       GetDC:                     { args: [T.u64], returns: T.u64 },
       ReleaseDC:                 { args: [T.u64, T.u64], returns: T.i32 },
@@ -157,6 +159,7 @@ function tryDlopen(): void {
       GetClipboardSequenceNumber:{ args: [], returns: T.u32 },
     });
     _user32 = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _user32 = null;
   }
@@ -191,6 +194,7 @@ function tryDlopen(): void {
       lstrlenW:                   { args: [T.ptr], returns: T.i32 },
     });
     _kernel32 = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _kernel32 = null;
   }
@@ -203,6 +207,7 @@ function tryDlopen(): void {
       GetModuleInformation: { args: [T.u64, T.u64, T.ptr, T.u32], returns: T.i32 },
     });
     _psapi = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _psapi = null;
   }
@@ -218,6 +223,7 @@ function tryDlopen(): void {
       GetDIBits:              { args: [T.u64, T.u64, T.u32, T.u32, T.ptr, T.ptr, T.u32], returns: T.i32 },
     });
     _gdi32 = lib.symbols;
+    _dlopenHandles.push(lib);
   } catch (_) {
     _gdi32 = null;
   }

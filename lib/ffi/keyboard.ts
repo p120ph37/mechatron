@@ -1,131 +1,25 @@
 /**
- * Pure-JS Bun FFI keyboard backend.
+ * ffi keyboard backend — main-thread async proxy to keyboard-worker.ts
+ * for non-Linux platforms (macOS, Windows).
  *
- * Linux: dlopens libX11.so.6 + libXtst.so.6 directly.
- * Windows: dlopens user32.dll directly.
- * macOS: dlopens CoreGraphics.framework; uses CGEventCreateKeyboardEvent +
- * CGEventPost to inject synthetic key events, and CGEventSourceKeyState
- * for read-back.
- *
- * Exports the same property names as the napi `keyboard_*` symbols so the
- * loader's consumers (`lib/keyboard/Keyboard.ts`) work unchanged.
+ * Linux is served by napi[x11/portal/gext] or nolib[x11/portal/gext/vt];
+ * ffi has no Linux backend.
  */
 
-import { ffi, getDisplay, isXTestAvailable, x11, xtest, True, False, CurrentTime } from "./x11";
-import {
-  user32, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC,
-} from "./win";
-import {
-  cg, cf, kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
-} from "./mac";
+import { createDispatcher } from "./_dispatch";
 
-// ==================== Linux ====================
-
-function linux_keyboard_press(keycode: number): void {
-  if (!isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  const xkeycode = X.XKeysymToKeycode(display, BigInt(keycode));
-  T.XTestFakeKeyEvent(display, xkeycode, True, CurrentTime);
-  X.XSync(display, False);
+if (process.platform === "linux") {
+  throw new Error("ffi/keyboard: not available on Linux — use napi or nolib");
+}
+if (!["win32", "darwin"].includes(process.platform)) {
+  throw new Error("ffi/keyboard: unsupported platform");
 }
 
-function linux_keyboard_release(keycode: number): void {
-  if (!isXTestAvailable()) return;
-  const X = x11()!, T = xtest()!;
-  const display = getDisplay();
-  const xkeycode = X.XKeysymToKeycode(display, BigInt(keycode));
-  T.XTestFakeKeyEvent(display, xkeycode, False, CurrentTime);
-  X.XSync(display, False);
-}
+const d = createDispatcher(require.resolve("./keyboard-worker"));
 
-function linux_keyboard_getKeyState(keycode: number): boolean {
-  if (!isXTestAvailable()) return false;
-  const X = x11()!;
-  const display = getDisplay();
-  const keys = new Uint8Array(32);
-  X.XQueryKeymap(display, ffi()!.ptr(keys));
-  const xkeycode = X.XKeysymToKeycode(display, BigInt(keycode));
-  return (keys[(xkeycode / 8) | 0] & (1 << (xkeycode % 8))) !== 0;
-}
-
-// ==================== Windows ====================
-
-function win_keyboard_press(keycode: number): void {
-  const u = user32(); if (!u) return;
-  const scan = u.MapVirtualKeyW(keycode >>> 0, MAPVK_VK_TO_VSC) & 0xff;
-  u.keybd_event(keycode & 0xff, scan, 0, 0n);
-}
-
-function win_keyboard_release(keycode: number): void {
-  const u = user32(); if (!u) return;
-  const scan = u.MapVirtualKeyW(keycode >>> 0, MAPVK_VK_TO_VSC) & 0xff;
-  u.keybd_event(keycode & 0xff, scan, KEYEVENTF_KEYUP, 0n);
-}
-
-function win_keyboard_getKeyState(keycode: number): boolean {
-  const u = user32(); if (!u) return false;
-  return (u.GetAsyncKeyState(keycode) & 0x8000) !== 0;
-}
-
-// ==================== macOS ====================
-
-// CGEventSourceRef is expensive to create — cache one per process.
-let _macSource: ReturnType<NonNullable<ReturnType<typeof cg>>["CGEventSourceCreate"]> | null = null;
-function macSource() {
-  if (_macSource !== null) return _macSource;
-  const C = cg();
-  if (!C) return null;
-  _macSource = C.CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
-  return _macSource;
-}
-
-function mac_keyboard_press(keycode: number): void {
-  const C = cg();
-  const F = cf();
-  if (!C || !F) return;
-  const src = macSource();
-  const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, 1);
-  if (!evt) return;
-  C.CGEventPost(kCGHIDEventTap, evt);
-  F.CFRelease(evt);
-}
-
-function mac_keyboard_release(keycode: number): void {
-  const C = cg();
-  const F = cf();
-  if (!C || !F) return;
-  const src = macSource();
-  const evt = C.CGEventCreateKeyboardEvent(src, keycode & 0xFFFF, 0);
-  if (!evt) return;
-  C.CGEventPost(kCGHIDEventTap, evt);
-  F.CFRelease(evt);
-}
-
-function mac_keyboard_getKeyState(keycode: number): boolean {
-  const C = cg();
-  if (!C) return false;
-  return C.CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, keycode & 0xFFFF) !== 0;
-}
-
-// ==================== Dispatch ====================
-
-const platform = process.platform;
-
-export const keyboard_press =
-  platform === "linux"  ? linux_keyboard_press :
-  platform === "win32"  ? win_keyboard_press :
-  platform === "darwin" ? mac_keyboard_press :
-                          (_k: number) => {};
-
-export const keyboard_release =
-  platform === "linux"  ? linux_keyboard_release :
-  platform === "win32"  ? win_keyboard_release :
-  platform === "darwin" ? mac_keyboard_release :
-                          (_k: number) => {};
-
-export const keyboard_getKeyState =
-  platform === "linux"  ? linux_keyboard_getKeyState :
-  platform === "win32"  ? win_keyboard_getKeyState :
-  platform === "darwin" ? mac_keyboard_getKeyState :
-                          (_k: number) => false;
+export const keyboard_press = (keycode: number): Promise<void> =>
+  d.call("keyboard_press", [keycode]);
+export const keyboard_release = (keycode: number): Promise<void> =>
+  d.call("keyboard_release", [keycode]);
+export const keyboard_getKeyState = (keycode: number): Promise<boolean> =>
+  d.call("keyboard_getKeyState", [keycode]);

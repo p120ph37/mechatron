@@ -1,165 +1,38 @@
+// Non-Linux mouse implementation.
+//
+// macOS uses Quartz Event Services (CGEventCreateMouseEvent +
+// CGEventPost / CGEventSourceButtonState / CGWarpMouseCursorPosition).
+// Windows uses SendInput with INPUT_MOUSE events and GetAsyncKeyState
+// for state queries.  Both platforms expose a single OS-native input API
+// with no variant fan-out, so this file is the only mouse implementation
+// on those platforms.
+//
+// On Linux, see ../mouse_x11.rs (XTest) and ../mouse_portal.rs (libei via
+// xdg-desktop-portal RemoteDesktop) — the build system selects one of
+// those crates per backend variant rather than runtime-dispatching at the
+// language level.
+
+// Pulled in only by the cfg-gated macOS/Windows code below.  On Linux
+// this file is intentionally empty (the per-variant crates
+// `mechatron-mouse-x11` and `mechatron-mouse-portal` carry the mouse
+// implementation instead).
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi::bindgen_prelude::*;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use napi_derive::napi;
 
-#[cfg(target_os = "linux")]
-use std::ffi::c_uint;
-
-#[cfg(target_os = "linux")]
-use crate::x11::*;
-
-// Button constants (matching C++ enum)
+// Button constants (matching C++ enum) — used by the macOS/Windows
+// dispatch tables.  Linux variants define their own button mappings.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const BUTTON_LEFT: i32 = 0;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const BUTTON_MID: i32 = 1;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const BUTTON_RIGHT: i32 = 2;
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 const BUTTON_X1: i32 = 3;
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 const BUTTON_X2: i32 = 4;
-
-// ==================== Linux ====================
-
-#[cfg(target_os = "linux")]
-fn x_button(button: i32) -> Option<u32> {
-    match button {
-        BUTTON_LEFT => Some(1),
-        BUTTON_MID => Some(2),
-        BUTTON_RIGHT => Some(3),
-        _ => None, // X1, X2 not supported on Linux
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn do_press(button: i32) {
-    if let Some(xbtn) = x_button(button) {
-        unsafe {
-            if !is_xtest_available() { return; }
-            let display = get_display();
-            XTestFakeButtonEvent(display, xbtn, True_, CurrentTime);
-            XSync(display, False_);
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn do_release(button: i32) {
-    if let Some(xbtn) = x_button(button) {
-        unsafe {
-            if !is_xtest_available() { return; }
-            let display = get_display();
-            XTestFakeButtonEvent(display, xbtn, False_, CurrentTime);
-            XSync(display, False_);
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_scroll_h(amount: i32) {
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        let repeat = amount.unsigned_abs() as i32;
-        let button: u32 = if amount < 0 { 6 } else { 7 };
-        for _ in 0..repeat {
-            XTestFakeButtonEvent(display, button, True_, CurrentTime);
-            XTestFakeButtonEvent(display, button, False_, CurrentTime);
-        }
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_scroll_v(amount: i32) {
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        let repeat = amount.unsigned_abs() as i32;
-        let button: u32 = if amount < 0 { 5 } else { 4 };
-        for _ in 0..repeat {
-            XTestFakeButtonEvent(display, button, True_, CurrentTime);
-            XTestFakeButtonEvent(display, button, False_, CurrentTime);
-        }
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
-    unsafe {
-        if !is_xtest_available() {
-            obj.set("x", 0i32)?;
-            obj.set("y", 0i32)?;
-            return Ok(());
-        }
-        let display = get_display();
-        let screens = XScreenCount(display);
-        let mut root: Window = 0;
-        let mut child: Window = 0;
-        let mut rx: i32 = 0;
-        let mut ry: i32 = 0;
-        let mut wx: i32 = 0;
-        let mut wy: i32 = 0;
-        let mut mask: c_uint = 0;
-
-        for i in 0..screens {
-            if XQueryPointer(
-                display, XRootWindow(display, i),
-                &mut root, &mut child,
-                &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
-            ) != 0 {
-                obj.set("x", rx)?;
-                obj.set("y", ry)?;
-                return Ok(());
-            }
-        }
-    }
-    obj.set("x", 0i32)?;
-    obj.set("y", 0i32)?;
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn platform_set_pos(x: i32, y: i32) {
-    unsafe {
-        if !is_xtest_available() { return; }
-        let display = get_display();
-        XWarpPointer(display, 0, XDefaultRootWindow(display), 0, 0, 0, 0, x, y);
-        XSync(display, False_);
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn platform_get_button_state(button: i32) -> bool {
-    unsafe {
-        if button == BUTTON_X1 || button == BUTTON_X2 || !is_xtest_available() {
-            return false;
-        }
-        let display = get_display();
-        let screens = XScreenCount(display);
-        let mut root: Window = 0;
-        let mut child: Window = 0;
-        let mut rx: i32 = 0;
-        let mut ry: i32 = 0;
-        let mut wx: i32 = 0;
-        let mut wy: i32 = 0;
-        let mut mask: c_uint = 0;
-
-        for i in 0..screens {
-            if XQueryPointer(
-                display, XRootWindow(display, i),
-                &mut root, &mut child,
-                &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
-            ) != 0 {
-                return match button {
-                    BUTTON_LEFT => (mask & Button1Mask) >> 8 != 0,
-                    BUTTON_MID => (mask & Button2Mask) >> 8 != 0,
-                    BUTTON_RIGHT => (mask & Button3Mask) >> 8 != 0,
-                    _ => false,
-                };
-            }
-        }
-    }
-    false
-}
 
 // ==================== macOS ====================
 
@@ -174,6 +47,7 @@ mod mac {
     pub type CGEventSourceStateID = u32;
     pub type CGEventTapLocation = u32;
     pub type CGScrollEventUnit = u32;
+    pub type CGEventField = u32;
 
     #[repr(C)]
     #[derive(Copy, Clone)]
@@ -189,6 +63,8 @@ mod mac {
     pub const kCGEventLeftMouseUp: CGEventType = 2;
     pub const kCGEventRightMouseDown: CGEventType = 3;
     pub const kCGEventRightMouseUp: CGEventType = 4;
+    pub const kCGEventLeftMouseDragged: CGEventType = 6;
+    pub const kCGEventRightMouseDragged: CGEventType = 7;
     pub const kCGEventOtherMouseDown: CGEventType = 25;
     pub const kCGEventOtherMouseUp: CGEventType = 26;
 
@@ -197,6 +73,8 @@ mod mac {
     pub const kCGMouseButtonCenter: CGMouseButton = 2;
 
     pub const kCGScrollEventUnitPixel: CGScrollEventUnit = 1;
+
+    pub const kCGMouseEventClickState: CGEventField = 1;
 
     extern "C" {
         pub fn CGEventSourceCreate(stateID: CGEventSourceStateID) -> CGEventSourceRef;
@@ -216,6 +94,11 @@ mod mac {
             ...
         ) -> CGEventRef;
         pub fn CGEventPost(tap: CGEventTapLocation, event: CGEventRef);
+        pub fn CGEventSetIntegerValueField(
+            event: CGEventRef,
+            field: CGEventField,
+            value: i64,
+        );
         pub fn CGEventSourceButtonState(
             stateID: CGEventSourceStateID,
             button: CGMouseButton,
@@ -236,6 +119,31 @@ fn mac_get_cursor_pos() -> mac::CGPoint {
         let pt = mac::CGEventGetLocation(evt);
         mac::CFRelease(evt);
         pt
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod click_state {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static LAST_CLICK: Mutex<Option<Instant>> = Mutex::new(None);
+    const DOUBLE_CLICK_MS: u128 = 500;
+
+    pub fn get_click_count() -> i64 {
+        let mut last = LAST_CLICK.lock().unwrap();
+        let now = Instant::now();
+        let count = match *last {
+            Some(t) if now.duration_since(t).as_millis() < DOUBLE_CLICK_MS => {
+                *last = None;
+                2
+            }
+            _ => {
+                *last = Some(now);
+                1
+            }
+        };
+        count
     }
 }
 
@@ -261,6 +169,8 @@ fn do_press(button: i32) {
             let pt = mac_get_cursor_pos();
             let evt = mac::CGEventCreateMouseEvent(src, evt_type, pt, cg_button);
             if !evt.is_null() {
+                let count = click_state::get_click_count();
+                mac::CGEventSetIntegerValueField(evt, mac::kCGMouseEventClickState, count);
                 mac::CGEventPost(mac::kCGHIDEventTap, evt);
                 mac::CFRelease(evt);
             }
@@ -278,6 +188,8 @@ fn do_release(button: i32) {
             let pt = mac_get_cursor_pos();
             let evt = mac::CGEventCreateMouseEvent(src, evt_type, pt, cg_button);
             if !evt.is_null() {
+                let count = click_state::get_click_count();
+                mac::CGEventSetIntegerValueField(evt, mac::kCGMouseEventClickState, count);
                 mac::CGEventPost(mac::kCGHIDEventTap, evt);
                 mac::CFRelease(evt);
             }
@@ -329,19 +241,42 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos() -> (i32, i32) {
     let pt = mac_get_cursor_pos();
-    obj.set("x", pt.x as i32)?;
-    obj.set("y", pt.y as i32)?;
-    Ok(())
+    (pt.x as i32, pt.y as i32)
 }
 
 #[cfg(target_os = "macos")]
 fn platform_set_pos(x: i32, y: i32) {
+    let pt = mac::CGPoint { x: x as f64, y: y as f64 };
     unsafe {
-        let pt = mac::CGPoint { x: x as f64, y: y as f64 };
-        mac::CGWarpMouseCursorPosition(pt);
-        mac::CGAssociateMouseAndMouseCursorPosition(true);
+        let left_down = mac::CGEventSourceButtonState(
+            mac::kCGEventSourceStateHIDSystemState,
+            mac::kCGMouseButtonLeft,
+        );
+        let right_down = mac::CGEventSourceButtonState(
+            mac::kCGEventSourceStateHIDSystemState,
+            mac::kCGMouseButtonRight,
+        );
+
+        if left_down || right_down {
+            let src = mac::CGEventSourceCreate(mac::kCGEventSourceStateHIDSystemState);
+            if src.is_null() { return; }
+            let (drag_type, drag_button) = if left_down {
+                (mac::kCGEventLeftMouseDragged, mac::kCGMouseButtonLeft)
+            } else {
+                (mac::kCGEventRightMouseDragged, mac::kCGMouseButtonRight)
+            };
+            let evt = mac::CGEventCreateMouseEvent(src, drag_type, pt, drag_button);
+            if !evt.is_null() {
+                mac::CGEventPost(mac::kCGHIDEventTap, evt);
+                mac::CFRelease(evt);
+            }
+            mac::CFRelease(src);
+        } else {
+            mac::CGWarpMouseCursorPosition(pt);
+            mac::CGAssociateMouseAndMouseCursorPosition(true);
+        }
     }
 }
 
@@ -485,14 +420,12 @@ fn platform_scroll_v(amount: i32) {
 }
 
 #[cfg(target_os = "windows")]
-fn platform_get_pos(_env: &Env, obj: &mut napi::JsObject) -> Result<()> {
+fn platform_get_pos() -> (i32, i32) {
     unsafe {
         let mut point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
         let _ = GetCursorPos(&mut point);
-        obj.set("x", point.x)?;
-        obj.set("y", point.y)?;
+        (point.x, point.y)
     }
-    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -518,39 +451,127 @@ fn platform_get_button_state(button: i32) -> bool {
     }
 }
 
+// ==================== AsyncTask wrappers ====================
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[napi(object)]
+pub struct MousePos {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct PressTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for PressTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { do_press(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct ReleaseTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for ReleaseTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { do_release(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct ScrollHTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for ScrollHTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_scroll_h(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct ScrollVTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for ScrollVTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_scroll_v(self.0); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct GetPosTask;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for GetPosTask {
+    type Output = (i32, i32);
+    type JsValue = MousePos;
+    fn compute(&mut self) -> Result<(i32, i32)> {
+        Ok(platform_get_pos())
+    }
+    fn resolve(&mut self, _env: Env, out: (i32, i32)) -> Result<MousePos> {
+        Ok(MousePos { x: out.0, y: out.1 })
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct SetPosTask(i32, i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for SetPosTask {
+    type Output = ();
+    type JsValue = ();
+    fn compute(&mut self) -> Result<()> { platform_set_pos(self.0, self.1); Ok(()) }
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> { Ok(()) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub struct GetButtonStateTask(i32);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl Task for GetButtonStateTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<bool> { Ok(platform_get_button_state(self.0)) }
+    fn resolve(&mut self, _env: Env, out: bool) -> Result<bool> { Ok(out) }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_press")]
-pub fn mouse_press(button: i32) {
-    do_press(button);
+pub fn mouse_press(button: i32) -> AsyncTask<PressTask> {
+    AsyncTask::new(PressTask(button))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_release")]
-pub fn mouse_release(button: i32) {
-    do_release(button);
+pub fn mouse_release(button: i32) -> AsyncTask<ReleaseTask> {
+    AsyncTask::new(ReleaseTask(button))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_scrollH")]
-pub fn mouse_scroll_h(amount: i32) {
-    platform_scroll_h(amount);
+pub fn mouse_scroll_h(amount: i32) -> AsyncTask<ScrollHTask> {
+    AsyncTask::new(ScrollHTask(amount))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_scrollV")]
-pub fn mouse_scroll_v(amount: i32) {
-    platform_scroll_v(amount);
+pub fn mouse_scroll_v(amount: i32) -> AsyncTask<ScrollVTask> {
+    AsyncTask::new(ScrollVTask(amount))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_getPos")]
-pub fn mouse_get_pos(env: Env) -> Result<napi::JsObject> {
-    let mut obj = env.create_object()?;
-    platform_get_pos(&env, &mut obj)?;
-    Ok(obj)
+pub fn mouse_get_pos() -> AsyncTask<GetPosTask> {
+    AsyncTask::new(GetPosTask)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_setPos")]
-pub fn mouse_set_pos(x: i32, y: i32) {
-    platform_set_pos(x, y);
+pub fn mouse_set_pos(x: i32, y: i32) -> AsyncTask<SetPosTask> {
+    AsyncTask::new(SetPosTask(x, y))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[napi(js_name = "mouse_getButtonState")]
-pub fn mouse_get_button_state(button: i32) -> bool {
-    platform_get_button_state(button)
+pub fn mouse_get_button_state(button: i32) -> AsyncTask<GetButtonStateTask> {
+    AsyncTask::new(GetButtonStateTask(button))
 }

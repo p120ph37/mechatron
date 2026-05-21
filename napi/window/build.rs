@@ -10,4 +10,11 @@ fn main() {
         println!("cargo:rustc-link-lib=Xrandr");
         println!("cargo:rustc-link-lib=rt");
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!("cargo:rustc-link-lib=framework=ApplicationServices");
+        println!("cargo:rustc-link-lib=framework=CoreFoundation");
+        println!("cargo:rustc-link-lib=framework=CoreGraphics");
+    }
 }

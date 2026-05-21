@@ -1,13 +1,12 @@
-import { Window } from "../window";
-import { getNative } from "../napi";
+import { getNative } from "../backend";
 import type { Module } from "./Module";
 
 export interface ModuleData {
   valid: boolean;
   name: string;
   path: string;
-  base: number;
-  size: number;
+  base: bigint;
+  size: bigint;
   pid: number;
 }
 
@@ -22,26 +21,26 @@ export class Process {
     }
   }
 
-  open(pid: number): boolean {
-    const valid = getNative("process").process_open(pid);
+  async open(pid: number): Promise<boolean> {
+    const valid = await getNative("process").process_open(pid);
     this._pid = valid ? pid : 0;
     return valid;
   }
 
-  close(): void {
-    getNative("process").process_close(this._pid);
+  async close(): Promise<void> {
+    await getNative("process").process_close(this._pid);
     this._pid = 0;
   }
 
-  isValid(): boolean {
+  async isValid(): Promise<boolean> {
     return getNative("process").process_isValid(this._pid);
   }
 
-  is64Bit(): boolean {
+  async is64Bit(): Promise<boolean> {
     return getNative("process").process_is64Bit(this._pid);
   }
 
-  isDebugged(): boolean {
+  async isDebugged(): Promise<boolean> {
     return getNative("process").process_isDebugged(this._pid);
   }
 
@@ -49,53 +48,43 @@ export class Process {
     return this._pid;
   }
 
-  getHandle(): number {
+  async getHandle(): Promise<number> {
     const native = getNative("process");
     if (typeof native.process_getHandle === "function") {
-      return native.process_getHandle(this._pid);
+      return await native.process_getHandle(this._pid);
     }
     return 0;
   }
 
-  getName(): string {
+  async getName(): Promise<string> {
     return getNative("process").process_getName(this._pid);
   }
 
-  getPath(): string {
+  async getPath(): Promise<string> {
     return getNative("process").process_getPath(this._pid);
   }
 
-  exit(): void {
-    getNative("process").process_exit(this._pid);
+  async exit(): Promise<void> {
+    await getNative("process").process_exit(this._pid);
   }
 
-  kill(): void {
-    getNative("process").process_kill(this._pid);
+  async kill(): Promise<void> {
+    await getNative("process").process_kill(this._pid);
   }
 
-  hasExited(): boolean {
+  async hasExited(): Promise<boolean> {
     return getNative("process").process_hasExited(this._pid);
   }
 
-  getModules(regex?: string): Module[] {
-    // Lazy require to avoid a cycle with Module (which imports Process).
+  async getModules(regex?: string): Promise<Module[]> {
     const { Module: ModuleClass } = require("./Module") as typeof import("./Module");
-    const raw: ModuleData[] = getNative("process").process_getModules(this._pid, regex);
+    const raw: ModuleData[] = await getNative("process").process_getModules(this._pid, regex);
     return raw.map((data) => {
       const mod = new ModuleClass(data);
       mod._segments = null;
       mod._proc = this;
       return mod;
     });
-  }
-
-  async getModulesAsync(regex?: string): Promise<Module[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(this.getModules(regex))));
-  }
-
-  getWindows(regex?: string): Window[] {
-    const handles: number[] = getNative("process").process_getWindows(this._pid, regex);
-    return handles.map((h) => new Window(h));
   }
 
   eq(other: Process | number): boolean {
@@ -113,24 +102,20 @@ export class Process {
     return new Process(this._pid);
   }
 
-  static getList(regex?: string): Process[] {
-    const pids: number[] = getNative("process").process_getList(regex);
+  static async getList(regex?: string): Promise<Process[]> {
+    const pids: number[] = await getNative("process").process_getList(regex);
     return pids.map((pid) => new Process(pid));
   }
 
-  static async getListAsync(regex?: string): Promise<Process[]> {
-    return new Promise((resolve) => queueMicrotask(() => resolve(Process.getList(regex))));
+  static async getCurrent(): Promise<Process> {
+    return new Process(await getNative("process").process_getCurrent());
   }
 
-  static getCurrent(): Process {
-    return new Process(getNative("process").process_getCurrent());
-  }
-
-  static isSys64Bit(): boolean {
+  static async isSys64Bit(): Promise<boolean> {
     return getNative("process").process_isSys64Bit();
   }
 
-  static _getSegments(process: Process, base: number): Array<{ valid: boolean; base: number; size: number; name: string }> {
-    return getNative("process").process_getSegments(process._pid, base);
+  static async _getSegments(process: Process, base: bigint): Promise<Array<{ valid: boolean; base: bigint; size: bigint; name: string }>> {
+    return await getNative("process").process_getSegments(process._pid, base);
   }
 }
