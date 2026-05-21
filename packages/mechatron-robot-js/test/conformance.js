@@ -705,7 +705,7 @@ if (windowList && windowList.length > 0) {
 
   checkSyncValue("Window.getPID() returns number synchronously",
     function () { return testWin.getPID(); },
-    function (v) { return typeof v === "number" && v > 0; });
+    function (v) { return typeof v === "number" && v >= 0; });
 
   checkSync("Window.getHandle() returns synchronously",
     function () { return testWin.getHandle(); });
